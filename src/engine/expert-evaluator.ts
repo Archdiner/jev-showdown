@@ -55,10 +55,7 @@ export class ExpertEvaluator extends Evaluator {
 
     return {
       score,
-      breakdown: {
-        ...baseResult.breakdown,
-        expertFeatures: score - baseResult.score,
-      },
+      breakdown: baseResult.breakdown,
     };
   }
 

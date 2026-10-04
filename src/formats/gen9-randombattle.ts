@@ -72,9 +72,9 @@ export class Gen9RandomBattle implements Format {
       if (!consistent) continue;
       
       // Strict role narrowing: Check revealed ability
-      if (pokemon.revealedAbility) {
-        // Ability is in roleData.abilities, not items (fixing bug)
-        const abilityProb = roleData.abilities?.[pokemon.revealedAbility] || 0;
+      if (pokemon.revealedAbility && speciesData) {
+        // Abilities are in speciesData, not roleData
+        const abilityProb = speciesData.abilities?.[pokemon.revealedAbility] || 0;
         if (abilityProb === 0) {
           consistent = false;
         } else {
@@ -109,7 +109,7 @@ export class Gen9RandomBattle implements Format {
       if (consistent) {
         const moves = Object.keys(roleData.moves || {}).slice(0, 4);
         const items = Object.keys(roleData.items || {});
-        const abilities = Object.keys(roleData.abilities || {});
+        const abilities = speciesData ? Object.keys(speciesData.abilities || {}) : [];
         const teraTypes = Object.keys(roleData.teraTypes || {});
         
         candidates.push({

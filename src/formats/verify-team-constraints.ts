@@ -20,8 +20,8 @@ for (let i = 0; i < 100; i++) {
     const team = generator.getTeam();
     
     // Convert to our belief format
-    const beliefs: PokemonBelief[] = team.map(mon => {
-      const species = typeof mon.species === 'string' ? mon.species : mon.species?.name || 'Unknown';
+    const beliefs: PokemonBelief[] = team.map((mon: any) => {
+      const species = typeof mon.species === 'string' ? mon.species : (mon.species?.name || 'Unknown');
       return {
         species,
         level: mon.level || 80,

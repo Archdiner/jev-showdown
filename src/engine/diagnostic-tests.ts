@@ -202,6 +202,10 @@ async function runTests() {
     searchTimeMs: 5000,
     sampledWorlds: 3,
     maxDepth: 3,
+    searchIterations: 1000,
+    explorationConstant: 1.41,
+    useTeraHeuristic: false,
+    useLLMPrior: false,
   };
   
   const evaluator = new Evaluator();
