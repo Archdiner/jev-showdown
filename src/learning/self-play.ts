@@ -9,8 +9,8 @@ import { GameState, Action, BotConfig } from '../types/index.js';
 
 export interface SelfPlayConfig {
   numGames: number;
-  bot1Type: 'mcts' | 'random' | 'maxdamage';
-  bot2Type: 'mcts' | 'random' | 'maxdamage';
+  bot1Type: 'mcts' | 'random' | 'maxdamage' | 'simple1ply' | 'robust';
+  bot2Type: 'mcts' | 'random' | 'maxdamage' | 'simple1ply' | 'robust';
   seed?: number;
   verbose?: boolean;
 }
@@ -326,6 +326,39 @@ export class SelfPlayHarness {
         };
         const bot = new Bot(config, gen9RandomBattle, this.logger);
         return bot;
+      case 'simple1ply': {
+        const { gen9RandomBattle: format } = await import('../formats/gen9-randombattle.js');
+        const { Simple1Ply } = await import('../engine/simple-1ply.js');
+        const engine = new Simple1Ply(format, { opponentModel: 'uniform' });
+        // Wrap in a bot-like interface
+        return {
+          selectAction: async (state: GameState, actions: Action[]) => {
+            return engine.search(state, actions);
+          },
+        };
+      }
+      case 'robust': {
+        const { gen9RandomBattle: format } = await import('../formats/gen9-randombattle.js');
+        const { RobustSearch } = await import('../engine/robust-search.js');
+        const { Evaluator } = await import('../engine/evaluator.js');
+        const config = {
+          searchTimeMs: 1200,
+          sampledWorlds: 3,
+          maxDepth: 3,
+          searchIterations: 1000,
+          explorationConstant: 1.41,
+          useTeraHeuristic: false,
+          useLLMPrior: false,
+        };
+        const evaluator = new Evaluator();
+        const engine = new RobustSearch(config, evaluator, format);
+        return {
+          selectAction: async (state: GameState, actions: Action[]) => {
+            return engine.search(state, actions);
+          },
+          getFallbackStats: () => engine.getFallbackStats(),
+        };
+      }
       default:
         return new RandomBot();
     }
@@ -347,11 +380,22 @@ export class SelfPlayHarness {
         }
       }
       
-      if (actions.length === 0) {
-        for (let i = 2; i <= 6; i++) {
-          actions.push({ type: 'switch', switchIndex: i });
+      // If still no actions, something is wrong - just pick the first non-fainted
+      if (actions.length === 0 && request.side && request.side.pokemon) {
+        for (let i = 0; i < request.side.pokemon.length; i++) {
+          const mon = request.side.pokemon[i];
+          if (mon && (!mon.condition || !mon.condition.includes('fnt'))) {
+            actions.push({ type: 'switch', switchIndex: i + 1 });
+            break;
+          }
         }
       }
+      
+      // Last resort: pass (forfeit)
+      if (actions.length === 0) {
+        actions.push({ type: 'switch', switchIndex: 1 });
+      }
+      
       return actions;
     }
 
