@@ -90,3 +90,41 @@ See `src/graph/gate.ts` for full gate spec.
 **Current**: Run `npm run graph -- status` for live state  
 **Branch**: `cursor/pokemon-showdown-bot-c043`  
 **PR**: [#1](https://github.com/Archdiner/jev-showdown/pull/1)
+
+## Live ladder
+
+The ladder client speaks the Showdown websocket protocol and asks the current `Bot.selectAction` engine for every choice. It does not change search or eval. Credentials come only from the environment and are never printed.
+
+Real ladder (run this on your machine, not from a cloud agent):
+
+```bash
+export SHOWDOWN_USERNAME='your-bot-name'
+export SHOWDOWN_PASSWORD='your-password'
+npm run ladder -- --games 10 --format gen9randombattle
+```
+
+That connects to `wss://sim3.psim.us/showdown/websocket`, logs in with `POST https://play.pokemonshowdown.com/action.php` (`act=login`, `name`, `pass`, `challstr`), then sends `/trn username,0,ASSERTION`. It searches `gen9randombattle`, plays `--games` battles, sends `/savereplay`, and exits. It never sends `/forfeit`. On an engine error or timer squeeze it plays the best legal move and records the fallback. Logs are JSONL in `logs/ladder/`:
+
+- one file per battle: turns, decisions, scores, state mismatches, opponent role probabilities, result, replay id, replay URL, Elo before/after
+- `logs/ladder/summary.json` for the run
+
+Override the login endpoint with `SHOWDOWN_LOGIN_URL` if action.php moves. Optional flags: `--search-ms`, `--decision-ms`, `--log-dir`.
+
+Local games against the MIT `pokemon-showdown` server (two client instances, no password):
+
+```bash
+npm run ladder -- --local --games 10 --format gen9randombattle
+```
+
+The process starts a server on port 8143 with `--no-security`, logs in `BotAlpha` and `BotBravo` as guests, and ladder-searches them against each other. `--port` changes the port. To point two separate processes at a server you already started:
+
+```bash
+npm run ladder -- --local --server ws://127.0.0.1:8143/showdown/websocket --username BotAlpha --accept --games 10 --format gen9randombattle
+npm run ladder -- --local --server ws://127.0.0.1:8143/showdown/websocket --username BotBravo --challenge BotAlpha --games 10 --format gen9randombattle
+```
+
+Public high-Elo replay dataset (search API, then per-replay JSON, parsed with `@pkmn/protocol`):
+
+```bash
+npm run replays:download -- --format gen9randombattle --min-rating 1600 --pages 3 --out data/replays/gen9randombattle.jsonl
+```

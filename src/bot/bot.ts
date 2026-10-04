@@ -1,5 +1,5 @@
 import { Action, GameState, BotConfig, BattleRecord, DecisionRecord } from '../types/index.js';
-import { Format } from '../types/format.js';
+import { Format, StateMismatch } from '../types/format.js';
 import { BeliefTracker } from '../engine/belief-tracker.js';
 import { RobustSearch } from '../engine/robust-search.js';
 import { Evaluator } from '../engine/evaluator.js';
@@ -13,6 +13,7 @@ export class Bot {
   private beliefTracker: BeliefTracker;
   private logger: BattleLogger;
   private searchEngine: RobustSearch;
+  private lastEngineError: string | null = null;
   private currentBattle?: {
     id: string;
     startTime: number;
@@ -44,11 +45,14 @@ export class Bot {
   }
 
   async selectAction(state: GameState, legalActions: Action[]): Promise<Action> {
+    this.lastEngineError = null;
+
     if (legalActions.length === 0) {
       return { type: 'move', moveIndex: 1 };
     }
 
     if (legalActions.length === 1) {
+      this.recordDecision(state, legalActions[0], 0, this.evaluator.evaluate(state));
       return legalActions[0];
     }
 
@@ -56,34 +60,56 @@ export class Bot {
       const startTime = Date.now();
       const action = await this.searchEngine.search(state, legalActions);
       const timeMs = Date.now() - startTime;
-
-      if (this.currentBattle) {
-        const evaluation = this.evaluator.evaluate(state);
-        this.currentBattle.decisions.push({
-          turn: state.turn,
-          state: JSON.stringify(state),
-          action,
-          searchStats: {
-            nodes: 0,
-            timeMs,
-            topActions: [],
-          },
-          evaluation,
-        });
-      }
-
+      const evaluation = this.evaluator.evaluate(state);
+      this.recordDecision(state, action, timeMs, evaluation);
       return action;
     } catch (e) {
-      console.error('Error in selectAction:', e);
+      const message = e instanceof Error ? e.message : String(e);
+      this.lastEngineError = message;
+      console.error('Error in selectAction:', message);
       return legalActions[0];
     }
+  }
+
+  /**
+   * Set when the search engine threw. The ladder client uses this to
+   * substitute the best legal move and record the failure.
+   */
+  getLastEngineError(): string | null {
+    return this.lastEngineError;
+  }
+
+  getLastDecision(): DecisionRecord | undefined {
+    const decisions = this.currentBattle?.decisions;
+    if (!decisions || decisions.length === 0) return undefined;
+    return decisions[decisions.length - 1];
+  }
+
+  private recordDecision(
+    state: GameState,
+    action: Action,
+    timeMs: number,
+    evaluation: { score: number }
+  ): void {
+    if (!this.currentBattle) return;
+    this.currentBattle.decisions.push({
+      turn: state.turn,
+      state: JSON.stringify(state),
+      action,
+      searchStats: {
+        nodes: 0,
+        timeMs,
+        topActions: [],
+      },
+      evaluation,
+    });
   }
   
   /**
    * Reconcile tracked state with server's request.
-   * Logs any mismatches for debugging.
+   * Returns mismatches so callers can log them as data.
    */
-  reconcileState(trackedState: GameState, request: any): void {
+  reconcileState(trackedState: GameState, request: any): StateMismatch[] {
     const mismatches = this.format.reconcileState(trackedState, request);
     
     if (mismatches.length > 0) {
@@ -91,13 +117,15 @@ export class Bot {
       for (const mismatch of mismatches) {
         const prefix = mismatch.severity === 'error' ? '❌' : 
                       mismatch.severity === 'warning' ? '⚠️' : 'ℹ️';
-        console.warn(`  ${prefix} ${mismatch.field}: tracked=${mismatch.tracked}, actual=${mismatch.actual}`);
+        console.warn(`  ${prefix} ${mismatch.field}: tracked=${JSON.stringify(mismatch.tracked)}, actual=${JSON.stringify(mismatch.actual)}`);
       }
       
       if (this.currentBattle) {
         this.currentBattle.log.push(`State mismatches: ${JSON.stringify(mismatches)}`);
       }
     }
+
+    return mismatches;
   }
 
   updateBelief(pokemonId: string, species: string, level: number): void {

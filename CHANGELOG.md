@@ -19,6 +19,14 @@ Search stays in charge. Two models sit beside it and can be turned off:
 
 # Cloud Agent Run (Oct 4, 2026)
 
+## Live ladder client
+
+`npm run ladder -- --games N --format gen9randombattle` plays the real ladder with `SHOWDOWN_USERNAME` and `SHOWDOWN_PASSWORD`. `npm run ladder -- --local --games N --format gen9randombattle` plays two clients on a local MIT Pokémon Showdown server. Games are JSONL (decisions, scores, mismatches, replay, Elo). `npm run replays:download` builds a high-Elo replay dataset. See AGENTS.md for the exact commands. Search and eval were not changed.
+
+---
+
+# Cloud Agent Run (Oct 4, 2026)
+
 ## Latest Update (Oct 4, 23:03 UTC - Commit d045097)
 
 ### 12. Comprehensive Regression Tracking System ✅
