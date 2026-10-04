@@ -130,22 +130,49 @@ export class SelfPlayHarness {
   private setupCustomBot(stream: any, botType: string): void {
     const bot = this.createBot(botType);
     let requestCount = 0;
+    let errorCount = 0;
+    const opponentTeam = new Map<string, any>();
+    let opponentActive: string | null = null;
     
     void (async () => {
       try {
         for await (const chunk of stream) {
           const lines = chunk.split('\n');
           for (const line of lines) {
+            if (line.startsWith('|error|')) {
+              errorCount++;
+              if (errorCount <= 5) {
+                console.error(`Bot error ${errorCount}: ${line}`);
+              }
+            }
+            
+            if (line.startsWith('|switch|') || line.startsWith('|drag|')) {
+              const parts = line.split('|');
+              if (parts.length >= 4) {
+                const player = parts[2];
+                if (player.startsWith('p2') || player.startsWith('foe')) {
+                  const details = parts[3];
+                  const species = details.split(',')[0].trim();
+                  opponentActive = species;
+                  opponentTeam.set(player, { species, details });
+                }
+              }
+            }
+            
             if (line.startsWith('|request|') && line.length > 10) {
               try {
                 requestCount++;
                 const request = JSON.parse(line.slice(9));
+                if (request.wait) {
+                  continue;
+                }
                 if (request.active || request.forceSwitch) {
                   const actions = this.getLegalActions(request);
                   if (actions.length > 0) {
-                    const state = this.buildGameState(request);
+                    const state = this.buildGameState(request, opponentActive);
                     const action = bot.selectAction(state, actions);
-                    stream.write(this.actionToCommand(action, request));
+                    const cmd = this.actionToCommand(action, request);
+                    stream.write(cmd);
                   }
                 }
               } catch (e) {
@@ -160,23 +187,49 @@ export class SelfPlayHarness {
     })();
   }
 
-  private buildGameState(request: any): GameState {
-    const myTeam = request.side?.pokemon?.map((p: any, i: number) => ({
-      species: p.ident.split(':')[1]?.trim() || 'Unknown',
-      level: p.level || 80,
-      possibleSets: new Map(),
-      revealedMoves: new Set(p.moves || []),
-      stats: p.stats,
-    })) || [];
+  private buildGameState(request: any, opponentActiveSpecies: string | null): GameState {
+    const myTeam = request.side?.pokemon?.map((p: any, i: number) => {
+      const species = p.ident?.split(':')[1]?.trim().split(',')[0] || p.details?.split(',')[0] || 'Unknown';
+      const moves = new Set<string>();
+      
+      if (p.moves) {
+        for (const moveName of p.moves) {
+          moves.add(moveName);
+        }
+      }
+      
+      if (i === 0 && request.active?.[0]?.moves) {
+        for (const move of request.active[0].moves) {
+          if (move.id || move.move) {
+            moves.add(move.id || move.move);
+          }
+        }
+      }
+      
+      return {
+        species,
+        level: p.level || 80,
+        possibleSets: new Map(),
+        revealedMoves: moves,
+        stats: p.stats || p.baseStats,
+      };
+    }) || [];
+
+    const opponentTeam = [{
+      species: opponentActiveSpecies || 'Unknown',
+      level: 80,
+      possibleSets: new Map<string, number>(),
+      revealedMoves: new Set<string>(),
+    }, ...Array(5).fill(null).map(() => ({
+      species: 'Unknown',
+      level: 80,
+      possibleSets: new Map<string, number>(),
+      revealedMoves: new Set<string>(),
+    }))];
 
     return {
       myTeam,
-      opponentTeam: Array(6).fill(null).map(() => ({
-        species: 'Unknown',
-        level: 80,
-        possibleSets: new Map(),
-        revealedMoves: new Set(),
-      })),
+      opponentTeam,
       myActive: 0,
       opponentActive: 0,
       turn: 1,
@@ -201,10 +254,10 @@ export class SelfPlayHarness {
         return new MaxDamageBot();
       case 'mcts':
         const config: BotConfig = {
-          searchTimeMs: 50,
-          searchIterations: 20,
+          searchTimeMs: 100,
+          searchIterations: 50,
           explorationConstant: 1.4,
-          sampledWorlds: 1,
+          sampledWorlds: 3,
           useTeraHeuristic: true,
           useLLMPrior: false,
         };
@@ -218,39 +271,55 @@ export class SelfPlayHarness {
   private getLegalActions(request: any): Action[] {
     const actions: Action[] = [];
 
+    if (request.forceSwitch) {
+      if (request.side && request.side.pokemon) {
+        for (let i = 1; i < request.side.pokemon.length; i++) {
+          const mon = request.side.pokemon[i];
+          if (mon.condition && !mon.condition.includes('fnt')) {
+            actions.push({ type: 'switch', switchIndex: i + 1 });
+          }
+        }
+      }
+      return actions.length > 0 ? actions : [{ type: 'switch', switchIndex: 2 }];
+    }
+
     if (request.active && request.active[0]) {
       const active = request.active[0];
       if (active.moves) {
         for (let i = 0; i < active.moves.length; i++) {
-          if (!active.moves[i].disabled) {
+          const move = active.moves[i];
+          const hasDisabled = move.disabled === true;
+          const hasNoPP = move.pp !== undefined && move.pp <= 0;
+          if (!hasDisabled && !hasNoPP) {
             actions.push({ type: 'move', moveIndex: i + 1 });
+          }
+        }
+      }
+
+      if (request.side && request.side.pokemon && actions.length > 0) {
+        for (let i = 1; i < request.side.pokemon.length; i++) {
+          const mon = request.side.pokemon[i];
+          if (mon.condition && !mon.condition.includes('fnt')) {
+            actions.push({ type: 'switch', switchIndex: i + 1 });
           }
         }
       }
     }
 
-    if (request.side && request.side.pokemon && !request.forceSwitch) {
-      for (let i = 1; i < request.side.pokemon.length; i++) {
-        const mon = request.side.pokemon[i];
-        if (mon.condition && !mon.condition.includes('fnt')) {
-          actions.push({ type: 'switch', switchIndex: i + 1 });
-        }
-      }
-    } else if (request.forceSwitch) {
-      for (let i = 1; i < request.side.pokemon.length; i++) {
-        const mon = request.side.pokemon[i];
-        if (mon.condition && !mon.condition.includes('fnt')) {
-          actions.push({ type: 'switch', switchIndex: i + 1 });
-        }
-      }
+    if (actions.length === 0) {
+      return [{ type: 'move', moveIndex: 1 }];
     }
 
-    return actions.length > 0 ? actions : [{ type: 'move', moveIndex: 1 }];
+    return actions;
   }
 
   private actionToCommand(action: Action, request: any): string {
     if (action.type === 'move') {
-      return `move ${action.moveIndex}`;
+      let cmd = `move ${action.moveIndex}`;
+      if (action.terastallize && request.active?.[0]?.canTerastallize) {
+        cmd += ' terastallize';
+      }
+      return cmd;
     } else {
       return `switch ${action.switchIndex}`;
     }

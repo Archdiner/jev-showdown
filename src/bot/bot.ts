@@ -1,6 +1,6 @@
 import { Action, GameState, BotConfig, BattleRecord, DecisionRecord } from '../types/index.js';
 import { BeliefTracker } from '../engine/belief-tracker.js';
-import { SearchEngine } from '../engine/search.js';
+import { DeterminizedSearch } from '../engine/determinized-search.js';
 import { Evaluator } from '../engine/evaluator.js';
 import { BattleLogger } from '../learning/battle-logger.js';
 import { dataLoader } from '../data/data-loader.js';
@@ -49,7 +49,7 @@ export class Bot {
 
     try {
       const startTime = Date.now();
-      const engine = new SearchEngine(this.config, this.evaluator);
+      const engine = new DeterminizedSearch(this.config, this.evaluator);
       const action = engine.search(state, legalActions);
       const timeMs = Date.now() - startTime;
 
