@@ -9,7 +9,39 @@
 
 # Cloud Agent Run (Oct 4, 2026)
 
-## Latest Update (Oct 4, 22:28 UTC - Commit e9673a1)
+## Latest Update (Oct 4, 22:39 UTC - Commit ec5f6b3)
+
+### 11. Expert Strategy + Critical Search Bug Fix 🔧
+**Files**: `src/graph/add-expert-strategy.ts`, `src/formats/gen9-randombattle.ts`, `src/engine/expert-evaluator.ts`, `src/engine/robust-search.ts`, `src/engine/diagnostic-tests.ts`
+
+**Expert Strategy Encoding**:
+- Added 5 Learning nodes from top-5 ladder player: strict role narrowing, hazards dominate, resource preservation, speed option, team-gen rules
+- Added 6 Hypothesis nodes with test plans (hazard differential, setter protection, resource preservation, Tera-second, speed option, tempo switch)
+- Implemented team generation constraints: max 2 per type, max 3 weak to one type, no shared 4x weakness (verified 100/100 real teams pass)
+- Fixed strict role narrowing: check abilities in `roleData.abilities` not `items`
+- Created `ExpertEvaluator` with 6 toggleable eval features ready for gate testing
+
+**CRITICAL BUG FIXED - Search Perspective**:
+- **Problem**: Bot assumed it was always p1, causing catastrophic failure when playing as p2
+  - Terminal evaluation: `winner === 'p1'` always scored as +10000, even when bot was p2
+  - When bot was p2 and won, it thought it LOST (-10000 score) and actively avoided winning moves
+  - Action mapping: `simulateTurn(myAction, oppAction)` passed actions in wrong order when bot was p2
+- **Fix**: Added `playerId: 'p1' | 'p2'` to GameState, extract from `request.side.id`
+  - Map actions correctly based on player ID
+  - Evaluate terminal states from our perspective: `winner === ourId ? +10000 : -10000`
+- **Testing**: Created diagnostic test suite with 4 hand-crafted positions (2/4 passing, 0% fallback rate)
+- **Impact**: Likely explains 62.7% vs random performance - bot was fighting itself when p2
+
+**Investigation Task Added**:
+- Created `task-investigate-search-failure` (IN_PROGRESS, critical priority)
+- Acceptance criteria: >=95% vs random over 300 paired games, 0 invalid choices
+- Suspects: eval sign flip ✓ (fixed), paranoid minimax, terminal scoring, world reconstruction, depth parity, time budget
+
+**Next**: Run full benchmark to measure impact, then implement Gate.runPairedGames for hypothesis testing.
+
+---
+
+## Earlier Update (Oct 4, 22:28 UTC - Commit e9673a1)
 
 ### 10. Graph-Based State System with Champion/Gate ✅
 **Files**: `src/graph/*`, `state/graph.db`, `AGENTS.md` (now <80 lines)
