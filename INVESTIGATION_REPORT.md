@@ -154,16 +154,23 @@ Created 4 hand-crafted positions with obvious best moves:
 
 **Evidence**: Diagnostic tests completed in <250ms, well under budget.
 
-## Benchmark Results (Preliminary)
+## Benchmark Results (FINAL - 50 games each)
 
-**VS Random (50 games)**:
-- Win rate: 60.0% (30-20-0)
-- Fallback rate: 0.00% (0/179,184 calls)
-- Time: ~340 seconds total
+**VS Random**:
+- Win rate: **60.0%** (30-20-0)
+- Target: >=95%
+- **FAIL**: 35 percentage points below target
+- Fallback rate: 0.00% (0/179,184 calls) ✓
 
-**VS Max-Damage (in progress)**:
-- Partial: 65% after 20 games
-- Full results pending...
+**VS Max-Damage**:
+- Win rate: **62.0%** (31-19-0)
+- Target: >=80%
+- **FAIL**: 18 percentage points below target
+
+**Max-Damage VS Random (baseline)**:
+- Win rate: 76.0% (38-12-0)
+- Our bot: 60% vs random < 76% max-damage baseline
+- **Conclusion**: Bot performs WORSE than simple max-damage heuristic
 
 ## Next Steps (Priority Order)
 

@@ -9,7 +9,37 @@
 
 # Cloud Agent Run (Oct 4, 2026)
 
-## Latest Update (Oct 4, 22:39 UTC - Commit ec5f6b3)
+## Latest Update (Oct 4, 23:03 UTC - Commit d045097)
+
+### 12. Comprehensive Regression Tracking System ✅
+**Files**: `src/graph/regression-tracker.ts`, `src/graph/regressions-cli.ts`, `src/graph/schema.ts`
+
+Owner requirement: detect when bot gets worse at ANYTHING, not just overall win rate.
+
+**Broad Metric Set**:
+- Win rate vs each panel opponent (random-v1, maxdamage-v1)
+- **Per-situation stats**: leading/trailing, endgames (1v1, 2v2), hazard advantage/disadvantage, weather, Tera timing (first/second)
+- **Decision quality**: switch frequency/quality, setup sweeps allowed/achieved, speed-option survival, blunder rate
+- **Diagnostic suite pass rate**: % of hand-crafted positions solved correctly
+- **Hard guardrails**: invalid choices, crashes, timeouts, p99 latency, fallback rate, state mismatches
+- **Ladder** (when available): rolling rating/GXE, rolling 100-game win rate, max loss streak
+
+**Regression Detection**:
+- Compare candidate vs previous champion using Wilson confidence intervals (95%)
+- Severity levels: critical (≥10% drop), major (≥5%), minor (≥2%)
+- Only flag statistically significant drops (baseline outside candidate's CI)
+- Record as Regression nodes in graph with `caused` and `regressed_from` edges
+
+**Integration**:
+- Added `Regression` node type, `detected` status, `caused`/`regressed_from` edge types to schema
+- CLI: `npm run regressions` - List all detected regressions by severity
+- `RegressionTracker` class with `detectRegressions()`, `recordRegressions()`, `generateRegressionTable()`
+- Gate will reject on ANY significant regression (next step: integrate with Gate.runPairedGames)
+- Summary table in gate report (data-first, no markdown)
+
+---
+
+## Earlier Update (Oct 4, 22:39 UTC - Commit ec5f6b3)
 
 ### 11. Expert Strategy + Critical Search Bug Fix 🔧
 **Files**: `src/graph/add-expert-strategy.ts`, `src/formats/gen9-randombattle.ts`, `src/engine/expert-evaluator.ts`, `src/engine/robust-search.ts`, `src/engine/diagnostic-tests.ts`
