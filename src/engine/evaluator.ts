@@ -49,22 +49,10 @@ export class Evaluator {
   }
 
   private evaluateMaterial(state: GameState): number {
-    let myMaterial = 0;
-    let oppMaterial = 0;
-
-    for (const mon of state.myTeam) {
-      if (!mon.stats) continue;
-      const hpPercent = 1.0;
-      myMaterial += hpPercent;
-    }
-
-    for (const mon of state.opponentTeam) {
-      if (!mon.stats) continue;
-      const hpPercent = 1.0;
-      oppMaterial += hpPercent;
-    }
-
-    return myMaterial - oppMaterial;
+    const myAlive = state.myTeam.filter(m => m.species !== 'Unknown').length;
+    const oppAlive = state.opponentTeam.filter(m => m.species !== 'Unknown').length;
+    
+    return (myAlive - oppAlive) * 2;
   }
 
   private evaluatePosition(state: GameState): number {

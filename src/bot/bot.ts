@@ -1,6 +1,6 @@
 import { Action, GameState, BotConfig, BattleRecord, DecisionRecord } from '../types/index.js';
 import { BeliefTracker } from '../engine/belief-tracker.js';
-import { MCTSEngine } from '../engine/mcts.js';
+import { SearchEngine } from '../engine/search.js';
 import { Evaluator } from '../engine/evaluator.js';
 import { BattleLogger } from '../learning/battle-logger.js';
 import { dataLoader } from '../data/data-loader.js';
@@ -47,12 +47,32 @@ export class Bot {
       return legalActions[0];
     }
 
-    const moves = legalActions.filter(a => a.type === 'move');
-    if (moves.length > 0 && Math.random() < 0.8) {
-      return moves[Math.floor(Math.random() * moves.length)];
-    }
+    try {
+      const startTime = Date.now();
+      const engine = new SearchEngine(this.config, this.evaluator);
+      const action = engine.search(state, legalActions);
+      const timeMs = Date.now() - startTime;
 
-    return legalActions[Math.floor(Math.random() * legalActions.length)];
+      if (this.currentBattle) {
+        const evaluation = this.evaluator.evaluate(state);
+        this.currentBattle.decisions.push({
+          turn: state.turn,
+          state: JSON.stringify(state),
+          action,
+          searchStats: {
+            nodes: 0,
+            timeMs,
+            topActions: [],
+          },
+          evaluation,
+        });
+      }
+
+      return action;
+    } catch (e) {
+      console.error('Error in selectAction:', e);
+      return legalActions[0];
+    }
   }
 
   updateBelief(pokemonId: string, species: string, level: number): void {

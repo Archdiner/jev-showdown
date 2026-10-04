@@ -143,7 +143,8 @@ export class SelfPlayHarness {
                 if (request.active || request.forceSwitch) {
                   const actions = this.getLegalActions(request);
                   if (actions.length > 0) {
-                    const action = bot.selectAction({} as GameState, actions);
+                    const state = this.buildGameState(request);
+                    const action = bot.selectAction(state, actions);
                     stream.write(this.actionToCommand(action, request));
                   }
                 }
@@ -159,6 +160,39 @@ export class SelfPlayHarness {
     })();
   }
 
+  private buildGameState(request: any): GameState {
+    const myTeam = request.side?.pokemon?.map((p: any, i: number) => ({
+      species: p.ident.split(':')[1]?.trim() || 'Unknown',
+      level: p.level || 80,
+      possibleSets: new Map(),
+      revealedMoves: new Set(p.moves || []),
+      stats: p.stats,
+    })) || [];
+
+    return {
+      myTeam,
+      opponentTeam: Array(6).fill(null).map(() => ({
+        species: 'Unknown',
+        level: 80,
+        possibleSets: new Map(),
+        revealedMoves: new Set(),
+      })),
+      myActive: 0,
+      opponentActive: 0,
+      turn: 1,
+      myTeraUsed: false,
+      opponentTeraUsed: false,
+      field: {
+        trickRoom: false,
+        screens: {},
+      },
+      hazards: {
+        my: { stealthRock: false, spikes: 0, toxicSpikes: 0 },
+        opponent: { stealthRock: false, spikes: 0, toxicSpikes: 0 },
+      },
+    };
+  }
+
   private createBot(type: string): any {
     switch (type) {
       case 'random':
@@ -167,8 +201,8 @@ export class SelfPlayHarness {
         return new MaxDamageBot();
       case 'mcts':
         const config: BotConfig = {
-          searchTimeMs: 100,
-          searchIterations: 50,
+          searchTimeMs: 50,
+          searchIterations: 20,
           explorationConstant: 1.4,
           sampledWorlds: 1,
           useTeraHeuristic: true,
@@ -195,7 +229,14 @@ export class SelfPlayHarness {
       }
     }
 
-    if (request.side && request.side.pokemon) {
+    if (request.side && request.side.pokemon && !request.forceSwitch) {
+      for (let i = 1; i < request.side.pokemon.length; i++) {
+        const mon = request.side.pokemon[i];
+        if (mon.condition && !mon.condition.includes('fnt')) {
+          actions.push({ type: 'switch', switchIndex: i + 1 });
+        }
+      }
+    } else if (request.forceSwitch) {
       for (let i = 1; i < request.side.pokemon.length; i++) {
         const mon = request.side.pokemon[i];
         if (mon.condition && !mon.condition.includes('fnt')) {
