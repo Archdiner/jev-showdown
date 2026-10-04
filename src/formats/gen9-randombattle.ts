@@ -56,9 +56,10 @@ export class Gen9RandomBattle implements Format {
       let consistent = true;
       let probability = roleData.weight;
       
-      // Check revealed moves
+      // Strict role narrowing: Check revealed moves
       if (pokemon.revealedMoves.size > 0) {
         for (const move of pokemon.revealedMoves) {
+          // If this role doesn't have this move at all, it's eliminated
           const moveProb = roleData.moves?.[move] || 0;
           if (moveProb === 0) {
             consistent = false;
@@ -70,42 +71,53 @@ export class Gen9RandomBattle implements Format {
       
       if (!consistent) continue;
       
-      // Check revealed ability
+      // Strict role narrowing: Check revealed ability
       if (pokemon.revealedAbility) {
-        const abilityProb = roleData.items?.[pokemon.revealedAbility] || 0;
-        if (abilityProb === 0) consistent = false;
-        probability *= abilityProb;
+        // Ability is in roleData.abilities, not items (fixing bug)
+        const abilityProb = roleData.abilities?.[pokemon.revealedAbility] || 0;
+        if (abilityProb === 0) {
+          consistent = false;
+        } else {
+          probability *= abilityProb;
+        }
       }
       
       if (!consistent) continue;
       
-      // Check revealed item
+      // Strict role narrowing: Check revealed item
       if (pokemon.revealedItem) {
         const itemProb = roleData.items?.[pokemon.revealedItem] || 0;
-        if (itemProb === 0) consistent = false;
-        probability *= itemProb;
+        if (itemProb === 0) {
+          consistent = false;
+        } else {
+          probability *= itemProb;
+        }
       }
       
       if (!consistent) continue;
       
-      // Check revealed Tera type
+      // Strict role narrowing: Check revealed Tera type
       if (pokemon.revealedTeraType) {
         const teraProb = roleData.teraTypes?.[pokemon.revealedTeraType] || 0;
-        if (teraProb === 0) consistent = false;
-        probability *= teraProb;
+        if (teraProb === 0) {
+          consistent = false;
+        } else {
+          probability *= teraProb;
+        }
       }
       
       if (consistent) {
         const moves = Object.keys(roleData.moves || {}).slice(0, 4);
         const items = Object.keys(roleData.items || {});
+        const abilities = Object.keys(roleData.abilities || {});
         const teraTypes = Object.keys(roleData.teraTypes || {});
         
         candidates.push({
           role: roleName,
           moves,
-          item: items[0],
-          ability: pokemon.revealedAbility,
-          teraType: teraTypes[0],
+          item: items[0] || '',
+          ability: pokemon.revealedAbility || abilities[0] || '',
+          teraType: teraTypes[0] || '',
           probability,
         });
       }
@@ -118,6 +130,106 @@ export class Gen9RandomBattle implements Format {
     }
     
     return candidates;
+  }
+  
+  /**
+   * Validate team generation constraints (Gen 9 Random Battle rules).
+   * Returns null if valid, or an array of constraint violations.
+   */
+  validateTeamConstraints(team: PokemonBelief[]): string[] | null {
+    const violations: string[] = [];
+    
+    // Filter out Unknown and fainted mons
+    const knownTeam = team.filter(mon => mon.species !== 'Unknown' && (!mon.currentHp || mon.currentHp > 0));
+    
+    if (knownTeam.length === 0) {
+      return null;
+    }
+    
+    // Constraint 1: Max 2 mons per type
+    const typeCount: Record<string, number> = {};
+    for (const mon of knownTeam) {
+      const species = Dex.species.get(mon.species);
+      if (!species.exists) continue;
+      
+      for (const type of species.types) {
+        typeCount[type] = (typeCount[type] || 0) + 1;
+        if (typeCount[type] > 2) {
+          violations.push(`More than 2 ${type}-type mons (found ${typeCount[type]})`);
+        }
+      }
+    }
+    
+    // Constraint 2: Max 3 mons weak to one type
+    const weaknessCount: Record<string, number> = {};
+    for (const mon of knownTeam) {
+      const species = Dex.species.get(mon.species);
+      if (!species.exists) continue;
+      
+      // Calculate weaknesses (types that deal >1x damage)
+      for (const attackType of Object.keys(Dex.types.all())) {
+        let effectiveness = 1.0;
+        for (const defenseType of species.types) {
+          const typeData = Dex.types.get(defenseType);
+          if (typeData.damageTaken && typeData.damageTaken[attackType] !== undefined) {
+            const dt = typeData.damageTaken[attackType];
+            if (dt === 1) effectiveness *= 2;      // Weak
+            else if (dt === 2) effectiveness *= 0.5; // Resist
+            else if (dt === 3) effectiveness *= 0;   // Immune
+          }
+        }
+        
+        if (effectiveness > 1.0) {
+          weaknessCount[attackType] = (weaknessCount[attackType] || 0) + 1;
+          if (weaknessCount[attackType] > 3) {
+            violations.push(`More than 3 mons weak to ${attackType} (found ${weaknessCount[attackType]})`);
+          }
+        }
+      }
+    }
+    
+    // Constraint 3: No shared 4x weakness
+    const fourXWeaknesses: string[][] = [];
+    for (const mon of knownTeam) {
+      const species = Dex.species.get(mon.species);
+      if (!species.exists) continue;
+      
+      const monWeaknesses: string[] = [];
+      for (const attackType of Object.keys(Dex.types.all())) {
+        let effectiveness = 1.0;
+        for (const defenseType of species.types) {
+          const typeData = Dex.types.get(defenseType);
+          if (typeData.damageTaken && typeData.damageTaken[attackType] !== undefined) {
+            const dt = typeData.damageTaken[attackType];
+            if (dt === 1) effectiveness *= 2;
+            else if (dt === 2) effectiveness *= 0.5;
+            else if (dt === 3) effectiveness *= 0;
+          }
+        }
+        
+        if (effectiveness >= 4.0) {
+          monWeaknesses.push(attackType);
+        }
+      }
+      
+      fourXWeaknesses.push(monWeaknesses);
+    }
+    
+    // Check for shared 4x weaknesses
+    for (let i = 0; i < fourXWeaknesses.length; i++) {
+      for (let j = i + 1; j < fourXWeaknesses.length; j++) {
+        const shared = fourXWeaknesses[i].filter(w => fourXWeaknesses[j].includes(w));
+        if (shared.length > 0) {
+          violations.push(`Shared 4x weakness to ${shared.join(', ')} between ${knownTeam[i].species} and ${knownTeam[j].species}`);
+        }
+      }
+    }
+    
+    // Constraint 4: Max 1 Tera Blast role per team
+    // Note: This requires role data which we check during set generation
+    // For now, we'll document this constraint but can't validate without role info
+    
+    return violations.length > 0 ? violations : null;
   }
   
   sampleSet(pokemon: PokemonBelief): SetCandidate | null {
