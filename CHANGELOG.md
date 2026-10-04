@@ -1,6 +1,41 @@
-# Changelog - Cloud Agent Run (Oct 4, 2026)
+# Changelog
 
-## Plain-English Summary of Changes
+**Note**: This file is the owner-facing plain-English summary of changes. For detailed technical state, see:
+- `docs/state/CURRENT.md` - Current capabilities, metrics, known issues
+- `docs/state/NEXT.md` - Task queue
+- `docs/state/DECISIONS.md` - Architecture decisions
+- `docs/state/sessions/` - Detailed session logs
+
+---
+
+# Cloud Agent Run (Oct 4, 2026)
+
+## Latest Update (Oct 4, 21:51 UTC - Commit 5522250)
+
+### 8. Achieved 0% Fallback Rate - Exact Sim Working ✅
+**Files**: `src/engine/battle-state-builder.ts`, `src/engine/sim-wrapper.ts`, `src/bot/bot.ts`, `src/learning/self-play.ts`
+
+- **Fixed team format**: Use packed format (`Species||Item|Ability|...`) not text format (`Species @ Item`)
+- **Fixed ability placeholder**: Use `'Pressure'` instead of `'noability'`
+- **Fixed Unknown pokemon**: Use proper packed format for Ditto placeholder
+- **Initialized TeamGeneratorFactory**: Call `Teams.setGeneratorFactory(TeamGenerators)` before Battle creation
+- **Removed redundant start()**: Battle auto-starts when both players set, don't call manually
+- **Added instrumentation**: Track fallback rate across search, bot, and self-play
+- **Result**: Fallback rate dropped from 100% to 0.00% (measured over 15,136 sim calls in 5 games)
+- **Quick test**: 100% win rate vs random (5 games) - up from 71% baseline with fallback
+
+### 9. Created Formal Handoff System ✅
+**Files**: `AGENTS.md`, `docs/state/*`, `docs/knowledge/*`, `scripts/verify.sh`, `scripts/check-handoff.sh`
+
+- **Entry point**: `AGENTS.md` (also `CLAUDE.md`, `.cursor/rules/00-start-here.mdc`) with start/end-of-session checklists
+- **Living state**: `docs/state/CURRENT.md` (metrics, issues, traps), `NEXT.md` (task queue), `DECISIONS.md` (9 ADRs), `sessions/` (per-session logs)
+- **Shared knowledge**: `docs/knowledge/SOURCES.md` (data sources, refresh protocol), `CONVENTIONS.md` (code style, testing), `STRATEGY.md` (Pokemon knowledge with evidence), `IDEAS.md` (11 hypotheses to test)
+- **Verification**: `npm run verify` (build + tests + 20-game smoke), `scripts/check-handoff.sh` (validates protocol compliance)
+- **Cleanup**: Removed redundant status docs (FINAL_REPORT, IMPLEMENTATION_NOTES, PERFORMANCE), kept CHANGELOG as owner-facing summary
+
+---
+
+## Earlier Changes
 
 ### 1. Format Interface & Modularity ✅
 **Files**: `src/types/format.ts`, `src/formats/gen9-randombattle.ts`
