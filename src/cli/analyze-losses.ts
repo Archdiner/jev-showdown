@@ -4,7 +4,10 @@ import { BattleLogger } from '../learning/battle-logger.js';
 import { GraphDB } from '../graph/db.js';
 import { GatewayClient } from '../llm/gateway-client.js';
 import { LossReviewer } from '../llm/loss-reviewer.js';
+import { reviveGameState } from '../llm/battle-facts.js';
 import { resolveReviewerModel } from '../llm/models.js';
+import type { AdvisorCandidate } from '../llm/types.js';
+import { dataLoader } from '../data/data-loader.js';
 
 async function main() {
   const logger = new BattleLogger();
@@ -31,7 +34,28 @@ async function main() {
       console.log(`Timestamp: ${new Date(battle.timestamp).toISOString()}`);
 
       if (client.hasApiKey()) {
-        const result = await reviewer.review(battle.log, { db: graph, battleId: battle.id, sourcePath: `battle:${battle.id}` });
+        const last = battle.decisions[battle.decisions.length - 1];
+        const state = last ? reviveGameState(last.state) : undefined;
+        const candidates: AdvisorCandidate[] = (last?.searchStats.topActions ?? []).map((entry, index) => ({
+          id: `a${index}`,
+          label: `${entry.action.type}`,
+          action: entry.action,
+          searchScore: entry.value,
+        }));
+        let pools = {};
+        try {
+          pools = dataLoader.getStats();
+        } catch {
+          pools = {};
+        }
+        const result = await reviewer.review(battle.log, {
+          db: graph,
+          battleId: battle.id,
+          sourcePath: `battle:${battle.id}`,
+          state,
+          candidates,
+          pools,
+        });
         if (!result.ok) {
           console.log(`Review failed: ${result.error}`);
           continue;

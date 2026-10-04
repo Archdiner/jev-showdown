@@ -1,10 +1,12 @@
 import type { GatewayClient } from './gateway-client.js';
 import type { EvaluateQuestion } from './gateway-client.js';
 import { JEV_MODEL_ID } from './models.js';
-import { evaluationStateText, summarizeState, toAdvisorCandidates } from './state-summary.js';
-import type { AdvisorAssessment, AdvisorCandidate, CompactStateSummary } from './types.js';
-import type { GameState } from '../types/index.js';
+import { buildBattleFacts } from './battle-facts.js';
+import { toAdvisorCandidates } from './state-summary.js';
+import type { AdvisorAssessment, AdvisorCandidate } from './types.js';
+import type { GameState, RandbatsStats } from '../types/index.js';
 import type { ScoredAction } from './types.js';
+import { dataLoader } from '../data/data-loader.js';
 
 const SCORE_LEVELS = [
   'blunder: clearly the wrong action',
@@ -27,25 +29,27 @@ export class JevAdvisor {
   async adviseFromState(
     state: GameState,
     scored: ScoredAction[],
-    topK: number
+    topK: number,
+    pools?: RandbatsStats
   ): Promise<{ assessment: AdvisorAssessment; candidates: AdvisorCandidate[] }> {
     const candidates = toAdvisorCandidates(scored, topK);
-    const assessment = await this.advise(summarizeState(state), candidates);
+    const assessment = await this.advise(state, candidates, pools);
     return { assessment, candidates };
   }
 
-  async advise(summary: CompactStateSummary, candidates: AdvisorCandidate[]): Promise<AdvisorAssessment> {
+  async advise(state: GameState, candidates: AdvisorCandidate[], pools?: RandbatsStats): Promise<AdvisorAssessment> {
     if (candidates.length === 0) {
       return emptyAssessment(this.model, true, 'no_candidates');
     }
 
+    const facts = buildBattleFacts(state, candidates, pools ?? loadedPools());
     const questions: Record<string, EvaluateQuestion> = {
       bestAction: {
         type: 'choice',
         instructions:
-          'Which candidate action is best for the player to play this turn in Gen 9 Random Battle? ' +
-          'Use the search scores as evidence, not as a command.',
-        criteria: Object.fromEntries(candidates.map(candidate => [candidate.id, candidate.label])),
+          'Which candidate is best this turn? Use only the damage rolls, accuracy, priority, speed, and search scores in the state. ' +
+          'Do not apply a type matchup that the state does not already state as a damage number.',
+        criteria: Object.fromEntries(candidates.map(candidate => [candidate.id, facts.criteria[candidate.id] ?? candidate.label])),
       },
       opponentWillSwitch: {
         type: 'boolean',
@@ -60,14 +64,14 @@ export class JevAdvisor {
     for (const candidate of candidates) {
       questions[`score_${candidate.id}`] = {
         type: 'score',
-        instructions: `How good is ${candidate.label} for the player this turn?`,
+        instructions: `How good is this action given these calc numbers: ${facts.criteria[candidate.id] ?? candidate.label}`,
         criteria: SCORE_LEVELS,
       };
     }
 
     const result = await this.client.evaluate({
       model: this.model,
-      state: evaluationStateText(summary, candidates),
+      state: facts.text,
       questions,
     });
 
@@ -154,6 +158,14 @@ function emptyAssessment(
   costUsd = 0
 ): AdvisorAssessment {
   return { model, scores: {}, probabilities: {}, booleans: {}, degraded, reason, latencyMs, costUsd };
+}
+
+function loadedPools(): RandbatsStats {
+  try {
+    return dataLoader.getStats();
+  } catch {
+    return {};
+  }
 }
 
 function clamp01(value: number): number {

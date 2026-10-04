@@ -1,4 +1,6 @@
 import { GatewayClient } from './gateway-client.js';
+import { JevAdvisor } from './jev-advisor.js';
+import { garchompRotomFixture } from './garchomp-rotom-fixture.js';
 import { JEV_MODEL_ID, resolveReviewerModel } from './models.js';
 
 /**
@@ -40,6 +42,18 @@ async function main(): Promise<void> {
       (review.ok ? '' : ` error=${review.error}`)
   );
   if (!review.ok && review.error !== 'restricted_model') failed = true;
+
+  client.startTurn();
+  const fixture = garchompRotomFixture();
+  const advisor = new JevAdvisor(client);
+  const garchomp = await advisor.advise(fixture.state, fixture.candidates, fixture.pools);
+  const best = Object.entries(garchomp.probabilities).sort((a, b) => b[1] - a[1])[0];
+  console.log(
+    `SMOKE garchomp-rotom ok=${!garchomp.degraded} latency_ms=${garchomp.latencyMs} cost_usd=${garchomp.costUsd.toFixed(8)} ` +
+      `best=${best ? `${best[0]}=${best[1]}` : 'none'} probabilities=${JSON.stringify(garchomp.probabilities)}` +
+      (garchomp.degraded ? ` error=${garchomp.reason}` : '')
+  );
+  if (garchomp.degraded && garchomp.reason !== 'restricted_model') failed = true;
 
   if (failed) process.exitCode = 1;
 }

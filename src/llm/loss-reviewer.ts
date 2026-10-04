@@ -4,6 +4,9 @@ import type { GraphDB } from '../graph/db.js';
 import type { GatewayClient } from './gateway-client.js';
 import { resolveReviewerModel } from './models.js';
 import type { CallMetrics } from './gateway-client.js';
+import { buildBattleFacts } from './battle-facts.js';
+import type { GameState, RandbatsStats } from '../types/index.js';
+import type { AdvisorCandidate } from './types.js';
 
 export const MISTAKE_CLASSES = [
   'speed-control',
@@ -79,30 +82,28 @@ export class LossReviewer {
 
   async review(
     battleText: string,
-    opts: { db?: GraphDB; battleId?: string; sourcePath?: string } = {}
+    opts: {
+      db?: GraphDB;
+      battleId?: string;
+      sourcePath?: string;
+      calcText?: string;
+      state?: GameState;
+      candidates?: AdvisorCandidate[];
+      pools?: RandbatsStats;
+    } = {}
   ): Promise<ReviewResult> {
     const clipped = battleText.length > MAX_LOG_CHARS;
     const transcript = clipped ? battleText.slice(0, MAX_LOG_CHARS) : battleText;
+    const calcText = opts.calcText ?? (opts.state ? buildBattleFacts(opts.state, opts.candidates ?? [], opts.pools).text : undefined);
+    const messages = buildReviewMessages(transcript, calcText, clipped);
     const result = await this.client.chat({
       model: this.model,
       temperature: 0,
       maxTokens: 1200,
       jsonSchema: FINDING_JSON_SCHEMA,
       messages: [
-        {
-          role: 'system',
-          content:
-            'You review one lost Gen 9 Random Battle played by a search-based bot. ' +
-            'Return only JSON matching the schema. Identify the single most critical turn, ' +
-            'a mistake class, and a hypothesis the champion/challenger gate can test. ' +
-            'Do not propose editing code directly. The hypothesis must include a kill condition.',
-        },
-        {
-          role: 'user',
-          content:
-            `${clipped ? 'The log was truncated to the first 20000 characters.\n' : ''}` +
-            `Battle source:\n${transcript}`,
-        },
+        { role: 'system', content: messages.system },
+        { role: 'user', content: messages.user },
       ],
     });
 
@@ -134,6 +135,30 @@ export class LossReviewer {
       model: this.model,
     };
   }
+}
+
+export function buildReviewMessages(
+  battleText: string,
+  calcText: string | undefined,
+  clipped = false
+): { system: string; user: string } {
+  const calc = calcText?.trim()
+    ? calcText
+    : 'NONE. No calc block was supplied. Do not claim any damage range, KO chance, speed order, or type effectiveness.';
+  return {
+    system:
+      'You review one lost Gen 9 Random Battle played by a search-based bot. ' +
+      'Return only JSON matching the schema. Identify the single most critical turn, ' +
+      'a mistake class, and a hypothesis the champion/challenger gate can test. ' +
+      'Do not propose editing code directly. The hypothesis must include a kill condition. ' +
+      'Ground every claim about damage, KO chance, accuracy, priority, speed, or type effectiveness in the CALC block. ' +
+      'Quote those numbers. Do not assert type matchups, immunities, or resistances from memory. ' +
+      'If the CALC block does not state a matchup as a damage number, do not claim it.',
+    user:
+      `${clipped ? 'The log was truncated to the first 20000 characters.\n' : ''}` +
+      `CALC (from @pkmn/dex, @smogon/calc, and the randbats role pool; this is the only source for matchup facts):\n${calc}\n\n` +
+      `BATTLE LOG:\n${battleText}`,
+  };
 }
 
 export function parseFinding(raw: string): { ok: true; finding: LossFinding } | { ok: false; error: string } {

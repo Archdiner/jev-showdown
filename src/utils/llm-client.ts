@@ -4,6 +4,7 @@ import { JevAdvisor } from '../llm/jev-advisor.js';
 import { LossReviewer } from '../llm/loss-reviewer.js';
 import { JEV_MODEL_ID, resolveReviewerModel } from '../llm/models.js';
 import type { CompactStateSummary } from '../llm/types.js';
+import type { GameState } from '../types/index.js';
 
 export interface LLMConfig {
   endpoint?: string;
@@ -49,8 +50,22 @@ export class LLMClient {
           teraUsed: { mine: false, opponent: false },
         };
 
+    const state: GameState = isGameState(request.state)
+      ? request.state
+      : {
+          myTeam: [],
+          opponentTeam: [],
+          myActive: 0,
+          opponentActive: 0,
+          turn: summary.turn,
+          myTeraUsed: summary.teraUsed.mine,
+          opponentTeraUsed: summary.teraUsed.opponent,
+          field: summary.field,
+          hazards: summary.hazards,
+          playerId: summary.player === 'unknown' ? undefined : summary.player,
+        };
     const assessment = await this.jev.advise(
-      summary,
+      state,
       choices.map((choice, index) => ({
         id: `a${index}`,
         label: choice,
@@ -94,6 +109,10 @@ export function createLLMClient(): LLMClient {
     apiKey: process.env.VERCEL_AI_GATEWAY_KEY || process.env.AI_GATEWAY_API_KEY,
     reasoningModel: resolveReviewerModel(),
   });
+}
+
+function isGameState(value: unknown): value is GameState {
+  return !!value && typeof value === 'object' && Array.isArray((value as GameState).myTeam);
 }
 
 function isSummary(value: unknown): value is CompactStateSummary {

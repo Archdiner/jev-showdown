@@ -5,7 +5,10 @@ import * as path from 'path';
 import { GatewayClient, resetRestrictionLatch } from './gateway-client.js';
 import { JevAdvisor } from './jev-advisor.js';
 import { blendCandidates, blendConfigForBot, chooseAction } from './blend.js';
-import { LossReviewer, formatJsonl } from './loss-reviewer.js';
+import { LossReviewer, buildReviewMessages, formatJsonl } from './loss-reviewer.js';
+import { buildBattleFacts, effectiveSpeed } from './battle-facts.js';
+import { garchompRotomFixture } from './garchomp-rotom-fixture.js';
+import { capEvaluationState } from './state-summary.js';
 import { challengerBlendConfig, loadJevPriorExperiment } from './experiment-config.js';
 import { DEFAULT_REVIEWER_MODEL_ID, JEV_MODEL_ID, estimateCostUsd } from './models.js';
 import { MAX_EVALUATION_STATE_TOKENS } from './state-summary.js';
@@ -162,7 +165,6 @@ describe('gateway client', () => {
 describe('Jev advisor', () => {
   it('posts one evaluate request with a string state, a choice, scores, and a boolean', async () => {
     resetRestrictionLatch();
-    const longLabel = 'x'.repeat(200_000);
     const script = scriptedFetch([jsonResponse({
       model: JEV_MODEL_ID,
       answers: {
@@ -176,10 +178,7 @@ describe('Jev advisor', () => {
     })]);
     const client = new GatewayClient({ apiKey: KEY, fetchImpl: script.fetch, log: () => {} });
     const advisor = new JevAdvisor(client);
-    const assessment = await advisor.advise(sampleSummary(), [
-      { ...candidates()[0], label: longLabel },
-      candidates()[1],
-    ]);
+    const assessment = await advisor.advise(sampleState(), candidates());
     expect(assessment.degraded).toBe(false);
     expect(assessment.probabilities.a1).toBe(0.75);
     expect(assessment.scores.a1).toBe(1);
@@ -226,7 +225,7 @@ describe('Jev advisor', () => {
       maxRetries: 2,
     });
     const advisor = new JevAdvisor(client);
-    const first = await advisor.advise(sampleSummary(), candidates());
+    const first = await advisor.advise(sampleState(), candidates());
     expect(first.degraded).toBe(true);
     expect(first.reason).toBe('restricted_model');
     expect(script.calls).toHaveLength(1);
@@ -262,7 +261,7 @@ describe('Jev advisor', () => {
       maxRetries: 0,
     });
     const advisor = new JevAdvisor(client);
-    const assessment = await advisor.advise(sampleSummary(), candidates());
+    const assessment = await advisor.advise(sampleState(), candidates());
     expect(assessment.degraded).toBe(true);
     expect(assessment.reason).toBe('timeout');
     expect(assessment.scores).toEqual({});
@@ -437,6 +436,59 @@ describe('loss reviewer', () => {
     expect(result.hypothesisId).toBeUndefined();
     expect(db.getNodesByType('Hypothesis')).toHaveLength(0);
     db.close();
+  });
+});
+
+describe('Garchomp vs Levitate Rotom-Wash', () => {
+  const fixture = garchompRotomFixture();
+  const facts = buildBattleFacts(fixture.state, fixture.candidates, fixture.pools);
+
+  it('puts dex types, Levitate, speed, and calc rolls into the state and the criteria', () => {
+    expect(facts.text).toContain('types=Dragon/Ground');
+    expect(facts.text).toContain('types=Electric/Water');
+    expect(facts.text).toContain('ability=Levitate (known)');
+    expect(facts.text).toContain('Garchomp=209');
+    expect(facts.text).toContain('Rotom-Wash=193');
+    expect(facts.text).toContain('Garchomp moves first');
+    expect(facts.text).toContain('hp=70%');
+    expect(facts.text).toContain('weather=none');
+    expect(facts.text).toContain('hazards opp rocks=true');
+    expect(facts.text).toContain('Hydro Pump');
+    expect(facts.text).toContain('Skarmory');
+
+    expect(facts.criteria.claw).toContain('type=Dragon');
+    expect(facts.criteria.claw).toContain('acc=100');
+    expect(facts.criteria.claw).toContain('search=9.50');
+    expect(facts.criteria.claw).toContain('damage=101-121');
+    expect(facts.criteria.stone).toContain('type=Rock');
+    expect(facts.criteria.stone).toContain('acc=80');
+    expect(facts.criteria.stone).toContain('search=10');
+    expect(facts.criteria.quake).toContain('damage=0');
+    expect(facts.criteria.quake).toContain('immune or no effect');
+    expect(facts.criteria.dance).toContain('no damage roll');
+
+    const clawExpected = Number(facts.criteria.claw.match(/expectedAfterAccuracy=(\d+)/)?.[1]);
+    const stoneExpected = Number(facts.criteria.stone.match(/expectedAfterAccuracy=(\d+)/)?.[1]);
+    expect(clawExpected).toBeGreaterThan(stoneExpected);
+    expect(facts.text.length).toBeLessThanOrEqual(32_000 * 4);
+  });
+
+  it('counts Choice Scarf and a speed boost in the speed stat', () => {
+    const base = effectiveSpeed(86, 84, 85, 'Bold', undefined, 0);
+    const scarf = effectiveSpeed(86, 84, 85, 'Bold', 'Choice Scarf', 0);
+    const boosted = effectiveSpeed(86, 84, 85, 'Bold', 'Choice Scarf', 1);
+    expect(base).toBe(193);
+    expect(scarf).toBe(Math.floor(193 * 1.5));
+    expect(boosted).toBe(Math.floor(Math.floor(193 * 1.5) * 1.5));
+  });
+
+  it('tells the loss reviewer to quote the calc and not invent matchups', () => {
+    const messages = buildReviewMessages('Turn 4: Stone Edge into Rotom-Wash.', facts.text);
+    expect(messages.system).toContain('Do not assert type matchups');
+    expect(messages.user).toContain('damage=101-121');
+    expect(messages.user).toContain('ability=Levitate (known)');
+    expect(messages.user).toContain('CALC');
+    expect(capEvaluationState(facts.text)).toBe(facts.text);
   });
 });
 
