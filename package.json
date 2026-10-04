@@ -20,7 +20,12 @@
     "export-replays": "tsx src/cli/export-replays.ts",
     "lint": "eslint src/**/*.ts"
   },
-  "keywords": ["pokemon", "showdown", "ai", "mcts"],
+  "keywords": [
+    "pokemon",
+    "showdown",
+    "ai",
+    "mcts"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {

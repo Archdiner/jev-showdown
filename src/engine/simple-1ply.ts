@@ -9,6 +9,7 @@
 import { Action, GameState, PokemonBelief } from '../types/index.js';
 import { Format } from '../types/format.js';
 import { Dex } from '@pkmn/sim';
+import { calculate, Pokemon, Move, Field, Result } from '@smogon/calc';
 
 export interface Simple1PlyConfig {
   opponentModel: 'uniform' | 'max-damage';
@@ -192,88 +193,43 @@ export class Simple1Ply {
   }
 
   /**
-   * Calculate damage using type chart and stats
+   * Calculate damage using @smogon/calc (exact mechanics)
    */
   private calculateDamage(attacker: PokemonBelief, defender: PokemonBelief, moveName: string): number {
-    const moveData = Dex.moves.get(moveName);
-    
-    if (!moveData || !attacker.stats || !defender.stats || !defender.maxHp) {
+    try {
+      // Create Pokemon objects for calculator
+      const attackerPokemon = new Pokemon(9, attacker.species, {
+        level: attacker.level || 80,
+        evs: { hp: 85, atk: 85, def: 85, spa: 85, spd: 85, spe: 85 },
+        nature: 'Hardy',
+      });
+
+      const defenderPokemon = new Pokemon(9, defender.species, {
+        level: defender.level || 80,
+        evs: { hp: 85, atk: 85, def: 85, spa: 85, spd: 85, spe: 85 },
+        nature: 'Hardy',
+        curHP: defender.currentHp || defender.maxHp,
+      });
+
+      const move = new Move(9, moveName);
+      const field = new Field();
+
+      const result = calculate(9, attackerPokemon, defenderPokemon, move, field);
+
+      // Return average damage
+      if (result.damage === 0) return 0;
+      if (typeof result.damage === 'number') return result.damage;
+      
+      // Damage is a range [min, max]
+      const damageRange = result.damage as number[];
+      return Math.floor((damageRange[0] + damageRange[damageRange.length - 1]) / 2);
+    } catch (e) {
+      // Fallback: return 0 for invalid moves
       return 0;
     }
-
-    // Status moves don't do damage
-    if (moveData.category === 'Status') {
-      return 0;
-    }
-
-    // Handle variable base power moves
-    let basePower = moveData.basePower;
-    if (basePower === 0 || basePower === 1) {
-      // Variable power moves - use average
-      if (moveName.toLowerCase().includes('grassknot') || moveName.toLowerCase().includes('lowkick')) {
-        basePower = 80;  // Reasonable average
-      } else if (moveName.toLowerCase().includes('gyroball')) {
-        basePower = 60;
-      } else {
-        return 0;  // Unknown variable power
-      }
-    }
-
-    const isPhysical = moveData.category === 'Physical';
-    const attackStat = isPhysical ? attacker.stats.atk : attacker.stats.spa;
-    const defenseStat = isPhysical ? defender.stats.def : defender.stats.spd;
-
-    // Get type effectiveness
-    const defenderTypes = this.getTypes(defender.species);
-    const effectiveness = this.getEffectiveness(moveData.type, defenderTypes);
-
-    // If immune, damage is 0
-    if (effectiveness === 0) {
-      return 0;
-    }
-
-    // Simplified damage formula (based on Gen 9 mechanics but simplified)
-    // Damage = ((2 * Level / 5 + 2) * Power * A/D / 50 + 2) * Modifiers
-    const level = attacker.level || 80;
-    const baseDamage = ((2 * level / 5 + 2) * basePower * attackStat / defenseStat / 50 + 2);
-    const damage = baseDamage * effectiveness;
-
-    return Math.round(damage);
   }
 
-  /**
-   * Get type effectiveness multiplier
-   * damageTaken on DEFENDER type tells how that type takes damage from attacker type
-   * 0 = normal, 1 = SUPER EFFECTIVE, 2 = not very effective, 3 = immune
-   */
-  private getEffectiveness(moveType: string, defenderTypes: string[]): number {
-    let effectiveness = 1.0;
-    
-    for (const defType of defenderTypes) {
-      // Look at defender type's damageTaken to see how it takes damage from move type
-      const defTypeData = Dex.types.get(defType);
-      if (defTypeData && defTypeData.damageTaken) {
-        const value = defTypeData.damageTaken[moveType];
-        if (value === 3) effectiveness *= 0;  // Immune
-        else if (value === 1) effectiveness *= 2;  // Super effective
-        else if (value === 2) effectiveness *= 0.5;  // Not very effective
-        // 0 or undefined = normal (1x)
-      }
-    }
-    
-    return effectiveness;
-  }
-
-  /**
-   * Get Pokemon types
-   */
-  private getTypes(species: string): string[] {
-    const speciesData = Dex.species.get(species);
-    if (speciesData && speciesData.types) {
-      return speciesData.types;
-    }
-    return ['Normal'];
-  }
+  // Removed getEffectiveness and getTypes - using @smogon/calc instead
 
   /**
    * Evaluate a game state
