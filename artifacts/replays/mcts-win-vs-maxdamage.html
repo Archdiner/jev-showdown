@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MCTS vs MAXDAMAGE - gen9randombattle</title>
+  
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Verdana, sans-serif;
+      background: #f0f0f0;
+    }
+    
+    .replay-wrapper {
+      max-width: 1200px;
+      margin: 20px auto;
+      background: white;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    
+    .replay-header {
+      background: #6688cc;
+      color: white;
+      padding: 15px 20px;
+    }
+    
+    .replay-header h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+    
+    .replay-meta {
+      font-size: 12px;
+      opacity: 0.9;
+      margin-top: 5px;
+    }
+    
+    .ps-replay {
+      min-height: 500px;
+    }
+  </style>
+</head>
+<body>
+  <div class="replay-wrapper">
+    <div class="replay-header">
+      <h1>MCTS vs MAXDAMAGE - gen9randombattle</h1>
+      <div class="replay-meta">
+        Result: mcts wins | 
+        2026-10-04T21:26:33.355Z
+      </div>
+    </div>
+    
+    <div class="ps-replay">
+      <div class="battle"></div>
+      <div class="battle-log"></div>
+      
+      <script class="battle-log-data" type="text/plain">
+|j|☆mcts
+|j|☆maxdamage
+|gametype|singles
+|gen|9
+|tier|[Gen 9] Random Battle
+|rated|
+|rule|Sleep Clause Mod: Limit one foe put to sleep
+|rule|HP Percentage Mod: HP is shown in percentages
+|
+|start
+|turn|1
+|
+|win|mcts
+      </script>
+    </div>
+  </div>
+  
+  <script src="https://play.pokemonshowdown.com/js/replay-embed.js"></script>
+</body>
+</html>
