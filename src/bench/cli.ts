@@ -13,13 +13,14 @@ function arg(name: string, fallback: string): string {
 function policy(name: string): PolicySpec {
   if (name === 'random') return { kind: 'random' };
   if (name === 'maxdamage') return { kind: 'maxdamage' };
+  if (name === 'legacy') return { kind: 'legacy' };
   const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',') ;
   if (name === 'exact' || name.startsWith('exact')) {
     const config: ExactConfig = {
       depth: Number(depth) || EXACT_1PLY.depth,
       opponentModel: model === 'uniform' ? 'uniform' : 'max-damage',
       evalMode: evalMode === 'full' ? 'full' : 'hp',
-      errorAsLoss: false,
+      errorAsLoss: name.includes(',loss'),
     };
     return { kind: 'exact', config };
   }
@@ -60,6 +61,7 @@ export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate
   invalid: number;
   crashes: number;
   p99ms: number;
+  maxMs: number;
 } {
   let wins = 0;
   let losses = 0;
@@ -88,6 +90,7 @@ export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate
     invalid,
     crashes,
     p99ms: p99(times),
+    maxMs: times.length ? Math.max(...times) : 0,
   };
 }
 
@@ -111,7 +114,7 @@ async function main() {
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   console.log('\n=== Result ===');
   console.log(`A win rate: ${(summary.winRate * 100).toFixed(1)}% (${summary.wins}W-${summary.losses}L-${summary.ties}T / ${summary.games})`);
-  console.log(`invalid=${summary.invalid} crashes=${summary.crashes} p99=${summary.p99ms.toFixed(0)}ms`);
+  console.log(`invalid=${summary.invalid} crashes=${summary.crashes} p99=${summary.p99ms.toFixed(0)}ms max=${summary.maxMs.toFixed(0)}ms`);
   console.log(`elapsed ${seconds}s`);
   const errors = results.filter(r => r.crashed).slice(0, 3);
   for (const error of errors) console.log(`crash seed=${error.seed}: ${error.error}`);

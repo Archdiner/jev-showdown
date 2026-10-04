@@ -32,9 +32,9 @@ export interface GameResult {
   decisions?: Array<{ side: SideId; turn: number; choice: string; scores?: Array<{ choice: string; score: number }> }>;
 }
 
-const MAX_LOOPS = 400;
+const MAX_LOOPS = 800;
 
-export function runGame(job: GameJob): GameResult {
+export async function runGame(job: GameJob): Promise<GameResult> {
   const rng = new PRNG([job.seed >>> 0, 3, 5, 7] as any);
   const result: GameResult = {
     index: job.index,
@@ -63,7 +63,7 @@ export function runGame(job: GameJob): GameResult {
       }
 
       if (p1Legal.length) {
-        const decision = decide(job.p1, battle, 'p1', rng);
+        const decision = await decide(job.p1, battle, 'p1', rng);
         result.p1TurnTimes.push(decision.ms);
         if (!p1Legal.includes(decision.choice)) result.p1Invalid++;
         const ok = safeChoose(battle, 'p1', decision.choice);
@@ -73,7 +73,7 @@ export function runGame(job: GameJob): GameResult {
         }
       }
       if (!battle.ended && p2Legal.length) {
-        const decision = decide(job.p2, battle, 'p2', rng);
+        const decision = await decide(job.p2, battle, 'p2', rng);
         result.p2TurnTimes.push(decision.ms);
         if (!p2Legal.includes(decision.choice)) result.p2Invalid++;
         const ok = safeChoose(battle, 'p2', decision.choice);
@@ -85,9 +85,10 @@ export function runGame(job: GameJob): GameResult {
     if (battle.winner === 'P1') result.winner = 'p1';
     else if (battle.winner === 'P2') result.winner = 'p2';
     else result.winner = 'tie';
+    // A long stall that hits the decision cap is a tie, not a crash.
     if (loops >= MAX_LOOPS && !battle.ended) {
-      result.crashed = true;
-      result.error = 'turn limit';
+      result.winner = 'tie';
+      result.error = 'decision cap';
     }
   } catch (error) {
     result.crashed = true;

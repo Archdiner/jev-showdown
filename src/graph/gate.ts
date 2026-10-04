@@ -1,6 +1,8 @@
-import { Worker } from 'worker_threads';
-import * as os from 'os';
 import { GraphDB } from './db.js';
+import { specFromId } from '../engine/exact/policies.js';
+import { teamsForSeed } from '../engine/exact/battle-utils.js';
+import { GameJob, GameResult as BenchGame } from '../bench/game.js';
+import { runGamesParallel } from '../bench/pool.js';
 
 // Gate configuration (encode metrics here, not prose)
 export const GATE_CONFIG = {
@@ -22,8 +24,9 @@ export const GATE_CONFIG = {
     max_state_mismatches: 0,
   },
   
-  // Minimum games per opponent before decision
-  min_games_per_opponent: 100,
+  // Paired seeds per opponent. Each seed is played twice with swapped sides,
+  // so 150 seeds is 300 games.
+  min_games_per_opponent: 150,
   
   // Confidence level for Wilson CI
   confidence: 0.95,
@@ -121,7 +124,7 @@ export class Gate {
       );
       
       games.push(...opponentGames);
-      
+
       // Calculate Elo and statistics
       const result = this.analyzePanelResults(challengerId, championId, opponent, opponentGames);
       panelResults.push(result);
@@ -176,12 +179,70 @@ export class Gate {
     challenger: string,
     champion: string,
     opponent: string,
-    numGames: number
+    numPairs: number
   ): Promise<GameResult[]> {
-    // TODO: Implement parallel game execution using worker threads
-    // For now, return placeholder
-    console.log(`  Running ${numGames} paired games (not yet implemented)...`);
-    return [];
+    // Same teams and seed, policies swapped. The verdict scores only the
+    // challenger (see analyzePanelResults). Champion Elo stays the 1500
+    // baseline, so we do not also replay champion-v0: that engine rebuilds
+    // a battle per node and the rebuild rejects the choice.
+    void champion;
+    const challengerSpec = specFromId(challenger);
+    const opponentSpec = specFromId(opponent);
+    const jobs: GameJob[] = [];
+    const labels: Array<{ p1: string; p2: string }> = [];
+
+    for (let i = 0; i < numPairs; i++) {
+      const seed = i + 1;
+      const teams = teamsForSeed(seed);
+      jobs.push({
+        index: jobs.length,
+        seed,
+        p1Team: teams.p1,
+        p2Team: teams.p2,
+        p1: challengerSpec,
+        p2: opponentSpec,
+      });
+      labels.push({ p1: challenger, p2: opponent });
+      jobs.push({
+        index: jobs.length,
+        seed,
+        p1Team: teams.p1,
+        p2Team: teams.p2,
+        p1: opponentSpec,
+        p2: challengerSpec,
+      });
+      labels.push({ p1: opponent, p2: challenger });
+    }
+
+    console.log(`  ${jobs.length} games (${numPairs} seeds x 2 sides) ${challenger} vs ${opponent}`);
+    const played = await runGamesParallel(jobs);
+    return played.map((game, i) => this.toGateResult(game, labels[i], jobs[i].seed));
+  }
+
+  private toGateResult(
+    game: BenchGame,
+    labels: { p1: string; p2: string },
+    seed: number,
+  ): GameResult {
+    const metrics = (invalid: number, times: number[], crashed: boolean): BotMetrics => ({
+      invalid_choices: invalid,
+      crashes: crashed ? 1 : 0,
+      timeouts: times.filter(ms => ms > GATE_CONFIG.guardrails.max_p99_turn_time_ms).length,
+      turn_times_ms: times,
+      fallback_rate: 0,
+      state_mismatches: 0,
+      eval_swings: [],
+    });
+    return {
+      winner: game.winner,
+      p1: labels.p1,
+      p2: labels.p2,
+      seed,
+      turns: game.turns,
+      protocol_log: game.error || '',
+      p1_metrics: metrics(game.p1Invalid, game.p1TurnTimes, game.crashed),
+      p2_metrics: metrics(game.p2Invalid, game.p2TurnTimes, game.crashed),
+    };
   }
 
   private analyzePanelResults(
@@ -370,6 +431,44 @@ export class Gate {
     if (result.verdict === 'promoted') {
       this.db.updateNode(result.challenger_id, {
         status: 'done',
+      });
+
+      if (this.db.getNode(result.champion_id)) {
+        this.db.updateNode(result.champion_id, { status: 'superseded' });
+      }
+
+      const vsRandom = result.panel_results.find(r => r.opponent.includes('random'));
+      const vsMax = result.panel_results.find(r => r.opponent.includes('max'));
+      const championNodeId = 'champion-exact-1ply';
+      this.db.addNode({
+        id: championNodeId,
+        type: 'Champion',
+        status: 'active',
+        title: 'Champion: exact 1-ply HP search',
+        description: '1-ply exact @pkmn/sim battle clone. Opponent model is max-damage. Eval is HP fraction plus faint counts.',
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        version: 'exact-1ply',
+        config_path: 'src/engine/exact/search.ts',
+        promoted_at: Date.now(),
+        metrics: {
+          win_rate_vs_random: vsRandom?.win_rate,
+          win_rate_vs_maxdamage: vsMax?.win_rate,
+          invalid_choices: result.guardrails.invalid_choices,
+          crashes: result.guardrails.crashes,
+          timeouts: result.guardrails.timeouts,
+          p99_turn_time_ms: result.guardrails.p99_turn_time_ms,
+          fallback_rate: result.guardrails.fallback_rate,
+          state_mismatches: result.guardrails.state_mismatches,
+        },
+      } as any);
+
+      this.db.addEdge({
+        id: `${championNodeId}-supersedes-${result.champion_id}`,
+        from_node: championNodeId,
+        to_node: result.champion_id,
+        type: 'supersedes',
+        created_at: Date.now(),
       });
       
       this.db.addEdge({

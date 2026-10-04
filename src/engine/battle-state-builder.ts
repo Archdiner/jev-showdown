@@ -13,6 +13,7 @@ import { TeamGenerators } from '@pkmn/randoms';
  */
 export class BattleStateBuilder {
   private static initialized = false;
+  static failedSimulations = 0;
   
   constructor(private format: Format) {
     // Initialize team generator factory once
@@ -217,8 +218,11 @@ export class BattleStateBuilder {
       const winner = battle.winner ? (battle.winner === 'P1' ? 'p1' : 'p2') : undefined;
       
       return { battle, terminated, winner };
-    } catch (e) {
-      console.error('Error simulating turn:', e);
+    } catch {
+      // "Not all choices done" means this reconstructed battle rejected the
+      // choice. Count it and signal an unfinished branch. RobustSearch used
+      // to score that as a loss; see evaluateAction.
+      BattleStateBuilder.failedSimulations++;
       return { battle, terminated: true, winner: undefined };
     }
   }

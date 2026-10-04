@@ -66,7 +66,7 @@ function beliefFrom(pokemon: any) {
   };
 }
 
-function battleToState(battle: Battle, sideId: SideId): GameState {
+export function battleToState(battle: Battle, sideId: SideId): GameState {
   const me = battle.getSide(sideId);
   const foe = me.foe;
   const myActive = Math.max(0, me.pokemon.findIndex(p => p.isActive));
