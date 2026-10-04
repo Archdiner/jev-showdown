@@ -51,15 +51,29 @@ export interface ChatRequest {
   jsonSchema?: Record<string, unknown>;
 }
 
-export interface EvaluateQuestion {
-  type: 'boolean' | 'choice' | 'score';
-  instructions: string;
-  criteria?: Record<string, string> | string[];
-}
+export type EvaluateQuestion =
+  | {
+      type: 'choice';
+      instructions: string;
+      /** Required. Option key -> description. */
+      criteria: Record<string, string>;
+    }
+  | {
+      type: 'score';
+      instructions: string;
+      /** Ordered lowest to highest. Two to ten labels. */
+      criteria: string[];
+    }
+  | {
+      type: 'boolean';
+      instructions: string;
+      criteria?: { true: string; false: string };
+    };
 
 export interface EvaluateRequest {
   model: string;
-  state: unknown;
+  /** Plain text. Jev rejects a non-string state and caps this at 32k tokens. */
+  state: string;
   questions: Record<string, EvaluateQuestion>;
 }
 
@@ -78,6 +92,13 @@ export interface EvaluateResponse {
 }
 
 const RETRYABLE = new Set([408, 409, 429, 500, 502, 503, 504]);
+
+/** Process-wide. A free-tier 403 must not be retried or logged on every turn. */
+const restrictedModels = new Set<string>();
+
+export function resetRestrictionLatch(): void {
+  restrictedModels.clear();
+}
 
 export class GatewayClient {
   readonly endpoint: string;
@@ -162,6 +183,12 @@ export class GatewayClient {
   }
 
   async evaluate(request: EvaluateRequest): Promise<GatewayResult<EvaluateResponse>> {
+    const invalid = validateEvaluation(request);
+    if (invalid) {
+      const metrics = this.metrics(request.model, 0, 0, 0, 0, 'error', 0);
+      return { ok: false, error: invalid, metrics };
+    }
+
     const result = await this.request<EvaluateResponse>(
       'POST',
       '/evaluate',
@@ -190,6 +217,11 @@ export class GatewayClient {
     model: string
   ): Promise<GatewayResult<T>> {
     const started = Date.now();
+    if (restrictedModels.has(model)) {
+      const metrics = this.metrics(model, 0, 0, 0, 0, 'error', 0);
+      return { ok: false, error: 'restricted_model', metrics };
+    }
+
     if (!this.#apiKey) {
       const metrics = this.metrics(model, 0, 0, 0, 0, 'error', 0);
       return { ok: false, error: 'missing_api_key', metrics };
@@ -229,6 +261,16 @@ export class GatewayClient {
 
         const text = await response.text();
         if (!response.ok) {
+          if (isRestrictedResponse(response.status, text)) {
+            const first = !restrictedModels.has(model);
+            restrictedModels.add(model);
+            const metrics = this.metrics(model, Date.now() - started, 0, 0, 0, 'error', attempts);
+            if (first) {
+              this.#log(`[llm] model=${model} 403 RestrictedModelsError; falling back to pure search`);
+            }
+            return { ok: false, error: 'restricted_model', metrics };
+          }
+
           lastError = `http_${response.status}`;
           if (RETRYABLE.has(response.status) && attempt < this.maxRetries && this.remainingBudgetMs() > 0) {
             await this.backoff(attempt);
@@ -324,4 +366,26 @@ function numberOrZero(value: unknown): number {
 
 function isAbort(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+}
+
+function isRestrictedResponse(status: number, body: string): boolean {
+  return status === 403 && /RestrictedModelsError|restricted model/i.test(body);
+}
+
+function validateEvaluation(request: EvaluateRequest): string | null {
+  if (typeof request.state !== 'string') return 'evaluation state must be a string';
+  for (const [name, question] of Object.entries(request.questions)) {
+    if (question.type === 'choice') {
+      const criteria = question.criteria;
+      if (!criteria || Array.isArray(criteria) || Object.keys(criteria).length === 0) {
+        return `choice question ${name} requires a criteria record keyed by option`;
+      }
+    }
+    if (question.type === 'score') {
+      if (!Array.isArray(question.criteria) || question.criteria.length < 2 || question.criteria.length > 10) {
+        return `score question ${name} requires 2 to 10 ordered criteria labels`;
+      }
+    }
+  }
+  return null;
 }

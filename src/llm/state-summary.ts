@@ -34,6 +34,39 @@ export function summarizeState(state: GameState): CompactStateSummary {
   };
 }
 
+/** Jev's state budget is 32k tokens. Estimate four characters per token. */
+export const MAX_EVALUATION_STATE_TOKENS = 32_000;
+const CHARS_PER_TOKEN = 4;
+
+export function capEvaluationState(text: string): string {
+  const maxChars = MAX_EVALUATION_STATE_TOKENS * CHARS_PER_TOKEN;
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars);
+}
+
+export function evaluationStateText(summary: CompactStateSummary, candidates: AdvisorCandidate[]): string {
+  const mon = (label: string, pokemon: CompactPokemon | null): string => {
+    if (!pokemon) return `${label}: none`;
+    const moves = pokemon.revealedMoves.length > 0 ? pokemon.revealedMoves.join('/') : 'unknown';
+    return `${label}: ${pokemon.species} hp=${pokemon.hpPercent ?? '?'} status=${pokemon.status ?? 'none'} moves=${moves}`;
+  };
+  const lines = [
+    'Gen 9 Random Battle.',
+    `turn=${summary.turn} player=${summary.player}`,
+    mon('my active', summary.myActive),
+    mon('opponent active', summary.opponentActive),
+    `my bench: ${summary.myBench.map(pokemon => pokemon.species).join(', ') || 'none'}`,
+    `opponent bench: ${summary.opponentBench.map(pokemon => pokemon.species).join(', ') || 'none'}`,
+    `field weather=${summary.field.weather ?? 'none'} terrain=${summary.field.terrain ?? 'none'} trickRoom=${summary.field.trickRoom}`,
+    `hazards mine rocks=${summary.hazards.my.stealthRock} spikes=${summary.hazards.my.spikes} toxicSpikes=${summary.hazards.my.toxicSpikes}`,
+    `hazards opponent rocks=${summary.hazards.opponent.stealthRock} spikes=${summary.hazards.opponent.spikes} toxicSpikes=${summary.hazards.opponent.toxicSpikes}`,
+    `tera used mine=${summary.teraUsed.mine} opponent=${summary.teraUsed.opponent}`,
+    'candidate actions:',
+    ...candidates.map(candidate => `${candidate.id} search=${candidate.searchScore} ${candidate.label}`),
+  ];
+  return capEvaluationState(lines.join('\n'));
+}
+
 export function toAdvisorCandidates(
   scored: Array<{ action: Action; searchScore: number }>,
   topK: number

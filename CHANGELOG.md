@@ -4,7 +4,7 @@
 
 Search stays in charge. Two models sit beside it and can be turned off:
 
-- **Jev** (`typesafe-ai/jev`) scores the top search actions. Blending that advice in as a prior or a tiebreaker is off unless a gate challenger opts in (`experiments/llm-jev-prior`). A missing key or a timeout leaves the move as pure search.
+- **Jev** (`typesafe-ai/jev`) is an evaluation model. The advisor POSTs `/v1/evaluate` with a string state and typed questions (a choice for the best action, per-action scores, and booleans such as whether the opponent switches). It is not sent to chat completions. Blending that advice in as a prior or a tiebreaker is off unless a gate challenger opts in (`experiments/llm-jev-prior`). A missing key, a timeout, or a free-tier `403 RestrictedModelsError` leaves the move as pure search. The 403 is logged once and later turns do not call the network.
 - **Loss reviewer** defaults to **Grok 4.7** (`spacexai/grok-4.7`, $2 / $6 per million input / output tokens as of the 2026-10-04 gateway catalog). It writes a hypothesis into the project graph and does not change code. Claude Opus 5.5 and GPT-6.1 Sol are the recorded alternatives. Set `LOSS_REVIEWER_MODEL` to switch.
 
 ---

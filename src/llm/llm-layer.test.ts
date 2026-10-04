@@ -2,12 +2,13 @@ import { describe, it, expect } from '@jest/globals';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { GatewayClient } from './gateway-client.js';
+import { GatewayClient, resetRestrictionLatch } from './gateway-client.js';
 import { JevAdvisor } from './jev-advisor.js';
 import { blendCandidates, blendConfigForBot, chooseAction } from './blend.js';
 import { LossReviewer, formatJsonl } from './loss-reviewer.js';
 import { challengerBlendConfig, loadJevPriorExperiment } from './experiment-config.js';
 import { DEFAULT_REVIEWER_MODEL_ID, JEV_MODEL_ID, estimateCostUsd } from './models.js';
+import { MAX_EVALUATION_STATE_TOKENS } from './state-summary.js';
 import { GraphDB } from '../graph/db.js';
 import type { AdvisorCandidate } from './types.js';
 import type { GameState } from '../types/index.js';
@@ -113,6 +114,29 @@ describe('gateway client', () => {
     expect(logs.join('\n')).not.toContain(KEY);
   });
 
+  it('does not retry a restricted model and logs the fallback once', async () => {
+    resetRestrictionLatch();
+    const logs: string[] = [];
+    const script = scriptedFetch([
+      new Response(JSON.stringify({ error: { code: 'RestrictedModelsError', message: 'free tier' } }), { status: 403 }),
+      jsonResponse({ choices: [{ message: { content: 'pong' } }] }),
+    ]);
+    const client = new GatewayClient({
+      apiKey: KEY,
+      fetchImpl: script.fetch,
+      log: line => logs.push(line),
+      maxRetries: 2,
+    });
+    const first = await client.chat({ model: DEFAULT_REVIEWER_MODEL_ID, messages: [{ role: 'user', content: 'hi' }] });
+    const second = await client.chat({ model: DEFAULT_REVIEWER_MODEL_ID, messages: [{ role: 'user', content: 'again' }] });
+    expect(first.ok).toBe(false);
+    if (!first.ok) expect(first.error).toBe('restricted_model');
+    expect(second.ok).toBe(false);
+    expect(script.calls).toHaveLength(1);
+    expect(logs.filter(line => line.includes('RestrictedModelsError'))).toHaveLength(1);
+    resetRestrictionLatch();
+  });
+
   it('aborts when the request exceeds the timeout budget', async () => {
     const fetchImpl: typeof fetch = (_url, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => {
@@ -136,32 +160,99 @@ describe('gateway client', () => {
 });
 
 describe('Jev advisor', () => {
-  it('parses per-action scores and probabilities', async () => {
+  it('posts one evaluate request with a string state, a choice, scores, and a boolean', async () => {
+    resetRestrictionLatch();
+    const longLabel = 'x'.repeat(200_000);
     const script = scriptedFetch([jsonResponse({
       model: JEV_MODEL_ID,
       answers: {
-        best: { type: 'choice', choice: 'a1', probabilities: { a0: 0.25, a1: 0.75 } },
-        score_a0: { type: 'score', score: 1, probabilities: {} },
-        score_a1: { type: 'score', score: 4, probabilities: {} },
+        bestAction: { type: 'choice', choice: 'a1', probabilities: { a0: 0.25, a1: 0.75 } },
+        score_a0: { type: 'score', score: 1, probabilities: { '0': 0, '1': 1, '2': 0, '3': 0, '4': 0 } },
+        score_a1: { type: 'score', score: 4, probabilities: { '0': 0, '1': 0, '2': 0, '3': 0, '4': 1 } },
+        opponentWillSwitch: { type: 'boolean', probability: 0.2 },
       },
-      usage: { inputTokens: 100, outputTokens: 0 },
-      providerMetadata: { gateway: { cost: '0.0000042' } },
+      usage: { inputTokens: 100, outputTokens: 20 },
+      providerMetadata: { gateway: { cost: '0.0000042', marketCost: '0.0000042', generationId: 'gen_test' } },
     })]);
     const client = new GatewayClient({ apiKey: KEY, fetchImpl: script.fetch, log: () => {} });
     const advisor = new JevAdvisor(client);
-    const assessment = await advisor.advise(sampleSummary(), candidates());
+    const assessment = await advisor.advise(sampleSummary(), [
+      { ...candidates()[0], label: longLabel },
+      candidates()[1],
+    ]);
     expect(assessment.degraded).toBe(false);
     expect(assessment.probabilities.a1).toBe(0.75);
     expect(assessment.scores.a1).toBe(1);
     expect(assessment.scores.a0).toBe(0.25);
+    expect(assessment.booleans.opponentWillSwitch).toBe(0.2);
     expect(assessment.costUsd).toBeCloseTo(0.0000042);
-    expect(script.calls[0].url).toContain('/evaluate');
+    expect(script.calls).toHaveLength(1);
+    expect(script.calls[0].url).toBe('https://ai-gateway.vercel.sh/v1/evaluate');
+    expect(script.calls[0].init?.method).toBe('POST');
+    expect(script.calls[0].url).not.toContain('chat/completions');
+
     const body = JSON.parse(String(script.calls[0].init?.body));
-    expect(body.model).toBe(JEV_MODEL_ID);
-    expect(body.questions.best.type).toBe('choice');
+    expect(body.model).toBe('typesafe-ai/jev');
+    expect(typeof body.state).toBe('string');
+    expect(body.state.length).toBeLessThanOrEqual(MAX_EVALUATION_STATE_TOKENS * 4);
+    expect(body.questions.bestAction.type).toBe('choice');
+    expect(Array.isArray(body.questions.bestAction.criteria)).toBe(false);
+    expect(typeof body.questions.bestAction.criteria.a0).toBe('string');
+    expect(typeof body.questions.bestAction.criteria.a1).toBe('string');
+    expect(body.questions.opponentWillSwitch).toEqual({
+      type: 'boolean',
+      instructions: expect.any(String),
+      criteria: {
+        true: expect.any(String),
+        false: expect.any(String),
+      },
+    });
+    expect(body.questions.score_a0.type).toBe('score');
+    expect(body.questions.score_a0.criteria.length).toBeGreaterThanOrEqual(2);
+    expect(body.questions.score_a0.criteria.length).toBeLessThanOrEqual(10);
+  });
+
+  it('falls back to pure search on 403 RestrictedModelsError, logged once and not retried', async () => {
+    resetRestrictionLatch();
+    const logs: string[] = [];
+    const script = scriptedFetch([
+      new Response(JSON.stringify({ error: { code: 'RestrictedModelsError', message: 'free tier' } }), { status: 403 }),
+      jsonResponse({ answers: {} }),
+    ]);
+    const client = new GatewayClient({
+      apiKey: KEY,
+      fetchImpl: script.fetch,
+      log: line => logs.push(line),
+      maxRetries: 2,
+    });
+    const advisor = new JevAdvisor(client);
+    const first = await advisor.advise(sampleSummary(), candidates());
+    expect(first.degraded).toBe(true);
+    expect(first.reason).toBe('restricted_model');
+    expect(script.calls).toHaveLength(1);
+
+    const outcome = await chooseAction({
+      state: sampleState(),
+      legalActions: [{ type: 'move', moveIndex: 1 }, { type: 'switch', switchIndex: 2 }],
+      search: {
+        scoreActions: async () => [
+          { action: { type: 'move', moveIndex: 1 }, searchScore: 5 },
+          { action: { type: 'switch', switchIndex: 2 }, searchScore: 1 },
+        ],
+      },
+      advisor,
+      config: { mode: 'prior', priorWeight: 1, tieEpsilon: 0.05, topK: 8 },
+    });
+    expect(outcome.source).toBe('search');
+    expect(outcome.degraded).toBe(true);
+    expect(outcome.action).toEqual({ type: 'move', moveIndex: 1 });
+    expect(script.calls).toHaveLength(1);
+    expect(logs.filter(line => line.includes('RestrictedModelsError'))).toHaveLength(1);
+    resetRestrictionLatch();
   });
 
   it('degrades to an empty assessment when the call times out', async () => {
+    resetRestrictionLatch();
     const timeout = Object.assign(new Error('timeout'), { name: 'TimeoutError' });
     const script = scriptedFetch([timeout]);
     const client = new GatewayClient({
@@ -186,6 +277,7 @@ describe('blend', () => {
       model: JEV_MODEL_ID,
       scores: { a0: 0, a1: 1 },
       probabilities: { a0: 0, a1: 1 },
+      booleans: {},
       degraded: false,
       latencyMs: 1,
       costUsd: 0,
@@ -200,6 +292,7 @@ describe('blend', () => {
       model: JEV_MODEL_ID,
       scores: { a0: 0, a1: 1 },
       probabilities: { a0: 0, a1: 1 },
+      booleans: {},
       degraded: false,
       latencyMs: 1,
       costUsd: 0,
@@ -213,6 +306,7 @@ describe('blend', () => {
       model: JEV_MODEL_ID,
       scores: { a0: 0.2, a1: 0.9 },
       probabilities: { a0: 0.1, a1: 0.9 },
+      booleans: {},
       degraded: false,
       latencyMs: 1,
       costUsd: 0,
@@ -226,6 +320,7 @@ describe('blend', () => {
       model: JEV_MODEL_ID,
       scores: { a0: 0, a1: 1 },
       probabilities: { a0: 0, a1: 1 },
+      booleans: {},
       degraded: false,
       latencyMs: 1,
       costUsd: 0,
@@ -238,6 +333,7 @@ describe('blend', () => {
       model: JEV_MODEL_ID,
       scores: {},
       probabilities: {},
+      booleans: {},
       degraded: true,
       reason: 'timeout',
       latencyMs: 1,

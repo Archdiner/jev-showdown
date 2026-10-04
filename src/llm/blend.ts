@@ -107,6 +107,7 @@ export async function chooseAction(args: {
       model: 'typesafe-ai/jev',
       scores: {},
       probabilities: {},
+      booleans: {},
       degraded: true,
       reason: error instanceof Error ? error.message : 'advisor_threw',
       latencyMs: 0,

@@ -66,6 +66,8 @@ export interface AdvisorAssessment {
   model: string;
   scores: Record<string, number>;
   probabilities: Record<string, number>;
+  /** Boolean question name -> probability the answer is true. */
+  booleans: Record<string, number>;
   degraded: boolean;
   reason?: string;
   latencyMs: number;

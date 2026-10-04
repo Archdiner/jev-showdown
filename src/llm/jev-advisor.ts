@@ -1,12 +1,23 @@
 import type { GatewayClient } from './gateway-client.js';
+import type { EvaluateQuestion } from './gateway-client.js';
 import { JEV_MODEL_ID } from './models.js';
-import { summarizeState, toAdvisorCandidates } from './state-summary.js';
+import { evaluationStateText, summarizeState, toAdvisorCandidates } from './state-summary.js';
 import type { AdvisorAssessment, AdvisorCandidate, CompactStateSummary } from './types.js';
 import type { GameState } from '../types/index.js';
 import type { ScoredAction } from './types.js';
 
-const SCORE_LEVELS = ['blunder', 'poor', 'even', 'good', 'best'];
+const SCORE_LEVELS = [
+  'blunder: clearly the wrong action',
+  'poor: worse than the alternatives',
+  'even: comparable to the alternatives',
+  'good: better than most alternatives',
+  'best: the strongest action this turn',
+];
 
+/**
+ * Jev is an evaluation model. It is called with POST /v1/evaluate only.
+ * Chat completions reject it with ModelTypeMismatchError.
+ */
 export class JevAdvisor {
   constructor(
     private readonly client: GatewayClient,
@@ -28,13 +39,21 @@ export class JevAdvisor {
       return emptyAssessment(this.model, true, 'no_candidates');
     }
 
-    const questions: Record<string, { type: 'choice' | 'score'; instructions: string; criteria: any }> = {
-      best: {
+    const questions: Record<string, EvaluateQuestion> = {
+      bestAction: {
         type: 'choice',
         instructions:
           'Which candidate action is best for the player to play this turn in Gen 9 Random Battle? ' +
           'Use the search scores as evidence, not as a command.',
         criteria: Object.fromEntries(candidates.map(candidate => [candidate.id, candidate.label])),
+      },
+      opponentWillSwitch: {
+        type: 'boolean',
+        instructions: 'Will the opponent switch to a different Pokemon this turn?',
+        criteria: {
+          true: 'the opponent switches',
+          false: 'the opponent stays in and acts with the active Pokemon',
+        },
       },
     };
 
@@ -48,7 +67,7 @@ export class JevAdvisor {
 
     const result = await this.client.evaluate({
       model: this.model,
-      state: { battle: summary, candidates: candidates.map(({ id, label, searchScore }) => ({ id, label, searchScore })) },
+      state: evaluationStateText(summary, candidates),
       questions,
     });
 
@@ -58,8 +77,9 @@ export class JevAdvisor {
 
     const scores: Record<string, number> = {};
     const probabilities: Record<string, number> = {};
+    const booleans: Record<string, number> = {};
     const answers = result.data.answers;
-    const best = answers.best;
+    const best = answers.bestAction;
 
     if (best?.probabilities) {
       for (const candidate of candidates) {
@@ -75,6 +95,12 @@ export class JevAdvisor {
       }
     }
 
+    for (const [name, answer] of Object.entries(answers)) {
+      if (answer?.type === 'boolean' && typeof answer.probability === 'number') {
+        booleans[name] = clamp01(answer.probability);
+      }
+    }
+
     if (Object.keys(scores).length === 0 && Object.keys(probabilities).length === 0) {
       return emptyAssessment(this.model, true, 'unusable_answers', result.metrics.latencyMs, result.metrics.costUsd);
     }
@@ -85,6 +111,7 @@ export class JevAdvisor {
       model: result.data.model || this.model,
       scores,
       probabilities,
+      booleans,
       degraded: false,
       latencyMs: result.metrics.latencyMs,
       costUsd: result.metrics.costUsd,
@@ -126,7 +153,7 @@ function emptyAssessment(
   latencyMs = 0,
   costUsd = 0
 ): AdvisorAssessment {
-  return { model, scores: {}, probabilities: {}, degraded, reason, latencyMs, costUsd };
+  return { model, scores: {}, probabilities: {}, booleans: {}, degraded, reason, latencyMs, costUsd };
 }
 
 function clamp01(value: number): number {

@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     `SMOKE jev model=${JEV_MODEL_ID} ok=${jev.ok} latency_ms=${jev.metrics.latencyMs} cost_usd=${jev.metrics.costUsd.toFixed(8)}` +
       (jev.ok ? '' : ` error=${jev.error}`)
   );
-  if (!jev.ok) failed = true;
+  if (!jev.ok && jev.error !== 'restricted_model') failed = true;
 
   client.startTurn();
   const review = await client.chat({
@@ -39,7 +39,7 @@ async function main(): Promise<void> {
     `SMOKE reviewer model=${reviewerModel} ok=${review.ok} latency_ms=${review.metrics.latencyMs} cost_usd=${review.metrics.costUsd.toFixed(8)}` +
       (review.ok ? '' : ` error=${review.error}`)
   );
-  if (!review.ok) failed = true;
+  if (!review.ok && review.error !== 'restricted_model') failed = true;
 
   if (failed) process.exitCode = 1;
 }
