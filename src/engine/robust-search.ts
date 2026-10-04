@@ -1,7 +1,7 @@
 import { Action, GameState, BotConfig } from '../types/index.js';
 import { Evaluator } from './evaluator.js';
 import { Format } from '../types/format.js';
-import { simWrapper } from './sim-wrapper.js';
+import { SimWrapper } from './sim-wrapper.js';
 
 /**
  * Robust 2-3 ply search with determinization.
@@ -11,11 +11,13 @@ export class RobustSearch {
   private config: BotConfig;
   private evaluator: Evaluator;
   private format: Format;
+  private simWrapper: SimWrapper;
   
   constructor(config: BotConfig, evaluator: Evaluator, format: Format) {
     this.config = config;
     this.evaluator = evaluator;
     this.format = format;
+    this.simWrapper = new SimWrapper(format);
   }
   
   async search(state: GameState, legalActions: Action[]): Promise<Action> {
@@ -95,7 +97,7 @@ export class RobustSearch {
     
     for (const oppAction of oppActions) {
       // Simulate the turn with real sim mechanics
-      const result = await simWrapper.simulateTurn(state, myAction, oppAction.action);
+      const result = await this.simWrapper.simulateTurn(state, myAction, oppAction.action);
       
       if (result.terminated) {
         const value = result.winner === 'p1' ? 10000 : -10000;

@@ -77,11 +77,8 @@ async function main() {
         (request.targetOutcome === 'win' && result.bot1Wins === 1) ||
         (request.targetOutcome === 'loss' && result.bot2Wins === 1);
       
-      if (matchesOutcome) {
+      if (matchesOutcome && result.lastLog) {
         found = true;
-        
-        // Get the battle record from logger
-        const battles = logger.getRecentBattles(1);
         
         const outcome = result.bot1Wins === 1
           ? `${request.bot1Type} wins` 
@@ -89,10 +86,8 @@ async function main() {
           ? `${request.bot2Type} wins`
           : 'Tie';
         
-        // Create a fallback log since we don't capture full protocol logs yet
-        const log = battles.length > 0 && battles[0].log 
-          ? battles[0].log 
-          : createFallbackLog(request, outcome);
+        const log = result.lastLog;
+        const logSize = Buffer.byteLength(log, 'utf-8');
         
         const outputPath = path.join(outputDir, request.outputName);
         
@@ -108,7 +103,7 @@ async function main() {
           outputPath
         );
         
-        console.log(`  ✓ Saved to: ${outputPath}`);
+        console.log(`  ✓ Saved to: ${outputPath} (${(logSize / 1024).toFixed(1)} KB, ${log.split('|turn|').length - 1} turns)`);
       }
     }
     

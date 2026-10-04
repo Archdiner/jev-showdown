@@ -30,10 +30,11 @@ export class SelfPlayHarness {
     this.logger = logger;
   }
 
-  async runGames(config: SelfPlayConfig): Promise<SelfPlayResult> {
+  async runGames(config: SelfPlayConfig): Promise<SelfPlayResult & { lastLog?: string }> {
     let bot1Wins = 0;
     let bot2Wins = 0;
     let ties = 0;
+    let lastLog = '';
 
     console.log(`Starting ${config.numGames} self-play games...`);
     console.log(`Bot 1: ${config.bot1Type} vs Bot 2: ${config.bot2Type}`);
@@ -44,9 +45,10 @@ export class SelfPlayHarness {
       }
 
       const result = await this.runSingleGame(config, i);
+      lastLog = result.log;
       
-      if (result === 'p1') bot1Wins++;
-      else if (result === 'p2') bot2Wins++;
+      if (result.winner === 'p1') bot1Wins++;
+      else if (result.winner === 'p2') bot2Wins++;
       else ties++;
 
       if (config.verbose || (i + 1) % 10 === 0) {
@@ -69,13 +71,14 @@ export class SelfPlayHarness {
       ties,
       totalGames: config.numGames,
       winRate,
+      lastLog,
     };
   }
 
   private async runSingleGame(
     config: SelfPlayConfig,
     gameIndex: number
-  ): Promise<'p1' | 'p2' | 'tie'> {
+  ): Promise<{ winner: 'p1' | 'p2' | 'tie'; log: string }> {
     return new Promise((resolve) => {
       const streams = BattleStreams.getPlayerStreams(new BattleStreams.BattleStream());
       const spec = { formatid: 'gen9randombattle' as ID };
@@ -102,23 +105,30 @@ export class SelfPlayHarness {
       }
 
       let winner: 'p1' | 'p2' | 'tie' = 'tie';
+      const fullLog: string[] = [];
 
       void (async () => {
         for await (const chunk of streams.omniscient) {
+          // Capture every line from omniscient stream
+          fullLog.push(chunk);
+          
           const lines = chunk.split('\n');
           
           for (const line of lines) {
             if (line.startsWith('|win|')) {
               winner = line.includes('Bot1') ? 'p1' : 'p2';
-              resolve(winner);
+              // Wait a bit for any final messages
+              await new Promise(r => setTimeout(r, 50));
+              resolve({ winner, log: fullLog.join('') });
               return;
             } else if (line === '|tie' || line.startsWith('|tie|')) {
-              resolve('tie');
+              await new Promise(r => setTimeout(r, 50));
+              resolve({ winner: 'tie', log: fullLog.join('') });
               return;
             }
           }
         }
-        resolve(winner);
+        resolve({ winner, log: fullLog.join('') });
       })();
 
       void streams.omniscient.write(`>start ${JSON.stringify(spec)}
