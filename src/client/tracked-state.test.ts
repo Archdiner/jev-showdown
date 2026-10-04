@@ -1,5 +1,6 @@
+import { Battle } from '@pkmn/client';
 import { gen9RandomBattle } from '../formats/gen9-randombattle.js';
-import { alignToRequest } from './tracked-state.js';
+import { alignToRequest, overlayProtocol } from './tracked-state.js';
 
 function mon(name: string, details: string, condition: string, active: boolean) {
   return {
@@ -56,6 +57,67 @@ describe('alignToRequest', () => {
       'Enamorus',
     ]);
     expect(aligned.myActive).toBe(0);
+    expect(mismatches.filter(mismatch => mismatch.severity === 'error')).toEqual([]);
+  });
+
+  it('keeps a fainted active slot when the protocol active array was cleared', () => {
+    const before = {
+      side: {
+        id: 'p2',
+        pokemon: [
+          mon('Ogerpon', 'Ogerpon-Wellspring, L76, F', '174/247', true),
+          mon('Sandslash', 'Sandslash-Alola, L88, M', '224/275', false),
+        ],
+      },
+    };
+    const forceSwitch = {
+      side: {
+        id: 'p2',
+        pokemon: [
+          mon('Sandslash', 'Sandslash-Alola, L88, M', '0 fnt', true),
+          mon('Ogerpon', 'Ogerpon-Wellspring, L76, F', '174/247', false),
+        ],
+      },
+      forceSwitch: [true],
+    };
+    const snapshot = gen9RandomBattle.buildGameState(before, {
+      team: new Map(),
+      activeSpecies: null,
+      revealedMoves: new Map(),
+      revealedItems: new Map(),
+      revealedAbilities: new Map(),
+    });
+    const sandslash = {
+      ident: 'p2a: Sandslash',
+      name: 'Sandslash',
+      details: 'Sandslash-Alola, L88, M',
+      hp: 0,
+      maxhp: 275,
+      fainted: true,
+    };
+    const battle = {
+      turn: 12,
+      p2: {
+        team: [
+          sandslash,
+          {
+            ident: 'p2a: Ogerpon',
+            name: 'Ogerpon',
+            details: 'Ogerpon-Wellspring, L76, F',
+            hp: 174,
+            maxhp: 247,
+            fainted: false,
+          },
+        ],
+        active: [null],
+        lastPokemon: sandslash,
+      },
+    } as unknown as Battle;
+
+    const aligned = alignToRequest(overlayProtocol(snapshot, battle, 'p2'), forceSwitch);
+    const mismatches = gen9RandomBattle.reconcileState(aligned, forceSwitch);
+    expect(aligned.myActive).toBe(0);
+    expect(aligned.myTeam[0].species).toBe('Sandslash');
     expect(mismatches.filter(mismatch => mismatch.severity === 'error')).toEqual([]);
   });
 });

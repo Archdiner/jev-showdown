@@ -72,7 +72,9 @@ export function overlayProtocol(
     if (mon.status) slot.status = mon.status;
   }
 
-  const active = side.active[0];
+  // A faint clears side.active and leaves the fainted Pokémon in lastPokemon.
+  // The force-switch request still marks that Pokémon active.
+  const active = side.active[0] ?? (side.lastPokemon?.fainted ? side.lastPokemon : null);
   if (active) {
     const species = requestSpecies(active);
     const idx = tracked.myTeam.findIndex(candidate => candidate.species === species);
