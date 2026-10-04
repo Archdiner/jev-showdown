@@ -319,7 +319,10 @@ export class Gen9RandomBattle implements Format {
       }
       
       // Add switches if not trapped
-      if (request.side && request.side.pokemon && actions.length > 0 && !active.trapped) {
+      // Check both trapped and maybeTrapped (Shadow Tag, Arena Trap, Magnet Pull, etc.)
+      const isTrapped = active.trapped || active.maybeTrapped;
+      
+      if (request.side && request.side.pokemon && actions.length > 0 && !isTrapped) {
         const activeIndex = request.side.pokemon.findIndex((p: any) => p.active);
         
         for (let i = 0; i < request.side.pokemon.length; i++) {
