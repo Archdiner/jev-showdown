@@ -13,9 +13,9 @@
 </head>
 <body>
   <h1>Development Graph</h1>
-  <p>Exported: 2026-10-04T22:28:31.386Z</p>
+  <p>Exported: 2026-10-04T22:36:32.704Z</p>
   
-  <h2>Nodes (10)</h2>
+  <h2>Nodes (23)</h2>
   
     <div class="node Goal open">
       <strong>Goal: #1 on gen9randombattle ladder</strong>
@@ -97,8 +97,112 @@
       
     </div>
   
+    <div class="node Learning active">
+      <strong>Learning: Strict role narrowing from reveals</strong>
+      <div>Status: active</div>
+      <div>Enumerate opponent possible roles and narrow strictly from revealed moves, ability, item, Tera. Roles exclude certain moves/items (match Showdex set tab).</div>
+      
+      
+    </div>
   
-  <h2>Edges (5)</h2>
+    <div class="node Learning active">
+      <strong>Learning: Hazards are huge in randbats</strong>
+      <div>Status: active</div>
+      <div>Boots and removal are rare. Toxic Spikes wins games vs teams with few Poison types. Get setter in safely, never risk it. Don't set rocks while threat sets up. Don't sacrifice team for useless layers. If opponent has hazards and we don't, play faster.</div>
+      
+      
+    </div>
+  
+    <div class="node Learning active">
+      <strong>Learning: Preserve resources and information advantage</strong>
+      <div>Status: active</div>
+      <div>No team preview means info is advantage. Don't throw mons away to unknown threats. Don't speedrun unless matchup good or opponent hazards force it. Use Tera second. Exception: sacrificing slow, low-HP hazard setter for momentum is fine.</div>
+      
+      
+    </div>
+  
+    <div class="node Learning active">
+      <strong>Learning: Identify and preserve speed option</strong>
+      <div>Status: active</div>
+      <div>Keep fastest mon, priority, Choice Scarf, or speed booster healthy and hidden. Endgames are chip-heavy. Use wallbreakers early.</div>
+      
+      
+    </div>
+  
+    <div class="node Learning active">
+      <strong>Learning: Team-generation rules are information</strong>
+      <div>Status: active</div>
+      <div>Constraints: max 2 mons per type, max 3 weak to one type, no shared 4x weakness, only 1 Tera Blast role per team (Gen 9).</div>
+      
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Hazard differential weighted by boots/removal</strong>
+      <div>Status: open</div>
+      <div>Expert says hazards dominate randbats due to rare boots/removal. Should weight hazard advantage higher than current eval.</div>
+      
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Protect hazard setter (never risk it)</strong>
+      <div>Status: open</div>
+      <div>Expert: get setter in safely, never risk it. Current eval doesn't distinguish setter from other mons.</div>
+      
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Resource preservation (don't throw mons away)</strong>
+      <div>Status: open</div>
+      <div>Expert: don't throw mons to unknown threats. No team preview means info is advantage.</div>
+      
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Tera-second prior (opponent Teras first)</strong>
+      <div>Status: open</div>
+      <div>Expert: use Tera second. Preserves our options and forces opponent to commit first.</div>
+      
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Speed option preservation</strong>
+      <div>Status: open</div>
+      <div>Expert: identify and preserve fastest mon / priority / Scarf. Endgames are chip-heavy.</div>
+      
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Play faster when opponent has hazard advantage</strong>
+      <div>Status: open</div>
+      <div>Expert: if opponent has hazards and we don't, play faster. Don't switch as much.</div>
+      
+      
+    </div>
+  
+    <div class="node Task open">
+      <strong>Task: Implement team-generation constraints</strong>
+      <div>Status: open</div>
+      <div>Verify and enforce: max 2 mons per type, max 3 weak to one type, no shared 4x weakness, only 1 Tera Blast per team</div>
+      
+      
+    </div>
+  
+    <div class="node Task open">
+      <strong>Task: Implement strict role narrowing from reveals</strong>
+      <div>Status: open</div>
+      <div>Narrow opponent set possibilities strictly: each role excludes certain moves/items. Match Showdex behavior.</div>
+      
+      
+    </div>
+  
+  
+  <h2>Edges (18)</h2>
   <ul>
   
     <li>decision-typescript-pkmn --[supports]--> goal-ladder-1</li>
@@ -110,6 +214,32 @@
     <li>decision-exact-sim --[supports]--> goal-ladder-1</li>
   
     <li>task-full-benchmark --[tests]--> champion-v0</li>
+  
+    <li>learning-set-info-narrowing --[supports]--> goal-ladder-1</li>
+  
+    <li>learning-hazards-huge --[supports]--> goal-ladder-1</li>
+  
+    <li>learning-preserve-resources --[supports]--> goal-ladder-1</li>
+  
+    <li>learning-speed-option --[supports]--> goal-ladder-1</li>
+  
+    <li>learning-team-gen-rules --[supports]--> goal-ladder-1</li>
+  
+    <li>hyp-hazard-differential --[derived_from]--> learning-hazards-huge</li>
+  
+    <li>hyp-protect-hazard-setter --[derived_from]--> learning-hazards-huge</li>
+  
+    <li>hyp-resource-preservation --[derived_from]--> learning-preserve-resources</li>
+  
+    <li>hyp-tera-second --[derived_from]--> learning-preserve-resources</li>
+  
+    <li>hyp-speed-option-preservation --[derived_from]--> learning-speed-option</li>
+  
+    <li>hyp-tempo-switch-hazard-disadvantage --[derived_from]--> learning-hazards-huge</li>
+  
+    <li>task-team-gen-constraints --[tests]--> learning-team-gen-rules</li>
+  
+    <li>task-strict-role-narrowing --[tests]--> learning-set-info-narrowing</li>
   
   </ul>
 </body>

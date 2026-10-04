@@ -9,8 +9,34 @@ graph TD
   source-pkmn-stats["DataSource: pkmn Randbats Statistics"]
   task-full-benchmark["Task: Run full benchmark with exact "]
   task-ladder-client["Task: Make ladder client production-"]
+  learning-set-info-narrowing["Learning: Strict role narrowing from rev"]
+  learning-hazards-huge["Learning: Hazards are huge in randbats"]
+  learning-preserve-resources["Learning: Preserve resources and informa"]
+  learning-speed-option["Learning: Identify and preserve speed op"]
+  learning-team-gen-rules["Learning: Team-generation rules are info"]
+  hyp-hazard-differential["Hypothesis: Hazard differential weighted b"]
+  hyp-protect-hazard-setter["Hypothesis: Protect hazard setter (never r"]
+  hyp-resource-preservation["Hypothesis: Resource preservation (don't t"]
+  hyp-tera-second["Hypothesis: Tera-second prior (opponent Te"]
+  hyp-speed-option-preservation["Hypothesis: Speed option preservation"]
+  hyp-tempo-switch-hazard-disadvantage["Hypothesis: Play faster when opponent has "]
+  task-team-gen-constraints["Task: Implement team-generation cons"]
+  task-strict-role-narrowing["Task: Implement strict role narrowin"]
   decision-typescript-pkmn -->|supports| goal-ladder-1
   decision-mit-only -->|supports| goal-ladder-1
   decision-search-first -->|supports| goal-ladder-1
   decision-exact-sim -->|supports| goal-ladder-1
   task-full-benchmark -->|tests| champion-v0
+  learning-set-info-narrowing -->|supports| goal-ladder-1
+  learning-hazards-huge -->|supports| goal-ladder-1
+  learning-preserve-resources -->|supports| goal-ladder-1
+  learning-speed-option -->|supports| goal-ladder-1
+  learning-team-gen-rules -->|supports| goal-ladder-1
+  hyp-hazard-differential -->|derived_from| learning-hazards-huge
+  hyp-protect-hazard-setter -->|derived_from| learning-hazards-huge
+  hyp-resource-preservation -->|derived_from| learning-preserve-resources
+  hyp-tera-second -->|derived_from| learning-preserve-resources
+  hyp-speed-option-preservation -->|derived_from| learning-speed-option
+  hyp-tempo-switch-hazard-disadvantage -->|derived_from| learning-hazards-huge
+  task-team-gen-constraints -->|tests| learning-team-gen-rules
+  task-strict-role-narrowing -->|tests| learning-set-info-narrowing

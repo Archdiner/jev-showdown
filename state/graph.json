@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "exported_at": 1791152911386,
+  "exported_at": 1791153392704,
   "nodes": [
     {
       "id": "goal-ladder-1",
@@ -166,6 +166,248 @@
         "src/client/showdown-client.ts",
         "src/cli/ladder.ts"
       ]
+    },
+    {
+      "id": "learning-set-info-narrowing",
+      "type": "Learning",
+      "status": "active",
+      "title": "Strict role narrowing from reveals",
+      "description": "Enumerate opponent possible roles and narrow strictly from revealed moves, ability, item, Tera. Roles exclude certain moves/items (match Showdex set tab).",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "source": "expert",
+        "expert_credentials": "top-5 ladder, circuit grand finalist"
+      },
+      "insight": "Enumerate opponent possible roles and narrow strictly from revealed moves, ability, item, Tera. Roles exclude certain moves/items (match Showdex set tab).",
+      "evidence": "Expert: top-5 ladder, circuit grand finalist",
+      "confidence": "high"
+    },
+    {
+      "id": "learning-hazards-huge",
+      "type": "Learning",
+      "status": "active",
+      "title": "Hazards are huge in randbats",
+      "description": "Boots and removal are rare. Toxic Spikes wins games vs teams with few Poison types. Get setter in safely, never risk it. Don't set rocks while threat sets up. Don't sacrifice team for useless layers. If opponent has hazards and we don't, play faster.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "source": "expert",
+        "expert_credentials": "top-5 ladder, circuit grand finalist"
+      },
+      "insight": "Boots and removal are rare. Toxic Spikes wins games vs teams with few Poison types. Get setter in safely, never risk it. Don't set rocks while threat sets up. Don't sacrifice team for useless layers. If opponent has hazards and we don't, play faster.",
+      "evidence": "Expert: hazards dominate due to rare removal",
+      "confidence": "high"
+    },
+    {
+      "id": "learning-preserve-resources",
+      "type": "Learning",
+      "status": "active",
+      "title": "Preserve resources and information advantage",
+      "description": "No team preview means info is advantage. Don't throw mons away to unknown threats. Don't speedrun unless matchup good or opponent hazards force it. Use Tera second. Exception: sacrificing slow, low-HP hazard setter for momentum is fine.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "source": "expert",
+        "expert_credentials": "top-5 ladder, circuit grand finalist"
+      },
+      "insight": "No team preview means info is advantage. Don't throw mons away to unknown threats. Don't speedrun unless matchup good or opponent hazards force it. Use Tera second. Exception: sacrificing slow, low-HP hazard setter for momentum is fine.",
+      "evidence": "Expert: resource preservation wins games",
+      "confidence": "high"
+    },
+    {
+      "id": "learning-speed-option",
+      "type": "Learning",
+      "status": "active",
+      "title": "Identify and preserve speed option",
+      "description": "Keep fastest mon, priority, Choice Scarf, or speed booster healthy and hidden. Endgames are chip-heavy. Use wallbreakers early.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "source": "expert",
+        "expert_credentials": "top-5 ladder, circuit grand finalist"
+      },
+      "insight": "Keep fastest mon, priority, Choice Scarf, or speed booster healthy and hidden. Endgames are chip-heavy. Use wallbreakers early.",
+      "evidence": "Expert: speed control critical in endgame",
+      "confidence": "high"
+    },
+    {
+      "id": "learning-team-gen-rules",
+      "type": "Learning",
+      "status": "active",
+      "title": "Team-generation rules are information",
+      "description": "Constraints: max 2 mons per type, max 3 weak to one type, no shared 4x weakness, only 1 Tera Blast role per team (Gen 9).",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "source": "expert",
+        "expert_credentials": "top-5 ladder, circuit grand finalist"
+      },
+      "insight": "Constraints: max 2 mons per type, max 3 weak to one type, no shared 4x weakness, only 1 Tera Blast role per team (Gen 9).",
+      "evidence": "Expert + verifiable in data/random-battles/gen9/teams.ts",
+      "confidence": "high"
+    },
+    {
+      "id": "hyp-hazard-differential",
+      "type": "Hypothesis",
+      "status": "open",
+      "title": "Hazard differential weighted by boots/removal",
+      "description": "Expert says hazards dominate randbats due to rare boots/removal. Should weight hazard advantage higher than current eval.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "kill_condition": "No improvement after 200 games, or regression vs any panel member",
+        "derived_from": "learning-hazards-huge",
+        "files": [
+          "src/engine/evaluator.ts"
+        ]
+      },
+      "rationale": "Expert says hazards dominate randbats due to rare boots/removal. Should weight hazard advantage higher than current eval.",
+      "expected_effect": "+3-5% win rate by valuing hazard advantage appropriately",
+      "test_plan": "Weight hazards by: (a) count boots on our team, (b) count removal on our team, (c) same for opponent belief, (d) increase hazard value by 2-3x if opponent lacks boots/removal"
+    },
+    {
+      "id": "hyp-protect-hazard-setter",
+      "type": "Hypothesis",
+      "status": "open",
+      "title": "Protect hazard setter (never risk it)",
+      "description": "Expert: get setter in safely, never risk it. Current eval doesn't distinguish setter from other mons.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "kill_condition": "No improvement after 200 games",
+        "derived_from": "learning-hazards-huge",
+        "files": [
+          "src/engine/evaluator.ts",
+          "src/types/index.ts"
+        ]
+      },
+      "rationale": "Expert: get setter in safely, never risk it. Current eval doesn't distinguish setter from other mons.",
+      "expected_effect": "+2-4% win rate by preserving setter and getting hazards up consistently",
+      "test_plan": "Tag hazard setters in belief. Add penalty (-300) if setter at risk (low HP, bad matchup). Add bonus (+200) if setter switched in safely. Don't sacrifice setter unless slow + low HP."
+    },
+    {
+      "id": "hyp-resource-preservation",
+      "type": "Hypothesis",
+      "status": "open",
+      "title": "Resource preservation (don't throw mons away)",
+      "description": "Expert: don't throw mons to unknown threats. No team preview means info is advantage.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "kill_condition": "No improvement after 200 games, or increases avg game length >20%",
+        "derived_from": "learning-preserve-resources",
+        "files": [
+          "src/engine/evaluator.ts"
+        ]
+      },
+      "rationale": "Expert: don't throw mons to unknown threats. No team preview means info is advantage.",
+      "expected_effect": "+2-3% win rate by avoiding bad sacrifices",
+      "test_plan": "Penalize moves that risk KO when opponent has 4+ unknown mons. Add info value: bonus for knowing opponent team, penalty for letting ours die before seeing theirs. Track \"deaths to unknown threats\" metric."
+    },
+    {
+      "id": "hyp-tera-second",
+      "type": "Hypothesis",
+      "status": "open",
+      "title": "Tera-second prior (opponent Teras first)",
+      "description": "Expert: use Tera second. Preserves our options and forces opponent to commit first.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "kill_condition": "No improvement after 200 games",
+        "derived_from": "learning-preserve-resources",
+        "files": [
+          "src/engine/evaluator.ts"
+        ]
+      },
+      "rationale": "Expert: use Tera second. Preserves our options and forces opponent to commit first.",
+      "expected_effect": "+1-2% win rate by waiting for opponent Tera",
+      "test_plan": "Add Tera timing heuristic: if opponent hasn't Tera'd and we haven't, penalize our Tera moves (-150). Once opponent Teras, remove penalty."
+    },
+    {
+      "id": "hyp-speed-option-preservation",
+      "type": "Hypothesis",
+      "status": "open",
+      "title": "Speed option preservation",
+      "description": "Expert: identify and preserve fastest mon / priority / Scarf. Endgames are chip-heavy.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "kill_condition": "No improvement after 200 games",
+        "derived_from": "learning-speed-option",
+        "files": [
+          "src/engine/evaluator.ts",
+          "src/types/index.ts"
+        ]
+      },
+      "rationale": "Expert: identify and preserve fastest mon / priority / Scarf. Endgames are chip-heavy.",
+      "expected_effect": "+2-4% win rate by keeping speed control for endgame",
+      "test_plan": "Identify speed option (fastest, priority moves, Choice Scarf, speed booster). Add bonus (+150) if healthy. Add penalty (-200) if at risk of fainting. Track \"speed option survived to endgame\" metric."
+    },
+    {
+      "id": "hyp-tempo-switch-hazard-disadvantage",
+      "type": "Hypothesis",
+      "status": "open",
+      "title": "Play faster when opponent has hazard advantage",
+      "description": "Expert: if opponent has hazards and we don't, play faster. Don't switch as much.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "kill_condition": "No improvement after 200 games",
+        "derived_from": "learning-hazards-huge",
+        "files": [
+          "src/engine/evaluator.ts"
+        ]
+      },
+      "rationale": "Expert: if opponent has hazards and we don't, play faster. Don't switch as much.",
+      "expected_effect": "+1-2% win rate by adapting tempo to hazard state",
+      "test_plan": "Add tempo adjustment: if opponent has hazards and we don't, reduce switch penalty and increase attack bonus. Measure \"avg turns per game\" and \"switch rate\" vs hazard differential."
+    },
+    {
+      "id": "task-team-gen-constraints",
+      "type": "Task",
+      "status": "open",
+      "title": "Implement team-generation constraints",
+      "description": "Verify and enforce: max 2 mons per type, max 3 weak to one type, no shared 4x weakness, only 1 Tera Blast per team",
+      "created_at": 1791153124953,
+      "updated_at": 1791153381269,
+      "metadata": {
+        "priority": "high",
+        "category": "correctness"
+      },
+      "acceptance_criteria": [
+        "Verify constraints in data/random-battles/gen9/teams.ts",
+        "Implement in opponent world sampler (Format.sampleOpponentSet)",
+        "Test: sample 1000 opponent teams, all satisfy constraints",
+        "Document any discrepancies found"
+      ],
+      "files": [
+        "src/formats/gen9-randombattle.ts",
+        "src/engine/world-builder.ts"
+      ]
+    },
+    {
+      "id": "task-strict-role-narrowing",
+      "type": "Task",
+      "status": "open",
+      "title": "Implement strict role narrowing from reveals",
+      "description": "Narrow opponent set possibilities strictly: each role excludes certain moves/items. Match Showdex behavior.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153388168,
+      "metadata": {
+        "priority": "high",
+        "category": "correctness"
+      },
+      "acceptance_criteria": [
+        "Parse role definitions from sets.json (each role has specific moves/items)",
+        "When move/item/ability revealed, eliminate incompatible roles",
+        "Test: if Earthquake revealed, eliminate special-only roles",
+        "Verify: belief entropy decreases monotonically with reveals"
+      ],
+      "files": [
+        "src/formats/gen9-randombattle.ts",
+        "src/engine/belief-tracker.ts"
+      ]
     }
   ],
   "edges": [
@@ -203,6 +445,97 @@
       "to_node": "champion-v0",
       "type": "tests",
       "created_at": 1791152884349
+    },
+    {
+      "id": "learning-set-info-narrowing-supports-goal-ladder-1",
+      "from_node": "learning-set-info-narrowing",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "learning-hazards-huge-supports-goal-ladder-1",
+      "from_node": "learning-hazards-huge",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "learning-preserve-resources-supports-goal-ladder-1",
+      "from_node": "learning-preserve-resources",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "learning-speed-option-supports-goal-ladder-1",
+      "from_node": "learning-speed-option",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "learning-team-gen-rules-supports-goal-ladder-1",
+      "from_node": "learning-team-gen-rules",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "hyp-hazard-differential-derived-from-learning-hazards-huge",
+      "from_node": "hyp-hazard-differential",
+      "to_node": "learning-hazards-huge",
+      "type": "derived_from",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "hyp-protect-hazard-setter-derived-from-learning-hazards-huge",
+      "from_node": "hyp-protect-hazard-setter",
+      "to_node": "learning-hazards-huge",
+      "type": "derived_from",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "hyp-resource-preservation-derived-from-learning-preserve-resources",
+      "from_node": "hyp-resource-preservation",
+      "to_node": "learning-preserve-resources",
+      "type": "derived_from",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "hyp-tera-second-derived-from-learning-preserve-resources",
+      "from_node": "hyp-tera-second",
+      "to_node": "learning-preserve-resources",
+      "type": "derived_from",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "hyp-speed-option-preservation-derived-from-learning-speed-option",
+      "from_node": "hyp-speed-option-preservation",
+      "to_node": "learning-speed-option",
+      "type": "derived_from",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "hyp-tempo-switch-hazard-disadvantage-derived-from-learning-hazards-huge",
+      "from_node": "hyp-tempo-switch-hazard-disadvantage",
+      "to_node": "learning-hazards-huge",
+      "type": "derived_from",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "task-team-gen-constraints-tests-learning-team-gen-rules",
+      "from_node": "task-team-gen-constraints",
+      "to_node": "learning-team-gen-rules",
+      "type": "tests",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "task-strict-role-narrowing-tests-learning-set-info-narrowing",
+      "from_node": "task-strict-role-narrowing",
+      "to_node": "learning-set-info-narrowing",
+      "type": "tests",
+      "created_at": 1791153124953
     }
   ]
 }
