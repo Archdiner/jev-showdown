@@ -1,16 +1,34 @@
 # Changelog
 
-**Note**: This file is the owner-facing plain-English summary of changes. For detailed technical state, see:
-- `docs/state/CURRENT.md` - Current capabilities, metrics, known issues
-- `docs/state/NEXT.md` - Task queue
-- `docs/state/DECISIONS.md` - Architecture decisions
-- `docs/state/sessions/` - Detailed session logs
+**Note**: This file is the owner-facing plain-English summary of changes. For technical state and task queue, run:
+- `npm run graph -- status` - Current champion, metrics, frontier tasks
+- `npm run graph -- next` - Exactly one task with measurable acceptance criteria
+- View `state/graph.html` for visual graph
 
 ---
 
 # Cloud Agent Run (Oct 4, 2026)
 
-## Latest Update (Oct 4, 21:51 UTC - Commit 5522250)
+## Latest Update (Oct 4, 22:28 UTC - Commit e9673a1)
+
+### 10. Graph-Based State System with Champion/Gate ✅
+**Files**: `src/graph/*`, `state/graph.db`, `AGENTS.md` (now <80 lines)
+
+Replaced markdown docs with structured graph system:
+- **SQLite backend** (`state/graph.db`) with JSON export (`state/graph.json`)
+- **Node types**: Goal, Milestone, Task, Experiment, Hypothesis, Result, Decision, Learning, DataSource, Convention, Benchmark, Champion
+- **Typed edges**: depends_on, tests, produced, supersedes, refutes, supports, blocks, derived_from
+- **CLI commands**: `npm run graph -- <cmd>` with status, next, add, update, link, query, render
+- **Gate system** (`src/graph/gate.ts`): Tournament runner with encoded metrics (not prose)
+  - SPRT: elo0=0, elo1=+10, α=β=0.05
+  - Hard guardrails: 0 invalid/crashes/timeouts, p99<2s, fallback≤1%, mismatches=0
+  - Wilson CIs, paired games, frozen opponent panel (random-v1, maxdamage-v1)
+- **Graph seeded** with current state: goal, champion v0, 4 ADR decisions, 2 data sources, 2 tasks
+- **Artifact**: Visual graph at `/opt/cursor/artifacts/graph.html`
+
+---
+
+## Earlier Updates (Oct 4, 21:51 UTC - Commit 5522250)
 
 ### 8. Achieved 0% Fallback Rate - Exact Sim Working ✅
 **Files**: `src/engine/battle-state-builder.ts`, `src/engine/sim-wrapper.ts`, `src/bot/bot.ts`, `src/learning/self-play.ts`
