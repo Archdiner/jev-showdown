@@ -13,9 +13,9 @@
 </head>
 <body>
   <h1>Development Graph</h1>
-  <p>Exported: 2026-10-04T22:36:32.704Z</p>
+  <p>Exported: 2026-10-04T23:23:25.669Z</p>
   
-  <h2>Nodes (23)</h2>
+  <h2>Nodes (28)</h2>
   
     <div class="node Goal open">
       <strong>Goal: #1 on gen9randombattle ladder</strong>
@@ -201,8 +201,48 @@
       
     </div>
   
+    <div class="node DataSource active">
+      <strong>DataSource: Vercel AI Gateway model catalog</strong>
+      <div>Status: active</div>
+      <div>GET https://ai-gateway.vercel.sh/v1/models on 2026-10-04. Reviewer default chosen from this list.</div>
+      
+      
+    </div>
   
-  <h2>Edges (18)</h2>
+    <div class="node Task done">
+      <strong>Task: LLM advisor and loss reviewer</strong>
+      <div>Status: done</div>
+      <div>Vercel AI Gateway client, Jev advisor blend (off by default), and Grok 4.7 loss reviewer that writes hypotheses. Search engine and live client were not modified.</div>
+      <div>Commit: <code>debf11ff1e825cc0ae115ba8abf7b9a0053ba163</code></div>
+      <div>Metrics: {"smoke":"skipped","smoke_reason":"missing_VERCEL_AI_GATEWAY_KEY","reviewer_model":"spacexai/grok-4.7"}</div>
+    </div>
+  
+    <div class="node Decision done">
+      <strong>Decision: Loss reviewer defaults to Grok 4.7</strong>
+      <div>Status: done</div>
+      <div>Do not default the post-game reviewer to anthropic/claude-opus-4.5. Prefer the newest xAI Grok frontier model on the gateway.</div>
+      <div>Commit: <code>debf11ff1e825cc0ae115ba8abf7b9a0053ba163</code></div>
+      <div>Metrics: {"reviewer_model":"spacexai/grok-4.7","input_usd_per_token":"0.000002","output_usd_per_token":"0.000006","input_cache_read_usd_per_token":"0.0000005","input_usd_per_million":2,"output_usd_per_million":6,"jev_model":"typesafe-ai/jev","jev_input_usd_per_token":"0.000000042","jev_output_usd_per_token":"0","jev_input_usd_per_million":0.042,"catalog_checked_at":"2026-10-04"}</div>
+    </div>
+  
+    <div class="node Experiment open">
+      <strong>Experiment: Challenger: Jev search prior</strong>
+      <div>Status: open</div>
+      <div>Gate challenger only. Champion blend mode stays off. Degrades to pure search when the gateway key is missing or the call exceeds the turn latency budget.</div>
+      <div>Commit: <code>debf11ff1e825cc0ae115ba8abf7b9a0053ba163</code></div>
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Jev prior on top-K search actions</strong>
+      <div>Status: open</div>
+      <div>Off by default. A gate challenger may blend Jev scores into search. Missing key or timeout degrades to pure search. Not applied to the champion.</div>
+      <div>Commit: <code>debf11ff1e825cc0ae115ba8abf7b9a0053ba163</code></div>
+      
+    </div>
+  
+  
+  <h2>Edges (24)</h2>
   <ul>
   
     <li>decision-typescript-pkmn --[supports]--> goal-ladder-1</li>
@@ -240,6 +280,18 @@
     <li>task-team-gen-constraints --[tests]--> learning-team-gen-rules</li>
   
     <li>task-strict-role-narrowing --[tests]--> learning-set-info-narrowing</li>
+  
+    <li>decision-loss-reviewer-grok-4-7 --[derived_from]--> datasource-vercel-ai-gateway-models</li>
+  
+    <li>decision-loss-reviewer-grok-4-7 --[supports]--> goal-ladder-1</li>
+  
+    <li>hypothesis-jev-search-prior --[supports]--> goal-ladder-1</li>
+  
+    <li>experiment-llm-jev-prior --[tests]--> hypothesis-jev-search-prior</li>
+  
+    <li>task-llm-layer --[produced]--> experiment-llm-jev-prior</li>
+  
+    <li>task-llm-layer --[supports]--> decision-loss-reviewer-grok-4-7</li>
   
   </ul>
 </body>

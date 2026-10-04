@@ -1,0 +1,16 @@
+export { GatewayClient } from './gateway-client.js';
+export type { CallMetrics, GatewayResult, ChatRequest, EvaluateRequest } from './gateway-client.js';
+export { JevAdvisor } from './jev-advisor.js';
+export { blendCandidates, blendConfigForBot, chooseAction } from './blend.js';
+export { LossReviewer, parseFinding, readBattleSource, writeFindingAsHypothesis } from './loss-reviewer.js';
+export { loadJevPriorExperiment, challengerBlendConfig } from './experiment-config.js';
+export {
+  CATALOG,
+  DEFAULT_REVIEWER_MODEL_ID,
+  JEV_MODEL_ID,
+  catalogModel,
+  estimateCostUsd,
+  resolveReviewerModel,
+} from './models.js';
+export { DEFAULT_BLEND_CONFIG } from './types.js';
+export type { BlendConfig, BlendMode, BlendOutcome, CandidateSearch, ScoredAction } from './types.js';

@@ -1,5 +1,15 @@
 # Changelog
 
+## LLM layer (branch `cursor/llm-layer`)
+
+Search stays in charge. Two models sit beside it and can be turned off:
+
+- **Jev** (`typesafe-ai/jev`) is an evaluation model. The advisor POSTs `/v1/evaluate`. The state string is built from the dex, `@smogon/calc`, and the randbats role pool: types, Tera, ability, item, level, HP, boosts, status, speed including Scarf and boosts, per-move damage range, KO chance, accuracy, and priority, the opponent's likely moves into our active and bench, hazards, screens, weather, terrain, and each candidate's search score. Those numbers are also copied into each choice criterion. The loss reviewer has to quote that calc block and is told not to invent type matchups. Blending is off unless a gate challenger opts in (`experiments/llm-jev-prior`). A missing key, a timeout, or a free-tier `403 RestrictedModelsError` leaves the move as pure search. The 403 is logged once and later turns do not call the network.
+- **Loss reviewer** defaults to **Grok 4.7** (`spacexai/grok-4.7`, $2 / $6 per million input / output tokens as of the 2026-10-04 gateway catalog). It writes a hypothesis into the project graph and does not change code. Claude Opus 5.5 and GPT-6.1 Sol are the recorded alternatives. Set `LOSS_REVIEWER_MODEL` to switch.
+
+---
+
+
 **Note**: This file is the owner-facing plain-English summary of changes. For technical state and task queue, run:
 - `npm run graph -- status` - Current champion, metrics, frontier tasks
 - `npm run graph -- next` - Exactly one task with measurable acceptance criteria

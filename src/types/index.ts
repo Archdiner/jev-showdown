@@ -19,6 +19,7 @@ export interface RoleData {
   items?: Record<string, number>;
   teraTypes?: Record<string, number>;
   evs?: Record<string, number>;
+  nature?: string;
 }
 
 export interface SpeciesStats {
@@ -40,6 +41,8 @@ export interface PokemonBelief {
   revealedAbility?: string;
   revealedItem?: string;
   revealedTeraType?: string;
+  /** Ordered move slots. Index 0 is move 1. */
+  moves?: string[];
   stats?: {
     hp: number;
     atk: number;
