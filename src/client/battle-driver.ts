@@ -21,7 +21,7 @@ import {
   sanitizeAction,
   teamPreviewChoice,
 } from './choice.js';
-import { cloneGameState, mismatchData, overlayProtocol } from './tracked-state.js';
+import { alignToRequest, cloneGameState, mismatchData, overlayProtocol } from './tracked-state.js';
 import { safeError, toID } from './ids.js';
 
 export interface GameSummary {
@@ -105,6 +105,9 @@ export class BattleDriver extends EventEmitter {
     });
     client.on('replay', (replay: ReplayNotice) => {
       this.onReplay(replay);
+    });
+    client.on('popup', (message: string) => {
+      this.onPopup(message);
     });
   }
 
@@ -190,7 +193,7 @@ export class BattleDriver extends EventEmitter {
   private openRoom(roomId: string): RoomState {
     const battle = new Battle(this.gens);
     const tracker = new OpponentTracker(this.options.format, () => this.rooms.get(roomId)?.ourSide ?? null);
-    const log = openGameLog(this.options.logDir, roomId);
+    const log = openGameLog(this.options.logDir, `${toID(this.options.username)}-${roomId}`);
     const room: RoomState = {
       roomId,
       battle,
@@ -353,7 +356,10 @@ export class BattleDriver extends EventEmitter {
 
   private reconcile(room: RoomState, request: any): StateMismatch[] {
     if (!room.snapshot || !room.ourSide) return [];
-    const tracked = overlayProtocol(room.snapshot, room.battle, room.ourSide);
+    const tracked = alignToRequest(
+      overlayProtocol(room.snapshot, room.battle, room.ourSide),
+      request,
+    );
     return this.options.bot.reconcileState(tracked, request);
   }
 
@@ -424,6 +430,13 @@ export class BattleDriver extends EventEmitter {
     }
   }
 
+  private onPopup(message: string): void {
+    const open = [...this.rooms.values()].filter(room => !room.finalized);
+    const target = open.find(room => room.ended) ?? open[open.length - 1];
+    if (!target) return;
+    target.log.write({ type: 'popup', battleId: target.roomId, message });
+  }
+
   private onReplay(replay: ReplayNotice): void {
     const open = [...this.rooms.values()].filter(room => !room.finalized);
     const target = open.find(room => room.ended) ?? open[0];
@@ -441,7 +454,10 @@ export class BattleDriver extends EventEmitter {
     const eloAfter = room.elo?.after ?? null;
     const replayDir = this.options.replayDir ?? path.join(this.options.logDir, 'replays');
     fs.mkdirSync(replayDir, { recursive: true });
-    const localReplayPath = path.join(replayDir, `${room.roomId.replace(/[^a-zA-Z0-9_-]+/g, '_')}.log`);
+    const localReplayPath = path.join(
+      replayDir,
+      `${toID(this.options.username)}-${room.roomId.replace(/[^a-zA-Z0-9_-]+/g, '_')}.log`,
+    );
     fs.writeFileSync(localReplayPath, room.lines.join('\n'));
 
     const summary: GameSummary = {

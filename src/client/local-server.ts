@@ -24,13 +24,17 @@ export async function startLocalServer(port: number): Promise<LocalServer> {
   const previous = fs.existsSync(configPath) ? fs.readFileSync(configPath) : null;
 
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.mkdirSync(path.join(root, 'config', 'ladders'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'config', 'chat-plugins'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'logs', 'modlog'), { recursive: true });
   fs.writeFileSync(
     configPath,
     `'use strict';
 exports.port = ${port};
 exports.bindaddress = '127.0.0.1';
-exports.crashguard = false;
+exports.crashguard = true;
 exports.watchconfig = false;
+exports.repl = false;
 `,
   );
 
@@ -46,8 +50,13 @@ exports.watchconfig = false;
   );
 
   let log = '';
+  const logPath = path.join(process.cwd(), 'logs', 'local-showdown.log');
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const logStream = fs.createWriteStream(logPath, { flags: 'w' });
   const collect = (chunk: Buffer) => {
-    log += chunk.toString();
+    const text = chunk.toString();
+    log += text;
+    logStream.write(text);
     if (log.length > 20000) log = log.slice(-12000);
   };
   child.stdout?.on('data', collect);
@@ -67,6 +76,7 @@ exports.watchconfig = false;
     wsUrl: `ws://127.0.0.1:${port}/showdown/websocket`,
     stop: async () => {
       await stopProcess(child);
+      logStream.end();
       restoreConfig(configPath, previous);
     },
   };

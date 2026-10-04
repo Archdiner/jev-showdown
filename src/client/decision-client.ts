@@ -80,9 +80,7 @@ export class DecisionClient {
   }
 
   private boot(): Promise<void> {
-    const worker = new Worker(new URL('./decision-worker.ts', import.meta.url), {
-      execArgv: ['--import', 'tsx'],
-    });
+    const worker = new Worker(new URL('./decision-worker-entry.js', import.meta.url));
     this.worker = worker;
 
     return new Promise((resolve, reject) => {

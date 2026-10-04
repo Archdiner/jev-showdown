@@ -110,6 +110,7 @@ async function makePlayer(input: {
   opts: LadderOptions;
   label: string;
 }): Promise<{ client: ShowdownClient; driver: BattleDriver; decisions: DecisionClient }> {
+  fs.mkdirSync(input.opts.logDir, { recursive: true });
   const config = engineConfig(input.opts);
   const decisions = new DecisionClient(
     config,

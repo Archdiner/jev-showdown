@@ -2,9 +2,18 @@ import { Battle } from '@pkmn/client';
 import { GameState, PokemonBelief } from '../types/index.js';
 import { StateMismatch } from '../types/format.js';
 
-function speciesFromDetails(details: string | undefined): string {
-  if (!details) return 'Unknown';
-  return details.split(',')[0]?.trim() || 'Unknown';
+/**
+ * Species key used by buildGameState and reconcileState: the request ident
+ * nickname (`p1: Squawkabilly`), falling back to the details species.
+ * Details often carry a forme (`Squawkabilly-Blue`) that the ident omits.
+ */
+export function requestSpecies(mon: { ident?: string; details?: string; name?: string } | undefined): string {
+  if (!mon) return 'Unknown';
+  const fromIdent = mon.ident?.split(':')[1]?.trim().split(',')[0];
+  if (fromIdent) return fromIdent;
+  if (mon.name) return mon.name;
+  const fromDetails = mon.details?.split(',')[0]?.trim();
+  return fromDetails || 'Unknown';
 }
 
 function cloneBelief(mon: PokemonBelief): PokemonBelief {
@@ -47,7 +56,7 @@ export function overlayProtocol(
   tracked.turn = battle.turn || tracked.turn;
 
   for (const mon of side.team) {
-    const species = speciesFromDetails(mon.details);
+    const species = requestSpecies(mon);
     const idx = tracked.myTeam.findIndex(candidate => candidate.species === species);
     if (idx < 0) continue;
     const slot = tracked.myTeam[idx];
@@ -65,12 +74,41 @@ export function overlayProtocol(
 
   const active = side.active[0];
   if (active) {
-    const species = speciesFromDetails(active.details);
+    const species = requestSpecies(active);
     const idx = tracked.myTeam.findIndex(candidate => candidate.species === species);
     if (idx >= 0) tracked.myActive = idx;
   }
 
   return tracked;
+}
+
+/**
+ * Put tracked slots in the request's party order so index-based
+ * reconciliation compares the same Pokémon. Protocol HP stays attached
+ * to the species it was observed on.
+ */
+export function alignToRequest(tracked: GameState, request: any): GameState {
+  const pokemon = request?.side?.pokemon;
+  if (!Array.isArray(pokemon) || pokemon.length === 0) return tracked;
+  const aligned = cloneGameState(tracked);
+  const bySpecies = new Map(aligned.myTeam.map(mon => [mon.species, mon]));
+  const next: PokemonBelief[] = [];
+  for (const mon of pokemon) {
+    const species = requestSpecies(mon);
+    const known = species ? bySpecies.get(species) : undefined;
+    if (known) {
+      next.push(known);
+      bySpecies.delete(species);
+    }
+  }
+  for (const leftover of bySpecies.values()) next.push(leftover);
+  const activeSpecies = tracked.myTeam[tracked.myActive]?.species;
+  aligned.myTeam = next;
+  if (activeSpecies) {
+    const idx = next.findIndex(mon => mon.species === activeSpecies);
+    if (idx >= 0) aligned.myActive = idx;
+  }
+  return aligned;
 }
 
 export function mismatchData(mismatches: StateMismatch[]): Array<Record<string, unknown>> {
