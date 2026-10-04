@@ -1,12 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { RandbatsStats, SpeciesStats } from '../types/index.js';
+import { Format } from '../types/format.js';
+import { freshnessChecker } from './freshness-checker.js';
 
 export class DataLoader {
   private static instance: DataLoader;
   private sets: Record<string, any> = {};
   private stats: RandbatsStats = {};
   private loaded = false;
+  private format?: Format;
 
   private constructor() {}
 
@@ -17,14 +20,41 @@ export class DataLoader {
     return DataLoader.instance;
   }
 
-  async load(): Promise<void> {
+  /**
+   * Load data with freshness checking.
+   * Automatically refreshes if data is stale.
+   */
+  async load(format?: Format): Promise<void> {
     if (this.loaded) return;
 
-    const dataDir = path.join(process.cwd(), 'data');
+    this.format = format;
     
+    const dataDir = path.join(process.cwd(), 'data');
     const setsPath = path.join(dataDir, 'gen9-sets.json');
     const statsPath = path.join(dataDir, 'gen9-stats.json');
 
+    // Check freshness if format provided
+    if (format) {
+      try {
+        const freshnessResult = await freshnessChecker.checkAndRefresh({
+          setsUrl: format.dataSources.setsUrl,
+          statsUrl: format.dataSources.statsUrl,
+        });
+        
+        if (freshnessResult.changes.length > 0) {
+          console.log('[DataLoader] Data was refreshed with changes:');
+          freshnessResult.changes.forEach(c => console.log(`  - ${c}`));
+        }
+        
+        if (freshnessResult.warnings.length > 0) {
+          freshnessResult.warnings.forEach(w => console.warn(`  ⚠ ${w}`));
+        }
+      } catch (e) {
+        console.warn('[DataLoader] Freshness check failed, using cached data:', e);
+      }
+    }
+
+    // Load data files
     if (!fs.existsSync(setsPath) || !fs.existsSync(statsPath)) {
       throw new Error(
         'Data files not found. Run `npm run data:refresh` first.'
@@ -33,7 +63,15 @@ export class DataLoader {
 
     this.sets = JSON.parse(fs.readFileSync(setsPath, 'utf-8'));
     this.stats = JSON.parse(fs.readFileSync(statsPath, 'utf-8'));
+    
+    // Initialize format with data
+    if (format) {
+      await format.initialize({ sets: this.sets, stats: this.stats });
+    }
+    
     this.loaded = true;
+    
+    console.log(`[DataLoader] Loaded ${Object.keys(this.sets).length} species sets, ${Object.keys(this.stats).length} species stats`);
   }
 
   getSets(): Record<string, any> {

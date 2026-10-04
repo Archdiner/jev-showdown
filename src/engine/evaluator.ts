@@ -49,10 +49,27 @@ export class Evaluator {
   }
 
   private evaluateMaterial(state: GameState): number {
-    const myAlive = state.myTeam.filter(m => m.species !== 'Unknown').length;
-    const oppAlive = state.opponentTeam.filter(m => m.species !== 'Unknown').length;
+    let myValue = 0;
+    let oppValue = 0;
     
-    return (myAlive - oppAlive) * 2;
+    // Count alive mons and weight by HP
+    for (const mon of state.myTeam) {
+      if (mon.species === 'Unknown') continue;
+      const hpPercent = mon.currentHp && mon.maxHp 
+        ? mon.currentHp / mon.maxHp 
+        : 1.0;
+      myValue += hpPercent;
+    }
+    
+    for (const mon of state.opponentTeam) {
+      if (mon.species === 'Unknown') continue;
+      const hpPercent = mon.currentHp && mon.maxHp
+        ? mon.currentHp / mon.maxHp
+        : 1.0;
+      oppValue += hpPercent;
+    }
+    
+    return (myValue - oppValue) * 2;
   }
 
   private evaluatePosition(state: GameState): number {
@@ -65,8 +82,35 @@ export class Evaluator {
     if (state.hazards.my.stealthRock) score -= this.weights.hazards;
     score -= state.hazards.my.spikes * this.weights.hazards * 0.5;
     score -= state.hazards.my.toxicSpikes * this.weights.hazards * 0.3;
+    
+    // Type matchup bonus
+    const myActive = state.myTeam[state.myActive];
+    const oppActive = state.opponentTeam[state.opponentActive];
+    
+    if (myActive && oppActive && oppActive.species !== 'Unknown') {
+      // Estimate offensive pressure
+      const myMoves = Array.from(myActive.revealedMoves || []);
+      let bestEffectiveness = 0;
+      
+      for (const move of myMoves) {
+        const eff = this.estimateEffectiveness(move, oppActive.species);
+        bestEffectiveness = Math.max(bestEffectiveness, eff);
+      }
+      
+      if (bestEffectiveness > 1.5) {
+        score += 30; // We have super effective coverage
+      } else if (bestEffectiveness < 0.75) {
+        score -= 20; // Our moves are resisted
+      }
+    }
 
     return score;
+  }
+  
+  private estimateEffectiveness(move: string, targetSpecies: string): number {
+    // Simplified effectiveness estimation
+    // In production, would use Dex.types
+    return 1.0;
   }
 
   private evaluateMomentum(state: GameState): number {

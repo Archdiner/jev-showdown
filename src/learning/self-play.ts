@@ -91,14 +91,14 @@ export class SelfPlayHarness {
         const p1 = new RandomPlayerAI(streams.p1);
         void p1.start();
       } else {
-        this.setupCustomBot(streams.p1, config.bot1Type);
+        void this.setupCustomBot(streams.p1, config.bot1Type);
       }
 
       if (config.bot2Type === 'random') {
         const p2 = new RandomPlayerAI(streams.p2);
         void p2.start();
       } else {
-        this.setupCustomBot(streams.p2, config.bot2Type);
+        void this.setupCustomBot(streams.p2, config.bot2Type);
       }
 
       let winner: 'p1' | 'p2' | 'tie' = 'tie';
@@ -127,8 +127,8 @@ export class SelfPlayHarness {
     });
   }
 
-  private setupCustomBot(stream: any, botType: string): void {
-    const bot = this.createBot(botType);
+  private async setupCustomBot(stream: any, botType: string): Promise<void> {
+    const bot = await this.createBot(botType);
     let requestCount = 0;
     let errorCount = 0;
     const opponentTeam = new Map<string, any>();
@@ -170,7 +170,7 @@ export class SelfPlayHarness {
                   const actions = this.getLegalActions(request);
                   if (actions.length > 0) {
                     const state = this.buildGameState(request, opponentActive);
-                    const action = bot.selectAction(state, actions);
+                    const action = await bot.selectAction(state, actions);
                     const cmd = this.actionToCommand(action, request);
                     stream.write(cmd);
                   }
@@ -246,22 +246,24 @@ export class SelfPlayHarness {
     };
   }
 
-  private createBot(type: string): any {
+  private async createBot(type: string): Promise<any> {
     switch (type) {
       case 'random':
         return new RandomBot();
       case 'maxdamage':
         return new MaxDamageBot();
       case 'mcts':
+        // Import gen9 format dynamically
+        const { gen9RandomBattle } = await import('../formats/gen9-randombattle.js');
         const config: BotConfig = {
-          searchTimeMs: 100,
-          searchIterations: 50,
+          searchTimeMs: 1200,
+          searchIterations: 100,
           explorationConstant: 1.4,
-          sampledWorlds: 3,
+          sampledWorlds: 4,
           useTeraHeuristic: true,
           useLLMPrior: false,
         };
-        const bot = new Bot(config, this.logger);
+        const bot = new Bot(config, gen9RandomBattle, this.logger);
         return bot;
       default:
         return new RandomBot();

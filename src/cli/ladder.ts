@@ -17,7 +17,9 @@ async function main() {
   }
 
   console.log('Loading data...');
-  await dataLoader.load();
+  
+  const { gen9RandomBattle } = await import('../formats/gen9-randombattle.js');
+  await dataLoader.load(gen9RandomBattle);
 
   const config: BotConfig = {
     searchTimeMs: 5000,
@@ -29,7 +31,7 @@ async function main() {
   };
 
   const logger = new BattleLogger();
-  const bot = new Bot(config, logger);
+  const bot = new Bot(config, gen9RandomBattle, logger);
   await bot.initialize();
 
   const client = new ShowdownClient({

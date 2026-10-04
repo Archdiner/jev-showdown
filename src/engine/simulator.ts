@@ -16,23 +16,146 @@ export class BattleSimulator {
     const newState = this.cloneState(state);
     newState.turn++;
 
-    if (Math.random() < 0.05) {
-      newState.myTeam = newState.myTeam.filter(() => Math.random() > 0.15);
-      newState.opponentTeam = newState.opponentTeam.filter(() => Math.random() > 0.15);
+    const myActive = newState.myTeam[newState.myActive];
+    const oppActive = newState.opponentTeam[newState.opponentActive];
+    
+    if (!myActive || !oppActive) {
+      return { state: newState, terminated: true, winner: 'p2' };
     }
 
-    const myAlive = newState.myTeam.length;
-    const oppAlive = newState.opponentTeam.length;
+    // Handle switches first (they go before moves)
+    if (myAction.type === 'switch') {
+      newState.myActive = myAction.switchIndex - 1;
+    }
+    if (oppAction.type === 'switch') {
+      newState.opponentActive = oppAction.switchIndex - 1;
+    }
+
+    // If both switched or one switched, return state after switches
+    if (myAction.type === 'switch' || oppAction.type === 'switch') {
+      return {
+        state: newState,
+        terminated: this.checkGameOver(newState),
+        winner: this.getWinner(newState),
+      };
+    }
+
+    // Both are moves - determine move order
+    const mySpeed = myActive.stats?.spe || 100;
+    const oppSpeed = oppActive.stats?.spe || 100;
+    const myPriority = this.getMovePriority(myAction);
+    const oppPriority = this.getMovePriority(oppAction);
+    
+    const myFirst = myPriority > oppPriority || 
+                    (myPriority === oppPriority && mySpeed > oppSpeed);
+
+    // Execute moves in order
+    if (myFirst) {
+      this.executeMove(newState, 'p1', myAction);
+      if (!this.checkGameOver(newState)) {
+        this.executeMove(newState, 'p2', oppAction);
+      }
+    } else {
+      this.executeMove(newState, 'p2', oppAction);
+      if (!this.checkGameOver(newState)) {
+        this.executeMove(newState, 'p1', myAction);
+      }
+    }
 
     return {
       state: newState,
-      terminated: myAlive === 0 || oppAlive === 0,
-      winner: myAlive === 0 ? 'p2' : oppAlive === 0 ? 'p1' : undefined,
+      terminated: this.checkGameOver(newState),
+      winner: this.getWinner(newState),
     };
   }
 
+  private executeMove(state: GameState, player: 'p1' | 'p2', action: Action): void {
+    if (action.type !== 'move') return;
+
+    const attacker = player === 'p1' 
+      ? state.myTeam[state.myActive]
+      : state.opponentTeam[state.opponentActive];
+    const defender = player === 'p1'
+      ? state.opponentTeam[state.opponentActive]
+      : state.myTeam[state.myActive];
+
+    if (!attacker || !defender || !attacker.revealedMoves) return;
+
+    // Get move
+    const moves = Array.from(attacker.revealedMoves);
+    const moveIndex = action.moveIndex - 1;
+    if (moveIndex < 0 || moveIndex >= moves.length) return;
+    
+    const moveName = moves[moveIndex];
+    
+    // Calculate damage
+    const damage = this.estimateDamage(attacker, defender, moveName);
+    
+    // Apply damage
+    const currentHp = defender.currentHp || defender.maxHp || 100;
+    const maxHp = defender.maxHp || 100;
+    const newHp = Math.max(0, currentHp - damage);
+    
+    defender.currentHp = newHp;
+    defender.maxHp = maxHp;
+
+    // Check if fainted
+    if (newHp === 0) {
+      // Mark as fainted (in real implementation, would need to force switch)
+      // For now, just leave HP at 0
+    }
+  }
+
+  private getMovePriority(action: Action): number {
+    // Simplified: most moves are priority 0
+    // In real implementation, would check move data
+    return 0;
+  }
+
+  private checkGameOver(state: GameState): boolean {
+    const myAlive = state.myTeam.filter(m => 
+      m.species !== 'Unknown' && (m.currentHp === undefined || m.currentHp > 0)
+    ).length;
+    const oppAlive = state.opponentTeam.filter(m =>
+      m.species !== 'Unknown' && (m.currentHp === undefined || m.currentHp > 0)
+    ).length;
+    
+    return myAlive === 0 || oppAlive === 0;
+  }
+
+  private getWinner(state: GameState): 'p1' | 'p2' | undefined {
+    const myAlive = state.myTeam.filter(m =>
+      m.species !== 'Unknown' && (m.currentHp === undefined || m.currentHp > 0)
+    ).length;
+    const oppAlive = state.opponentTeam.filter(m =>
+      m.species !== 'Unknown' && (m.currentHp === undefined || m.currentHp > 0)
+    ).length;
+    
+    if (myAlive === 0) return 'p2';
+    if (oppAlive === 0) return 'p1';
+    return undefined;
+  }
+
   private cloneState(state: GameState): GameState {
-    return JSON.parse(JSON.stringify(state));
+    // Deep clone with Set preservation
+    return {
+      ...state,
+      myTeam: state.myTeam.map(mon => ({
+        ...mon,
+        revealedMoves: new Set(mon.revealedMoves),
+        possibleSets: new Map(mon.possibleSets),
+      })),
+      opponentTeam: state.opponentTeam.map(mon => ({
+        ...mon,
+        revealedMoves: new Set(mon.revealedMoves),
+        possibleSets: new Map(mon.possibleSets),
+      })),
+      field: { ...state.field, screens: { ...state.field.screens } },
+      hazards: {
+        my: { ...state.hazards.my },
+        opponent: { ...state.hazards.opponent },
+      },
+    };
   }
 
   estimateDamage(attacker: any, defender: any, move: string): number {

@@ -48,6 +48,18 @@ export interface PokemonBelief {
     spd: number;
     spe: number;
   };
+  currentHp?: number;
+  maxHp?: number;
+  status?: string;
+  boosts?: {
+    atk: number;
+    def: number;
+    spa: number;
+    spd: number;
+    spe: number;
+    accuracy: number;
+    evasion: number;
+  };
 }
 
 export interface GameState {
@@ -82,6 +94,15 @@ export interface EvaluationResult {
     momentum: number;
     heuristics: number;
   };
+}
+
+export interface EvaluatorWeights {
+  material: number;
+  hp: number;
+  position: number;
+  hazards: number;
+  momentum: number;
+  information: number;
 }
 
 export interface SearchNode {

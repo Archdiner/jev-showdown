@@ -1,12 +1,14 @@
 import { Action, GameState, BotConfig, BattleRecord, DecisionRecord } from '../types/index.js';
+import { Format } from '../types/format.js';
 import { BeliefTracker } from '../engine/belief-tracker.js';
-import { DeterminizedSearch } from '../engine/determinized-search.js';
+import { RobustSearch } from '../engine/robust-search.js';
 import { Evaluator } from '../engine/evaluator.js';
 import { BattleLogger } from '../learning/battle-logger.js';
 import { dataLoader } from '../data/data-loader.js';
 
 export class Bot {
   private config: BotConfig;
+  private format: Format;
   private evaluator: Evaluator;
   private beliefTracker: BeliefTracker;
   private logger: BattleLogger;
@@ -17,15 +19,16 @@ export class Bot {
     log: string[];
   };
 
-  constructor(config: BotConfig, logger: BattleLogger) {
+  constructor(config: BotConfig, format: Format, logger: BattleLogger) {
     this.config = config;
-    this.evaluator = new Evaluator();
+    this.format = format;
+    this.evaluator = new Evaluator(format.getEvaluatorWeights());
     this.beliefTracker = new BeliefTracker();
     this.logger = logger;
   }
 
   async initialize(): Promise<void> {
-    await dataLoader.load();
+    await dataLoader.load(this.format);
   }
 
   startBattle(battleId: string): void {
@@ -38,7 +41,7 @@ export class Bot {
     this.beliefTracker = new BeliefTracker();
   }
 
-  selectAction(state: GameState, legalActions: Action[]): Action {
+  async selectAction(state: GameState, legalActions: Action[]): Promise<Action> {
     if (legalActions.length === 0) {
       return { type: 'move', moveIndex: 1 };
     }
@@ -49,8 +52,8 @@ export class Bot {
 
     try {
       const startTime = Date.now();
-      const engine = new DeterminizedSearch(this.config, this.evaluator);
-      const action = engine.search(state, legalActions);
+      const engine = new RobustSearch(this.config, this.evaluator, this.format);
+      const action = await engine.search(state, legalActions);
       const timeMs = Date.now() - startTime;
 
       if (this.currentBattle) {
@@ -72,6 +75,27 @@ export class Bot {
     } catch (e) {
       console.error('Error in selectAction:', e);
       return legalActions[0];
+    }
+  }
+  
+  /**
+   * Reconcile tracked state with server's request.
+   * Logs any mismatches for debugging.
+   */
+  reconcileState(trackedState: GameState, request: any): void {
+    const mismatches = this.format.reconcileState(trackedState, request);
+    
+    if (mismatches.length > 0) {
+      console.warn(`[Bot] State mismatches detected (turn ${trackedState.turn}):`);
+      for (const mismatch of mismatches) {
+        const prefix = mismatch.severity === 'error' ? '❌' : 
+                      mismatch.severity === 'warning' ? '⚠️' : 'ℹ️';
+        console.warn(`  ${prefix} ${mismatch.field}: tracked=${mismatch.tracked}, actual=${mismatch.actual}`);
+      }
+      
+      if (this.currentBattle) {
+        this.currentBattle.log.push(`State mismatches: ${JSON.stringify(mismatches)}`);
+      }
     }
   }
 

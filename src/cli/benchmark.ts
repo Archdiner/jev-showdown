@@ -7,7 +7,8 @@ import { dataLoader } from '../data/data-loader.js';
 async function main() {
   console.log('=== Pokemon Showdown Bot Benchmark ===\n');
   console.log('Loading data...');
-  await dataLoader.load();
+  const { gen9RandomBattle } = await import('../formats/gen9-randombattle.js');
+  await dataLoader.load(gen9RandomBattle);
 
   const logger = new BattleLogger();
   const harness = new SelfPlayHarness(logger);
