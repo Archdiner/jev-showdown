@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "exported_at": 1791156189468,
+  "exported_at": 1791156205669,
   "nodes": [
     {
       "id": "goal-ladder-1",
@@ -422,13 +422,43 @@
       "reliability": "trusted"
     },
     {
+      "id": "task-llm-layer",
+      "type": "Task",
+      "status": "done",
+      "title": "LLM advisor and loss reviewer",
+      "description": "Vercel AI Gateway client, Jev advisor blend (off by default), and Grok 4.7 loss reviewer that writes hypotheses. Search engine and live client were not modified.",
+      "commit": "debf11ff1e825cc0ae115ba8abf7b9a0053ba163",
+      "created_at": 1791156182746,
+      "updated_at": 1791156205384,
+      "metrics": {
+        "smoke": "skipped",
+        "smoke_reason": "missing_VERCEL_AI_GATEWAY_KEY",
+        "reviewer_model": "spacexai/grok-4.7"
+      },
+      "acceptance_criteria": [
+        "Gateway client times out, retries, logs cost and latency, and enforces a per-turn budget without logging the key",
+        "Jev returns per-action scores and probabilities and degrades to pure search",
+        "Blend is off by default and available as a gate challenger",
+        "Loss reviewer writes a hypothesis and does not change code",
+        "Unit tests mock HTTP; live smoke runs only when VERCEL_AI_GATEWAY_KEY is set"
+      ],
+      "files": [
+        "src/llm/gateway-client.ts",
+        "src/llm/jev-advisor.ts",
+        "src/llm/blend.ts",
+        "src/llm/loss-reviewer.ts",
+        "experiments/llm-jev-prior/config.json"
+      ]
+    },
+    {
       "id": "decision-loss-reviewer-grok-4-7",
       "type": "Decision",
       "status": "done",
       "title": "Loss reviewer defaults to Grok 4.7",
       "description": "Do not default the post-game reviewer to anthropic/claude-opus-4.5. Prefer the newest xAI Grok frontier model on the gateway.",
+      "commit": "debf11ff1e825cc0ae115ba8abf7b9a0053ba163",
       "created_at": 1791156182746,
-      "updated_at": 1791156182746,
+      "updated_at": 1791156205390,
       "metrics": {
         "reviewer_model": "spacexai/grok-4.7",
         "input_usd_per_token": "0.000002",
@@ -469,13 +499,28 @@
       "consequences": "Reviewer findings are hypotheses only and are not applied to code. Jev stays the in-search advisor at typesafe-ai/jev, input $0.000000042/token ($0.042/1M) and output $0."
     },
     {
+      "id": "experiment-llm-jev-prior",
+      "type": "Experiment",
+      "status": "open",
+      "title": "Challenger: Jev search prior",
+      "description": "Gate challenger only. Champion blend mode stays off. Degrades to pure search when the gateway key is missing or the call exceeds the turn latency budget.",
+      "commit": "debf11ff1e825cc0ae115ba8abf7b9a0053ba163",
+      "created_at": 1791156182746,
+      "updated_at": 1791156205393,
+      "config_path": "experiments/llm-jev-prior/config.json",
+      "hypothesis_id": "hypothesis-jev-search-prior",
+      "predicted_effect": "+10 Elo vs the frozen panel if the prior helps, otherwise reject.",
+      "kill_condition": "Reject on any guardrail violation or if SPRT accepts H0 (no Elo gain)."
+    },
+    {
       "id": "hypothesis-jev-search-prior",
       "type": "Hypothesis",
       "status": "open",
       "title": "Jev prior on top-K search actions",
       "description": "Off by default. A gate challenger may blend Jev scores into search. Missing key or timeout degrades to pure search. Not applied to the champion.",
+      "commit": "debf11ff1e825cc0ae115ba8abf7b9a0053ba163",
       "created_at": 1791156182746,
-      "updated_at": 1791156182746,
+      "updated_at": 1791156205395,
       "metadata": {
         "autoApplied": false,
         "killCondition": "Reject if any hard guardrail fails, including timeouts or p99 >= 2s, or if SPRT accepts no difference.",
@@ -484,47 +529,6 @@
       "rationale": "Random-battle search scores are often close. A fast evaluation model can score the same top-K actions and either nudge the ranking (prior) or break ties, without replacing search.",
       "expected_effect": "Challenger Elo vs the frozen panel rises by about +10 if the prior corrects systematic mistakes, with p99 turn time still under 2s.",
       "test_plan": "Submit experiment-llm-jev-prior against the champion through the gate. Challenger config is experiments/llm-jev-prior/config.json (blend mode prior, weight 0.15, topK 8). Champion stays useLLMPrior false. Paired games, SPRT elo0=0 elo1=+10 alpha=beta=0.05."
-    },
-    {
-      "id": "experiment-llm-jev-prior",
-      "type": "Experiment",
-      "status": "open",
-      "title": "Challenger: Jev search prior",
-      "description": "Gate challenger only. Champion blend mode stays off. Degrades to pure search when the gateway key is missing or the call exceeds the turn latency budget.",
-      "created_at": 1791156182746,
-      "updated_at": 1791156182746,
-      "config_path": "experiments/llm-jev-prior/config.json",
-      "hypothesis_id": "hypothesis-jev-search-prior",
-      "predicted_effect": "+10 Elo vs the frozen panel if the prior helps, otherwise reject.",
-      "kill_condition": "Reject on any guardrail violation or if SPRT accepts H0 (no Elo gain)."
-    },
-    {
-      "id": "task-llm-layer",
-      "type": "Task",
-      "status": "done",
-      "title": "LLM advisor and loss reviewer",
-      "description": "Vercel AI Gateway client, Jev advisor blend (off by default), and Grok 4.7 loss reviewer that writes hypotheses. Search engine and live client were not modified.",
-      "created_at": 1791156182746,
-      "updated_at": 1791156182746,
-      "metrics": {
-        "smoke": "skipped",
-        "smoke_reason": "missing_VERCEL_AI_GATEWAY_KEY",
-        "reviewer_model": "spacexai/grok-4.7"
-      },
-      "acceptance_criteria": [
-        "Gateway client times out, retries, logs cost and latency, and enforces a per-turn budget without logging the key",
-        "Jev returns per-action scores and probabilities and degrades to pure search",
-        "Blend is off by default and available as a gate challenger",
-        "Loss reviewer writes a hypothesis and does not change code",
-        "Unit tests mock HTTP; live smoke runs only when VERCEL_AI_GATEWAY_KEY is set"
-      ],
-      "files": [
-        "src/llm/gateway-client.ts",
-        "src/llm/jev-advisor.ts",
-        "src/llm/blend.ts",
-        "src/llm/loss-reviewer.ts",
-        "experiments/llm-jev-prior/config.json"
-      ]
     }
   ],
   "edges": [
