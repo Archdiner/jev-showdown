@@ -273,14 +273,23 @@ export class SelfPlayHarness {
 
     if (request.forceSwitch) {
       if (request.side && request.side.pokemon) {
-        for (let i = 1; i < request.side.pokemon.length; i++) {
+        const activeIndex = request.side.pokemon.findIndex((p: any) => p.active);
+        
+        for (let i = 0; i < request.side.pokemon.length; i++) {
+          if (i === activeIndex) continue;
           const mon = request.side.pokemon[i];
           if (mon.condition && !mon.condition.includes('fnt')) {
             actions.push({ type: 'switch', switchIndex: i + 1 });
           }
         }
       }
-      return actions.length > 0 ? actions : [{ type: 'switch', switchIndex: 2 }];
+      
+      if (actions.length === 0) {
+        for (let i = 2; i <= 6; i++) {
+          actions.push({ type: 'switch', switchIndex: i });
+        }
+      }
+      return actions;
     }
 
     if (request.active && request.active[0]) {
@@ -296,8 +305,11 @@ export class SelfPlayHarness {
         }
       }
 
-      if (request.side && request.side.pokemon && actions.length > 0) {
-        for (let i = 1; i < request.side.pokemon.length; i++) {
+      if (request.side && request.side.pokemon && actions.length > 0 && !active.trapped) {
+        const activeIndex = request.side.pokemon.findIndex((p: any) => p.active);
+        
+        for (let i = 0; i < request.side.pokemon.length; i++) {
+          if (i === activeIndex) continue;
           const mon = request.side.pokemon[i];
           if (mon.condition && !mon.condition.includes('fnt')) {
             actions.push({ type: 'switch', switchIndex: i + 1 });

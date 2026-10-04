@@ -27,44 +27,57 @@ export class DeterminizedSearch {
       return legalActions[0];
     }
 
-    const startTime = Date.now();
-    const actionScores = new Map<string, number[]>();
+    const actionScores = new Map<string, number>();
 
     for (const action of legalActions) {
-      actionScores.set(this.actionKey(action), []);
-    }
-
-    const numWorlds = Math.min(this.config.sampledWorlds, 5);
-    
-    for (let world = 0; world < numWorlds; world++) {
-      if (Date.now() - startTime > this.config.searchTimeMs) break;
-
-      const worldResults = this.searchInWorld(state, legalActions);
-      
-      for (const [actionKey, value] of worldResults) {
-        const scores = actionScores.get(actionKey);
-        if (scores) {
-          scores.push(value);
-        }
-      }
+      const score = this.evaluateActionSimple(state, action);
+      actionScores.set(this.actionKey(action), score);
     }
 
     let bestAction = legalActions[0];
-    let bestAvgScore = -Infinity;
+    let bestScore = -Infinity;
 
     for (const action of legalActions) {
-      const scores = actionScores.get(this.actionKey(action)) || [];
-      const avgScore = scores.length > 0 
-        ? scores.reduce((a, b) => a + b, 0) / scores.length 
-        : 0;
-      
-      if (avgScore > bestAvgScore) {
-        bestAvgScore = avgScore;
+      const score = actionScores.get(this.actionKey(action)) || 0;
+      if (score > bestScore) {
+        bestScore = score;
         bestAction = action;
       }
     }
 
     return bestAction;
+  }
+
+  private evaluateActionSimple(state: GameState, action: Action): number {
+    if (action.type === 'switch') {
+      return 20;
+    }
+
+    const myActive = state.myTeam[state.myActive];
+    const oppActive = state.opponentTeam[state.opponentActive];
+
+    if (!myActive || !oppActive || oppActive.species === 'Unknown') {
+      return 50;
+    }
+
+    const moves = Array.from(myActive.revealedMoves);
+    if (moves.length === 0) return 50;
+
+    const moveIndex = action.moveIndex - 1;
+    const move = moves[moveIndex] || moves[0];
+
+    const damage = simulator.estimateDamage(myActive, oppActive, move);
+    
+    let score = damage;
+
+    const effectiveness = simulator.estimateDamage(myActive, oppActive, move) / 100;
+    if (effectiveness > 1.5) {
+      score += 100;
+    } else if (effectiveness < 0.75) {
+      score -= 50;
+    }
+
+    return score;
   }
 
   private searchInWorld(
