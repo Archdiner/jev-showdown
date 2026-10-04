@@ -14,6 +14,7 @@ export const NodeType = z.enum([
   'Convention',
   'Benchmark',
   'Champion',
+  'Regression',
 ]);
 
 export const NodeStatus = z.enum([
@@ -24,6 +25,7 @@ export const NodeStatus = z.enum([
   'rejected',
   'active', // for champions
   'superseded',
+  'detected', // for regressions
 ]);
 
 export const EdgeType = z.enum([
@@ -35,6 +37,8 @@ export const EdgeType = z.enum([
   'supports',
   'blocks',
   'derived_from',
+  'caused',         // experiment/commit caused regression
+  'regressed_from', // regression from previous champion
 ]);
 
 // Base node schema

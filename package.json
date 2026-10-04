@@ -11,6 +11,7 @@
     "verify": "bash scripts/verify.sh",
     "graph": "tsx src/graph/cli.ts",
     "gate": "tsx src/graph/gate-cli.ts",
+    "regressions": "tsx src/graph/regressions-cli.ts",
     "data:refresh": "tsx src/data/refresh-data.ts",
     "selfplay": "tsx src/cli/selfplay.ts",
     "ladder": "tsx src/cli/ladder.ts",
