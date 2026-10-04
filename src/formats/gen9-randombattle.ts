@@ -438,6 +438,9 @@ export class Gen9RandomBattle implements Format {
       });
     }
     
+    // Extract player ID from request
+    const playerId: 'p1' | 'p2' = request.side?.id || 'p1';
+
     return {
       myTeam,
       opponentTeam,
@@ -454,6 +457,7 @@ export class Gen9RandomBattle implements Format {
         my: { stealthRock: false, spikes: 0, toxicSpikes: 0 },
         opponent: { stealthRock: false, spikes: 0, toxicSpikes: 0 },
       },
+      playerId,
     };
   }
   
