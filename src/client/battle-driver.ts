@@ -388,7 +388,7 @@ export class BattleDriver extends EventEmitter {
 
   private async retryChoice(room: RoomState, errorLine: string): Promise<void> {
     if (/not your turn/i.test(errorLine)) return;
-    if (room.retries >= 1 || room.lastLegal.length === 0 || !room.lastRequest) return;
+    if (room.retries >= 6 || room.lastLegal.length === 0 || !room.lastRequest) return;
     const remaining = room.lastLegal.filter(action => !room.lastChoice || !sameAction(action, room.lastChoice));
     if (remaining.length === 0) return;
     room.retries += 1;

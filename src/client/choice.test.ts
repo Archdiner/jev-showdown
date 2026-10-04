@@ -53,6 +53,24 @@ describe('choice validation', () => {
     expect(isActionLegal({ type: 'switch', switchIndex: 2 }, trapped)).toBe(false);
   });
 
+  it('revival blessing passes to a fainted pokemon', () => {
+    const forced = {
+      rqid: 54,
+      forceSwitch: [true],
+      side: {
+        pokemon: [
+          { ident: 'p1: Rabsca', condition: '59/284', active: true, reviving: true },
+          { ident: 'p1: Umbreon', condition: '0 fnt', active: false },
+          { ident: 'p1: Lugia', condition: '149/275', active: false },
+        ],
+      },
+    };
+    expect(legalActionsForRequest(forced, gen9RandomBattle)).toEqual([
+      { type: 'switch', switchIndex: 2 },
+    ]);
+    expect(isActionLegal({ type: 'switch', switchIndex: 3 }, forced)).toBe(false);
+  });
+
   it('only offers switches on a force switch', () => {
     const forced = {
       rqid: 4,

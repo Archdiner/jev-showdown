@@ -52,15 +52,23 @@ function isFainted(mon: any): boolean {
   return typeof mon?.condition === 'string' && mon.condition.includes('fnt');
 }
 
+/** Revival Blessing's follow-up is a switch request whose only targets are fainted. */
+function isReviving(request: any): boolean {
+  const mons: any[] | undefined = request?.side?.pokemon;
+  return !!mons?.some(mon => mon?.reviving);
+}
+
 function isSwitchLegal(request: any, switchIndex: number): boolean {
   if (isTeamPreview(request)) return false;
   if (!Number.isInteger(switchIndex) || switchIndex < 1) return false;
   const mons: any[] | undefined = request.side?.pokemon;
   if (!mons) return false;
   const mon = mons[switchIndex - 1];
-  if (!mon || isFainted(mon)) return false;
-  if (mon.commanding) return false;
+  if (!mon || mon.commanding) return false;
 
+  if (isReviving(request)) return isFainted(mon);
+
+  if (isFainted(mon)) return false;
   const force = isForceSwitch(request);
   const active = request.active?.[0];
   const trapped = !!(active && (active.trapped || active.maybeTrapped));
