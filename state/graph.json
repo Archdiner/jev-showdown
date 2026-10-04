@@ -1,0 +1,208 @@
+{
+  "version": "1.0",
+  "exported_at": 1791152911386,
+  "nodes": [
+    {
+      "id": "goal-ladder-1",
+      "type": "Goal",
+      "status": "open",
+      "title": "#1 on gen9randombattle ladder",
+      "description": "Achieve top ranking through exact mechanics and strategic play",
+      "created_at": 1791152884349,
+      "updated_at": 1791152884349,
+      "metadata": {
+        "target_metric": "ladder_elo",
+        "target_value": 1900
+      }
+    },
+    {
+      "id": "champion-v0",
+      "type": "Champion",
+      "status": "active",
+      "title": "Champion v0: Exact Sim",
+      "description": "3-ply expectiminimax with 0% fallback, exact @pkmn/sim mechanics",
+      "commit": "f209c86",
+      "created_at": 1791152884349,
+      "updated_at": 1791152884349,
+      "metrics": {
+        "win_rate_vs_random": 1,
+        "invalid_choices": 0,
+        "crashes": 0,
+        "timeouts": 0,
+        "p99_turn_time_ms": 1500,
+        "fallback_rate": 0,
+        "state_mismatches": 0
+      },
+      "version": "v0",
+      "config_path": "src/bot/bot.ts",
+      "promoted_at": 1791152884349
+    },
+    {
+      "id": "decision-typescript-pkmn",
+      "type": "Decision",
+      "status": "done",
+      "title": "TypeScript with @pkmn ecosystem",
+      "description": "Need accurate Pokemon mechanics. Options: build from scratch, unofficial sims, or @pkmn packages.",
+      "commit": "f209c86",
+      "created_at": 1791138484349,
+      "updated_at": 1791152884349,
+      "context": "Need accurate Pokemon mechanics. Options: build from scratch, unofficial sims, or @pkmn packages.",
+      "decision": "Use TypeScript with @pkmn/sim, @pkmn/dex, @pkmn/randoms for all mechanics.",
+      "alternatives": [
+        "Python + unofficial sim",
+        "Custom simulator",
+        "JavaScript without types"
+      ],
+      "consequences": "Exact official mechanics, MIT licensed, tied to @pkmn update cycle"
+    },
+    {
+      "id": "decision-mit-only",
+      "type": "Decision",
+      "status": "done",
+      "title": "MIT-only licensing",
+      "description": "Open source project needs clear licensing.",
+      "commit": "f209c86",
+      "created_at": 1791142084349,
+      "updated_at": 1791152884349,
+      "context": "Open source project needs clear licensing.",
+      "decision": "All dependencies must be MIT, Apache-2.0, BSD, or equivalent. No GPL/AGPL.",
+      "alternatives": [
+        "Allow GPL",
+        "Proprietary code"
+      ],
+      "consequences": "Permissive reuse, excludes some ML libraries"
+    },
+    {
+      "id": "decision-search-first",
+      "type": "Decision",
+      "status": "done",
+      "title": "Search-first over LLM-first",
+      "description": "Two approaches: LLM generates moves, or traditional search.",
+      "commit": "f209c86",
+      "created_at": 1791145684349,
+      "updated_at": 1791152884349,
+      "context": "Two approaches: LLM generates moves, or traditional search.",
+      "decision": "Core uses game-tree search (expectiminimax). LLMs optional for priors only.",
+      "alternatives": [
+        "LLM-only",
+        "Pure rule-based"
+      ],
+      "consequences": "Explainable, fast, improves with eval not just data"
+    },
+    {
+      "id": "decision-exact-sim",
+      "type": "Decision",
+      "status": "done",
+      "title": "Exact sim in search, not fallback",
+      "description": "Original had 100% fallback to hand-written damage calc.",
+      "commit": "f209c86",
+      "created_at": 1791149284349,
+      "updated_at": 1791152884349,
+      "context": "Original had 100% fallback to hand-written damage calc.",
+      "decision": "Fixed Battle creation to achieve 0% fallback. Search MUST use Battle.makeChoices().",
+      "alternatives": [
+        "Accept fallback",
+        "Improve fallback approximation"
+      ],
+      "consequences": "Accurate predictions, more complex code, must keep GameState synced"
+    },
+    {
+      "id": "source-smogon-sets",
+      "type": "DataSource",
+      "status": "active",
+      "title": "Smogon Gen9 Random Battle Sets",
+      "created_at": 1791152884349,
+      "updated_at": 1791152884349,
+      "url": "https://raw.githubusercontent.com/smogon/pokemon-showdown/master/data/random-battles/gen9/sets.json",
+      "refresh_cadence": "daily",
+      "reliability": "trusted"
+    },
+    {
+      "id": "source-pkmn-stats",
+      "type": "DataSource",
+      "status": "active",
+      "title": "pkmn Randbats Statistics",
+      "created_at": 1791152884349,
+      "updated_at": 1791152884349,
+      "url": "https://pkmn.github.io/randbats/data/gen9randombattle.json",
+      "refresh_cadence": "weekly",
+      "reliability": "trusted"
+    },
+    {
+      "id": "task-full-benchmark",
+      "type": "Task",
+      "status": "open",
+      "title": "Run full benchmark with exact sim",
+      "description": "Measure true win rates with 0% fallback (300+ games vs random and max-damage)",
+      "created_at": 1791152884349,
+      "updated_at": 1791152884349,
+      "acceptance_criteria": [
+        "300+ games vs random",
+        "300+ games vs max-damage",
+        "Fallback rate stays 0.00%",
+        "Record metrics in champion node"
+      ],
+      "files": [
+        "src/cli/selfplay.ts"
+      ]
+    },
+    {
+      "id": "task-ladder-client",
+      "type": "Task",
+      "status": "in_progress",
+      "title": "Make ladder client production-ready",
+      "description": "Live ladder games with reconnection, timer-safe moves, logging",
+      "created_at": 1791152884349,
+      "updated_at": 1791152906119,
+      "acceptance_criteria": [
+        "Verify full games vs local showdown server",
+        "npm run ladder --games N --format gen9randombattle",
+        "Timer-safe submission with hard per-turn deadline",
+        "Reconnect/resume on disconnect",
+        "Log every game and decision to data store",
+        "Tag source=ladder with opponent name/rating"
+      ],
+      "files": [
+        "src/client/showdown-client.ts",
+        "src/cli/ladder.ts"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "decision-typescript-pkmn-supports-goal-ladder-1",
+      "from_node": "decision-typescript-pkmn",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791152884349
+    },
+    {
+      "id": "decision-mit-only-supports-goal-ladder-1",
+      "from_node": "decision-mit-only",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791152884349
+    },
+    {
+      "id": "decision-search-first-supports-goal-ladder-1",
+      "from_node": "decision-search-first",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791152884349
+    },
+    {
+      "id": "decision-exact-sim-supports-goal-ladder-1",
+      "from_node": "decision-exact-sim",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791152884349
+    },
+    {
+      "id": "task-full-benchmark-tests-champion-v0",
+      "from_node": "task-full-benchmark",
+      "to_node": "champion-v0",
+      "type": "tests",
+      "created_at": 1791152884349
+    }
+  ]
+}

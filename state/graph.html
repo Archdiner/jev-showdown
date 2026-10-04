@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Development Graph</title>
+  <style>
+    body { font-family: system-ui; margin: 20px; }
+    .node { border: 1px solid #ccc; padding: 10px; margin: 10px 0; border-radius: 5px; }
+    .node.Champion { background: #d4edda; }
+    .node.Goal { background: #cce5ff; }
+    .node.done { opacity: 0.6; }
+    .edges { margin-top: 10px; font-size: 0.9em; color: #666; }
+  </style>
+</head>
+<body>
+  <h1>Development Graph</h1>
+  <p>Exported: 2026-10-04T22:28:31.386Z</p>
+  
+  <h2>Nodes (10)</h2>
+  
+    <div class="node Goal open">
+      <strong>Goal: #1 on gen9randombattle ladder</strong>
+      <div>Status: open</div>
+      <div>Achieve top ranking through exact mechanics and strategic play</div>
+      
+      
+    </div>
+  
+    <div class="node Champion active">
+      <strong>Champion: Champion v0: Exact Sim</strong>
+      <div>Status: active</div>
+      <div>3-ply expectiminimax with 0% fallback, exact @pkmn/sim mechanics</div>
+      <div>Commit: <code>f209c86</code></div>
+      <div>Metrics: {"win_rate_vs_random":1,"invalid_choices":0,"crashes":0,"timeouts":0,"p99_turn_time_ms":1500,"fallback_rate":0,"state_mismatches":0}</div>
+    </div>
+  
+    <div class="node Decision done">
+      <strong>Decision: TypeScript with @pkmn ecosystem</strong>
+      <div>Status: done</div>
+      <div>Need accurate Pokemon mechanics. Options: build from scratch, unofficial sims, or @pkmn packages.</div>
+      <div>Commit: <code>f209c86</code></div>
+      
+    </div>
+  
+    <div class="node Decision done">
+      <strong>Decision: MIT-only licensing</strong>
+      <div>Status: done</div>
+      <div>Open source project needs clear licensing.</div>
+      <div>Commit: <code>f209c86</code></div>
+      
+    </div>
+  
+    <div class="node Decision done">
+      <strong>Decision: Search-first over LLM-first</strong>
+      <div>Status: done</div>
+      <div>Two approaches: LLM generates moves, or traditional search.</div>
+      <div>Commit: <code>f209c86</code></div>
+      
+    </div>
+  
+    <div class="node Decision done">
+      <strong>Decision: Exact sim in search, not fallback</strong>
+      <div>Status: done</div>
+      <div>Original had 100% fallback to hand-written damage calc.</div>
+      <div>Commit: <code>f209c86</code></div>
+      
+    </div>
+  
+    <div class="node DataSource active">
+      <strong>DataSource: Smogon Gen9 Random Battle Sets</strong>
+      <div>Status: active</div>
+      
+      
+      
+    </div>
+  
+    <div class="node DataSource active">
+      <strong>DataSource: pkmn Randbats Statistics</strong>
+      <div>Status: active</div>
+      
+      
+      
+    </div>
+  
+    <div class="node Task open">
+      <strong>Task: Run full benchmark with exact sim</strong>
+      <div>Status: open</div>
+      <div>Measure true win rates with 0% fallback (300+ games vs random and max-damage)</div>
+      
+      
+    </div>
+  
+    <div class="node Task in_progress">
+      <strong>Task: Make ladder client production-ready</strong>
+      <div>Status: in_progress</div>
+      <div>Live ladder games with reconnection, timer-safe moves, logging</div>
+      
+      
+    </div>
+  
+  
+  <h2>Edges (5)</h2>
+  <ul>
+  
+    <li>decision-typescript-pkmn --[supports]--> goal-ladder-1</li>
+  
+    <li>decision-mit-only --[supports]--> goal-ladder-1</li>
+  
+    <li>decision-search-first --[supports]--> goal-ladder-1</li>
+  
+    <li>decision-exact-sim --[supports]--> goal-ladder-1</li>
+  
+    <li>task-full-benchmark --[tests]--> champion-v0</li>
+  
+  </ul>
+</body>
+</html>

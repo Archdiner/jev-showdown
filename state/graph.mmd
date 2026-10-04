@@ -1,0 +1,16 @@
+graph TD
+  goal-ladder-1{{"Goal: #1 on gen9randombattle ladder"}}
+  champion-v0(["Champion: Champion v0: Exact Sim"])
+  decision-typescript-pkmn["Decision: TypeScript with @pkmn ecosyste"]
+  decision-mit-only["Decision: MIT-only licensing"]
+  decision-search-first["Decision: Search-first over LLM-first"]
+  decision-exact-sim["Decision: Exact sim in search, not fallb"]
+  source-smogon-sets["DataSource: Smogon Gen9 Random Battle Sets"]
+  source-pkmn-stats["DataSource: pkmn Randbats Statistics"]
+  task-full-benchmark["Task: Run full benchmark with exact "]
+  task-ladder-client["Task: Make ladder client production-"]
+  decision-typescript-pkmn -->|supports| goal-ladder-1
+  decision-mit-only -->|supports| goal-ladder-1
+  decision-search-first -->|supports| goal-ladder-1
+  decision-exact-sim -->|supports| goal-ladder-1
+  task-full-benchmark -->|tests| champion-v0
