@@ -284,6 +284,9 @@ export class SelfPlayHarness {
       revealedMoves: new Set<string>(),
     }))];
 
+    // Extract player ID from request
+    const playerId: 'p1' | 'p2' = request.side?.id || 'p1';
+
     return {
       myTeam,
       opponentTeam,
@@ -300,6 +303,7 @@ export class SelfPlayHarness {
         my: { stealthRock: false, spikes: 0, toxicSpikes: 0 },
         opponent: { stealthRock: false, spikes: 0, toxicSpikes: 0 },
       },
+      playerId,
     };
   }
 

@@ -103,12 +103,24 @@ export class RobustSearch {
     let totalValue = 0;
     let totalWeight = 0;
     
+    // Determine if we're p1 or p2 (default to p1 if not specified)
+    const weAreP1 = !state.playerId || state.playerId === 'p1';
+    
     for (const oppAction of oppActions) {
       // Simulate the turn with real sim mechanics
-      const result = await this.simWrapper.simulateTurn(state, myAction, oppAction.action);
+      // SimWrapper expects (p1Action, p2Action), so map correctly
+      const p1Action = weAreP1 ? myAction : oppAction.action;
+      const p2Action = weAreP1 ? oppAction.action : myAction;
+      const result = await this.simWrapper.simulateTurn(state, p1Action, p2Action);
       
       if (result.terminated) {
-        const value = result.winner === 'p1' ? 10000 : -10000;
+        // Evaluate terminal state from our perspective
+        let value: number;
+        if (result.winner === (weAreP1 ? 'p1' : 'p2')) {
+          value = 10000;  // We won
+        } else {
+          value = -10000;  // We lost
+        }
         totalValue += value * oppAction.weight;
         totalWeight += oppAction.weight;
       } else {

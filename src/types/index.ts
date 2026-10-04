@@ -80,6 +80,7 @@ export interface GameState {
     my: { stealthRock: boolean; spikes: number; toxicSpikes: number };
     opponent: { stealthRock: boolean; spikes: number; toxicSpikes: number };
   };
+  playerId?: 'p1' | 'p2';
 }
 
 export type Action = 
