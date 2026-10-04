@@ -29,54 +29,86 @@ export class SearchEngine {
       return legalActions[0];
     }
 
-    const actionScores = new Map<string, number>();
+    const actionScores = new Map<string, { total: number; samples: number }>();
     
     for (const action of legalActions) {
-      let score = 0;
-      
-      if (action.type === 'move') {
-        const myActive = state.myTeam[state.myActive];
-        const oppActive = state.opponentTeam[state.opponentActive];
-        
-        if (myActive && oppActive) {
-          const moves = Array.from(myActive.revealedMoves);
-          const moveIndex = action.moveIndex - 1;
-          const move = moves[moveIndex] || 'Tackle';
-          
-          const damage = simulator.estimateDamage(myActive, oppActive, move);
-          score += damage / 10;
-        } else {
-          score += 5;
-        }
-      } else {
-        score = 2;
-      }
+      actionScores.set(this.actionKey(action), { total: 0, samples: 0 });
+    }
 
-      const oppAction = this.sampleOpponentAction(state);
-      const result = simulator.simulateAction(state, action, oppAction);
-      
-      if (result.terminated) {
-        score += result.winner === 'p1' ? 100 : -100;
-      } else {
-        score += this.evaluator.evaluate(result.state).score / 10;
-      }
+    const startTime = Date.now();
+    let iterations = 0;
 
-      actionScores.set(this.actionKey(action), score);
+    while (
+      Date.now() - startTime < this.config.searchTimeMs &&
+      iterations < this.config.searchIterations
+    ) {
+      for (const action of legalActions) {
+        const score = this.evaluateAction(state, action);
+        const scores = actionScores.get(this.actionKey(action))!;
+        scores.total += score;
+        scores.samples++;
+      }
+      iterations++;
     }
 
     let bestAction = legalActions[0];
-    let bestScore = -Infinity;
+    let bestAvgScore = -Infinity;
 
     for (const action of legalActions) {
-      const score = actionScores.get(this.actionKey(action)) || 0;
+      const scores = actionScores.get(this.actionKey(action))!;
+      const avgScore = scores.samples > 0 ? scores.total / scores.samples : 0;
       
-      if (score > bestScore) {
-        bestScore = score;
+      if (avgScore > bestAvgScore) {
+        bestAvgScore = avgScore;
         bestAction = action;
       }
     }
 
     return bestAction;
+  }
+
+  private evaluateAction(state: GameState, action: Action): number {
+    let score = 0;
+
+    if (action.type === 'move') {
+      const myActive = state.myTeam[state.myActive];
+      const oppActive = state.opponentTeam[state.opponentActive];
+      
+      if (myActive && oppActive) {
+        const moves = Array.from(myActive.revealedMoves);
+        const moveIndex = action.moveIndex - 1;
+        const move = moves[moveIndex] || 'Tackle';
+        
+        const damage = simulator.estimateDamage(myActive, oppActive, move);
+        score += damage / 5;
+
+        const effectiveness = simulator.estimateDamage(myActive, oppActive, move) / 100;
+        if (effectiveness > 1.5) {
+          score += 10;
+        } else if (effectiveness < 0.75) {
+          score -= 5;
+        }
+      } else {
+        score += 10;
+      }
+    } else {
+      const myActive = state.myTeam[action.switchIndex - 1];
+      if (myActive) {
+        score += 5;
+      }
+    }
+
+    const oppAction = this.sampleOpponentAction(state);
+    const result = simulator.simulateAction(state, action, oppAction);
+    
+    if (result.terminated) {
+      score += result.winner === 'p1' ? 200 : -200;
+    } else {
+      const evalScore = this.evaluator.evaluate(result.state).score;
+      score += evalScore / 5;
+    }
+
+    return score;
   }
 
   private sampleOpponentAction(state: GameState): Action {

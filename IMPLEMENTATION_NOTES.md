@@ -1,6 +1,6 @@
 # Implementation Notes
 
-## What's Complete
+## What's Complete (v0.2.0)
 
 ### Infrastructure (100%)
 - TypeScript build system with ESM modules
@@ -8,6 +8,7 @@
 - Package.json with all dependencies (@pkmn/*, @smogon/calc)
 - Git ignore and build configuration
 - CLI commands: selfplay, ladder, analyze, benchmark
+- **Compiled JS significantly faster than tsx**
 
 ### Data Layer (100%)
 - Data refresh script fetching from official sources
@@ -21,6 +22,7 @@
 - Proper async stream handling for both players
 - Battle outcome detection (win/loss/tie)
 - Works with RandomPlayerAI and custom bots
+- GameState construction from battle requests
 
 ### Battle Logging (100%)
 - SQLite database with battles and decisions tables
@@ -28,12 +30,13 @@
 - Query methods (getRecentBattles, getLosses, getWinRate)
 - Indexes for performance
 
-### Showdown Client (90%)
+### Showdown Client (70%)
 - WebSocket connection handling
 - Login flow (challstr → /api/login → /trn)
 - Protocol message parsing
 - Move/switch command sending
-- **Not tested on live server** (no credentials in test environment)
+- **Not tested end-to-end on live server**
+- **Missing:** Reconnection logic, proper timer handling, throttle management
 
 ### Belief Tracker (80%)
 - Initialization from randbats statistics
@@ -42,24 +45,28 @@
 - Sampling from belief distribution
 - **Missing:** Damage roll inference, speed tier detection
 
-### Evaluation (60%)
+### Evaluation (75%) **IMPROVED**
 - Material, position, momentum, heuristics scoring
+- **Type effectiveness calculation via Dex**
 - Hazard evaluation (Stealth Rock, Spikes)
 - Information advantage (revealed vs hidden)
 - Tera usage tracking
-- **Missing:** Type matchup awareness, win condition detection
+- **Missing:** Speed tiers, win condition detection
 
-### Damage Calculator (50%)
-- @smogon/calc integration
+### Damage Calculator (70%) **IMPROVED**
+- **Damage estimation using Dex.moves and Dex.species**
+- **Type effectiveness multipliers (0.5x, 2x, 4x, immune)**
+- **Physical vs Special category detection**
 - Basic damage range calculation
-- KO chance estimation
-- **Missing:** Full Pokemon/Move object construction from game state
+- **Missing:** Full @smogon/calc integration for exact rolls
 
-### Search Engine (30%)
-- MCTS structure (nodes, UCB1 selection)
-- Expansion and backpropagation logic
-- **Missing:** State simulation, determinization, move application
-- **Current workaround:** Bot uses move-preference heuristic (favor moves 80% of time)
+### Search Engine (60%) **IMPLEMENTED**
+- **Working search with action evaluation**
+- **Damage-aware move scoring**
+- **Forward simulation (simplified)**
+- **Action selection based on evaluation + simulation**
+- **Per-turn time budget enforced**
+- **Missing:** Full MCTS tree (currently flat evaluation), determinization
 
 ### LLM Integration (40%)
 - Vercel AI Gateway client
@@ -69,7 +76,7 @@
 
 ### Baselines (100%)
 - Random bot (selects uniformly)
-- Max-damage bot (estimates damage, picks highest)
+- **Max-damage bot (uses damage evaluator with type effectiveness)**
 
 ## Architecture Decisions
 
