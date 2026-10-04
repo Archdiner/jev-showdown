@@ -20,6 +20,14 @@ export class RobustSearch {
     this.simWrapper = new SimWrapper(format);
   }
   
+  getFallbackStats(): { fallbackCount: number; totalCalls: number; fallbackRate: number } {
+    return this.simWrapper.getFallbackStats();
+  }
+  
+  resetFallbackStats(): void {
+    this.simWrapper.resetStats();
+  }
+  
   async search(state: GameState, legalActions: Action[]): Promise<Action> {
     if (legalActions.length === 0) {
       return { type: 'move', moveIndex: 1 };

@@ -11,9 +11,24 @@ export interface SimResult {
 
 export class SimWrapper {
   private builder: BattleStateBuilder;
+  private fallbackCount: number = 0;
+  private totalCalls: number = 0;
   
   constructor(format: Format) {
     this.builder = new BattleStateBuilder(format);
+  }
+  
+  getFallbackStats(): { fallbackCount: number; totalCalls: number; fallbackRate: number } {
+    return {
+      fallbackCount: this.fallbackCount,
+      totalCalls: this.totalCalls,
+      fallbackRate: this.totalCalls > 0 ? this.fallbackCount / this.totalCalls : 0,
+    };
+  }
+  
+  resetStats(): void {
+    this.fallbackCount = 0;
+    this.totalCalls = 0;
   }
   
   async simulateTurn(
@@ -21,10 +36,13 @@ export class SimWrapper {
     p1Action: Action,
     p2Action: Action
   ): Promise<SimResult> {
+    this.totalCalls++;
+    
     try {
       const battle = await this.builder.createBattle(state);
       
       if (!battle) {
+        this.fallbackCount++;
         return simulator.simulateAction(state, p1Action, p2Action);
       }
       
@@ -41,6 +59,7 @@ export class SimWrapper {
         winner: result.winner,
       };
     } catch (e) {
+      this.fallbackCount++;
       return simulator.simulateAction(state, p1Action, p2Action);
     }
   }

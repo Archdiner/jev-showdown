@@ -12,6 +12,7 @@ export class Bot {
   private evaluator: Evaluator;
   private beliefTracker: BeliefTracker;
   private logger: BattleLogger;
+  private searchEngine: RobustSearch;
   private currentBattle?: {
     id: string;
     startTime: number;
@@ -25,6 +26,7 @@ export class Bot {
     this.evaluator = new Evaluator(format.getEvaluatorWeights());
     this.beliefTracker = new BeliefTracker();
     this.logger = logger;
+    this.searchEngine = new RobustSearch(config, this.evaluator, format);
   }
 
   async initialize(): Promise<void> {
@@ -52,8 +54,7 @@ export class Bot {
 
     try {
       const startTime = Date.now();
-      const engine = new RobustSearch(this.config, this.evaluator, this.format);
-      const action = await engine.search(state, legalActions);
+      const action = await this.searchEngine.search(state, legalActions);
       const timeMs = Date.now() - startTime;
 
       if (this.currentBattle) {
@@ -140,5 +141,13 @@ export class Bot {
 
   getConfig(): BotConfig {
     return { ...this.config };
+  }
+  
+  getFallbackStats(): { fallbackCount: number; totalCalls: number; fallbackRate: number } {
+    return this.searchEngine.getFallbackStats();
+  }
+  
+  resetFallbackStats(): void {
+    this.searchEngine.resetFallbackStats();
   }
 }

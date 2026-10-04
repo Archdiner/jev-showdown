@@ -1,7 +1,9 @@
-import { Battle, BattleStreams, Teams, Dex } from '@pkmn/sim';
+import { Battle, BattleStreams, Teams } from '@pkmn/sim';
+import { Dex } from '@pkmn/dex';
 import { ID } from '@pkmn/data';
 import { GameState, PokemonBelief, Action } from '../types/index.js';
 import { Format } from '../types/format.js';
+import { TeamGenerators } from '@pkmn/randoms';
 
 /**
  * Build real @pkmn/sim Battle objects from GameState for exact forward simulation.
@@ -10,7 +12,15 @@ import { Format } from '../types/format.js';
  * (HP, status, boosts, hazards, field, active, fainted) to match current position.
  */
 export class BattleStateBuilder {
-  constructor(private format: Format) {}
+  private static initialized = false;
+  
+  constructor(private format: Format) {
+    // Initialize team generator factory once
+    if (!BattleStateBuilder.initialized) {
+      Teams.setGeneratorFactory(TeamGenerators);
+      BattleStateBuilder.initialized = true;
+    }
+  }
   
   /**
    * Create a Battle object from current GameState.
@@ -26,25 +36,37 @@ export class BattleStateBuilder {
         return null;
       }
       
-      // Create battle stream
-      const stream = new BattleStreams.BattleStream();
+      // Parse teams
+      const p1Parsed = Teams.import(p1Team);
+      const p2Parsed = Teams.import(p2Team);
+      
+      if (!p1Parsed || !p2Parsed) {
+        return null;
+      }
+      
+      // Create battle
       const battle = new Battle({
         formatid: 'gen9randombattle' as any,
       });
       
-      // Start battle with teams
-      void battle.setPlayer('p1', { name: 'P1', team: p1Team });
-      void battle.setPlayer('p2', { name: 'P2', team: p2Team });
+      // Set up players with teams
+      battle.setPlayer('p1', {
+        name: 'P1',
+        team: p1Parsed,
+      });
       
-      // Let battle initialize
-      await battle.start();
+      battle.setPlayer('p2', {
+        name: 'P2',
+        team: p2Parsed,
+      });
       
+      // Battle is automatically started when both players are set
       // Force state to match current position
       this.forceState(battle, state);
       
       return battle;
     } catch (e) {
-      console.error('Error creating battle:', e);
+      // Silent failure - falls back to hand-written simulator
       return null;
     }
   }
@@ -57,8 +79,8 @@ export class BattleStateBuilder {
     
     for (const mon of team) {
       if (mon.species === 'Unknown') {
-        // Use a placeholder for unknown mons
-        mons.push('Ditto @ Choice Scarf|Limber|Transform|||85,85,85,85,85,85||||80|');
+        // Use a placeholder for unknown mons (packed format, no @)
+        mons.push('Ditto||ChoiceScarf|Limber|Transform|Hardy|85,85,85,85,85,85||||80|');
         continue;
       }
       
@@ -70,13 +92,26 @@ export class BattleStateBuilder {
         moves.push('Tackle');
       }
       
-      const ability = mon.revealedAbility || 'noability';
+      // Use revealed ability, or get a default ability for the species, or use a common placeholder
+      let ability = mon.revealedAbility;
+      if (!ability) {
+        // Try to get a default ability from Dex
+        const speciesData = Dex.species.get(mon.species);
+        if (speciesData && speciesData.exists && speciesData.abilities) {
+          ability = speciesData.abilities['0'] || speciesData.abilities['1'] || 'Pressure';
+        } else {
+          ability = 'Pressure'; // Universal placeholder ability
+        }
+      }
+      
       const item = mon.revealedItem || '';
       const level = mon.level;
       
-      // Showdown format: Species @ Item | Ability | Move1, Move2, Move3, Move4 | Nature | EVs | IVs | Shiny | Gender | Level | Happiness, Pokeball
+      // Packed format: Species|Nickname|Item|Ability|Moves|Nature|EVs|Gender|IVs|Shiny|Level|
+      // EVs and IVs are comma-separated (hp,atk,def,spa,spd,spe)
+      const itemNormalized = item.replace(/\s+/g, ''); // Remove spaces from item names
       mons.push(
-        `${mon.species}${item ? ` @ ${item}` : ''}|${ability}|${moves.join(',')}|Hardy|85,85,85,85,85,85|31,31,31,31,31,31|||${level}|`
+        `${mon.species}||${itemNormalized}|${ability}|${moves.join(',')}|Hardy|85,85,85,85,85,85||||${level}|`
       );
     }
     

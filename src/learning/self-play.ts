@@ -21,6 +21,11 @@ export interface SelfPlayResult {
   ties: number;
   totalGames: number;
   winRate: number;
+  fallbackStats?: {
+    fallbackCount: number;
+    totalCalls: number;
+    fallbackRate: number;
+  };
 }
 
 export class SelfPlayHarness {
@@ -35,6 +40,8 @@ export class SelfPlayHarness {
     let bot2Wins = 0;
     let ties = 0;
     let lastLog = '';
+    let totalFallbackCount = 0;
+    let totalSimCalls = 0;
 
     console.log(`Starting ${config.numGames} self-play games...`);
     console.log(`Bot 1: ${config.bot1Type} vs Bot 2: ${config.bot2Type}`);
@@ -50,6 +57,11 @@ export class SelfPlayHarness {
       if (result.winner === 'p1') bot1Wins++;
       else if (result.winner === 'p2') bot2Wins++;
       else ties++;
+      
+      if (result.fallbackStats) {
+        totalFallbackCount += result.fallbackStats.fallbackCount;
+        totalSimCalls += result.fallbackStats.totalCalls;
+      }
 
       if (config.verbose || (i + 1) % 10 === 0) {
         const currentWinRate = bot1Wins / (i + 1);
@@ -58,12 +70,20 @@ export class SelfPlayHarness {
     }
 
     const winRate = bot1Wins / config.numGames;
+    const fallbackRate = totalSimCalls > 0 ? totalFallbackCount / totalSimCalls : 0;
 
     console.log('\n=== Final Results ===');
     console.log(`Bot 1 (${config.bot1Type}): ${bot1Wins} wins`);
     console.log(`Bot 2 (${config.bot2Type}): ${bot2Wins} wins`);
     console.log(`Ties: ${ties}`);
     console.log(`Win rate: ${(winRate * 100).toFixed(2)}%`);
+    
+    if (config.bot1Type === 'mcts' || config.bot2Type === 'mcts') {
+      console.log(`\n=== Simulation Stats ===`);
+      console.log(`Total sim calls: ${totalSimCalls}`);
+      console.log(`Fallback count: ${totalFallbackCount}`);
+      console.log(`Fallback rate: ${(fallbackRate * 100).toFixed(2)}%`);
+    }
 
     return {
       bot1Wins,
@@ -72,13 +92,22 @@ export class SelfPlayHarness {
       totalGames: config.numGames,
       winRate,
       lastLog,
+      fallbackStats: totalSimCalls > 0 ? {
+        fallbackCount: totalFallbackCount,
+        totalCalls: totalSimCalls,
+        fallbackRate,
+      } : undefined,
     };
   }
 
   private async runSingleGame(
     config: SelfPlayConfig,
     gameIndex: number
-  ): Promise<{ winner: 'p1' | 'p2' | 'tie'; log: string }> {
+  ): Promise<{ 
+    winner: 'p1' | 'p2' | 'tie'; 
+    log: string;
+    fallbackStats?: { fallbackCount: number; totalCalls: number; fallbackRate: number };
+  }> {
     return new Promise((resolve) => {
       const streams = BattleStreams.getPlayerStreams(new BattleStreams.BattleStream());
       const spec = { formatid: 'gen9randombattle' as ID };
@@ -90,18 +119,25 @@ export class SelfPlayHarness {
       const p1spec = { name: 'Bot1', team: Teams.pack(team1) };
       const p2spec = { name: 'Bot2', team: Teams.pack(team2) };
 
+      let bot1Instance: any = null;
+      let bot2Instance: any = null;
+
       if (config.bot1Type === 'random') {
         const p1 = new RandomPlayerAI(streams.p1);
         void p1.start();
       } else {
-        void this.setupCustomBot(streams.p1, config.bot1Type);
+        void (async () => {
+          bot1Instance = await this.setupCustomBot(streams.p1, config.bot1Type);
+        })();
       }
 
       if (config.bot2Type === 'random') {
         const p2 = new RandomPlayerAI(streams.p2);
         void p2.start();
       } else {
-        void this.setupCustomBot(streams.p2, config.bot2Type);
+        void (async () => {
+          bot2Instance = await this.setupCustomBot(streams.p2, config.bot2Type);
+        })();
       }
 
       let winner: 'p1' | 'p2' | 'tie' = 'tie';
@@ -119,16 +155,25 @@ export class SelfPlayHarness {
               winner = line.includes('Bot1') ? 'p1' : 'p2';
               // Wait a bit for any final messages
               await new Promise(r => setTimeout(r, 50));
-              resolve({ winner, log: fullLog.join('') });
+              
+              // Collect fallback stats from bot1 if it's an MCTS bot
+              const fallbackStats = bot1Instance?.getFallbackStats?.() || bot2Instance?.getFallbackStats?.();
+              
+              resolve({ winner, log: fullLog.join(''), fallbackStats });
               return;
             } else if (line === '|tie' || line.startsWith('|tie|')) {
               await new Promise(r => setTimeout(r, 50));
-              resolve({ winner: 'tie', log: fullLog.join('') });
+              
+              const fallbackStats = bot1Instance?.getFallbackStats?.() || bot2Instance?.getFallbackStats?.();
+              
+              resolve({ winner: 'tie', log: fullLog.join(''), fallbackStats });
               return;
             }
           }
         }
-        resolve({ winner, log: fullLog.join('') });
+        
+        const fallbackStats = bot1Instance?.getFallbackStats?.() || bot2Instance?.getFallbackStats?.();
+        resolve({ winner, log: fullLog.join(''), fallbackStats });
       })();
 
       void streams.omniscient.write(`>start ${JSON.stringify(spec)}
@@ -137,7 +182,7 @@ export class SelfPlayHarness {
     });
   }
 
-  private async setupCustomBot(stream: any, botType: string): Promise<void> {
+  private async setupCustomBot(stream: any, botType: string): Promise<any> {
     const bot = await this.createBot(botType);
     let requestCount = 0;
     let errorCount = 0;
@@ -195,6 +240,8 @@ export class SelfPlayHarness {
         console.error('Error in custom bot stream:', e);
       }
     })();
+    
+    return bot;
   }
 
   private buildGameState(request: any, opponentActiveSpecies: string | null): GameState {
