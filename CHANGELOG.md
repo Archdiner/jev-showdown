@@ -1,5 +1,15 @@
 # Changelog
 
+## LLM layer (branch `cursor/llm-layer`)
+
+Search stays in charge. Two models sit beside it and can be turned off:
+
+- **Jev** (`typesafe-ai/jev`) scores the top search actions. Blending that advice in as a prior or a tiebreaker is off unless a gate challenger opts in (`experiments/llm-jev-prior`). A missing key or a timeout leaves the move as pure search.
+- **Loss reviewer** defaults to **Grok 4.7** (`spacexai/grok-4.7`, $2 / $6 per million input / output tokens as of the 2026-10-04 gateway catalog). It writes a hypothesis into the project graph and does not change code. Claude Opus 5.5 and GPT-6.1 Sol are the recorded alternatives. Set `LOSS_REVIEWER_MODEL` to switch.
+
+---
+
+
 **Note**: This file is the owner-facing plain-English summary of changes. For technical state and task queue, run:
 - `npm run graph -- status` - Current champion, metrics, frontier tasks
 - `npm run graph -- next` - Exactly one task with measurable acceptance criteria

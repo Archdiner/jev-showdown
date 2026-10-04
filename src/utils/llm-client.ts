@@ -1,137 +1,101 @@
 import { LLMRequest, LLMResponse } from '../types/index.js';
+import { GatewayClient } from '../llm/gateway-client.js';
+import { JevAdvisor } from '../llm/jev-advisor.js';
+import { LossReviewer } from '../llm/loss-reviewer.js';
+import { JEV_MODEL_ID, resolveReviewerModel } from '../llm/models.js';
+import type { CompactStateSummary } from '../llm/types.js';
 
 export interface LLMConfig {
-  endpoint: string;
+  endpoint?: string;
   apiKey?: string;
   jevModel?: string;
   reasoningModel?: string;
 }
 
+/**
+ * Compatibility wrapper around the LLM layer.
+ * Jev advises; the loss reviewer is a separate, configurable frontier model.
+ */
 export class LLMClient {
-  private config: LLMConfig;
+  private gateway: GatewayClient;
+  private jev: JevAdvisor;
+  private reviewer: LossReviewer;
 
-  constructor(config: LLMConfig) {
-    this.config = {
-      jevModel: config.jevModel || 'typesafe-ai/jev',
-      reasoningModel: config.reasoningModel || 'anthropic/claude-opus-5.5',
-      endpoint: config.endpoint || 'https://ai-gateway.vercel.sh/v1',
+  constructor(config: LLMConfig = {}) {
+    this.gateway = new GatewayClient({
+      endpoint: config.endpoint,
       apiKey: config.apiKey,
-    };
+    });
+    this.jev = new JevAdvisor(this.gateway, config.jevModel || JEV_MODEL_ID);
+    this.reviewer = new LossReviewer(this.gateway, config.reasoningModel || resolveReviewerModel());
   }
 
   async queryJev(request: LLMRequest): Promise<LLMResponse> {
-    if (!this.config.apiKey) {
-      return this.mockResponse(request);
+    const choices = request.choices ?? [];
+    const summary: CompactStateSummary = isSummary(request.state)
+      ? request.state
+      : {
+          turn: 0,
+          player: 'unknown',
+          field: { trickRoom: false, screens: {} },
+          hazards: {
+            my: { stealthRock: false, spikes: 0, toxicSpikes: 0 },
+            opponent: { stealthRock: false, spikes: 0, toxicSpikes: 0 },
+          },
+          myActive: null,
+          opponentActive: null,
+          myBench: [],
+          opponentBench: [],
+          teraUsed: { mine: false, opponent: false },
+        };
+
+    const assessment = await this.jev.advise(
+      summary,
+      choices.map((choice, index) => ({
+        id: `a${index}`,
+        label: choice,
+        action: { type: 'move', moveIndex: index + 1 },
+        searchScore: 0,
+      }))
+    );
+
+    if (assessment.degraded) {
+      return {
+        scores: {},
+        probabilities: {},
+        reasoning: assessment.reason || 'degraded to pure search',
+      };
     }
 
-    try {
-      const response = await fetch(`${this.config.endpoint}/completions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.config.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: this.config.jevModel,
-          state: request.state,
-          question: request.question,
-          choices: request.choices,
-        }),
-      });
-
-      if (!response.ok) {
-        console.warn('LLM API error:', response.status);
-        return this.mockResponse(request);
-      }
-
-      const data = await response.json();
-      return this.parseJevResponse(data);
-    } catch (error) {
-      console.warn('LLM query failed:', error);
-      return this.mockResponse(request);
-    }
-  }
-
-  async analyzeLoss(
-    battleLog: string,
-    decisions: any[],
-    outcome: string
-  ): Promise<string> {
-    if (!this.config.apiKey) {
-      return 'LLM analysis not available (no API key)';
-    }
-
-    try {
-      const response = await fetch(`${this.config.endpoint}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.config.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: this.config.reasoningModel,
-          messages: [
-            {
-              role: 'system',
-              content: 'You are an expert Pokemon battler analyzing game logs to identify mistakes and suggest improvements.',
-            },
-            {
-              role: 'user',
-              content: `Analyze this Pokemon Showdown battle loss and identify key mistakes:\n\nBattle Log:\n${battleLog.slice(0, 5000)}\n\nProvide specific turn numbers and suggest what should have been done differently.`,
-            },
-          ],
-          max_tokens: 1000,
-        }),
-      });
-
-      if (!response.ok) {
-        return `Analysis failed: HTTP ${response.status}`;
-      }
-
-      const data = await response.json() as any;
-      return data.choices?.[0]?.message?.content || 'No analysis generated';
-    } catch (error) {
-      return `Analysis error: ${error}`;
-    }
-  }
-
-  private parseJevResponse(data: any): LLMResponse {
-    return {
-      choice: data.choice,
-      scores: data.scores || {},
-      probabilities: data.probabilities || {},
-      reasoning: data.reasoning,
-    };
-  }
-
-  private mockResponse(request: LLMRequest): LLMResponse {
     const scores: Record<string, number> = {};
-    
-    if (request.choices) {
-      for (const choice of request.choices) {
-        scores[choice] = Math.random();
-      }
-    }
+    const probabilities: Record<string, number> = {};
+    choices.forEach((choice, index) => {
+      scores[choice] = assessment.scores[`a${index}`] ?? 0;
+      probabilities[choice] = assessment.probabilities[`a${index}`] ?? 0;
+    });
+    const choice = Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0]?.[0];
+    return { choice, scores, probabilities };
+  }
 
-    return {
-      scores,
-      probabilities: scores,
-      reasoning: 'Mock response (no API key)',
-    };
+  async analyzeLoss(battleLog: string, _decisions: unknown[], _outcome: string): Promise<string> {
+    const result = await this.reviewer.review(battleLog);
+    if (!result.ok) return `Analysis unavailable: ${result.error}`;
+    return JSON.stringify(result.finding);
   }
 
   hasApiKey(): boolean {
-    return !!this.config.apiKey;
+    return this.gateway.hasApiKey();
   }
 }
 
 export function createLLMClient(): LLMClient {
-  const apiKey = 
-    process.env.AI_GATEWAY_API_KEY || 
-    process.env.VERCEL_AI_GATEWAY_KEY;
-
   return new LLMClient({
     endpoint: 'https://ai-gateway.vercel.sh/v1',
-    apiKey,
+    apiKey: process.env.VERCEL_AI_GATEWAY_KEY || process.env.AI_GATEWAY_API_KEY,
+    reasoningModel: resolveReviewerModel(),
   });
+}
+
+function isSummary(value: unknown): value is CompactStateSummary {
+  return !!value && typeof value === 'object' && 'turn' in value && 'field' in value && 'hazards' in value;
 }

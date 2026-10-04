@@ -22,6 +22,11 @@ graph TD
   hyp-tempo-switch-hazard-disadvantage["Hypothesis: Play faster when opponent has "]
   task-team-gen-constraints["Task: Implement team-generation cons"]
   task-strict-role-narrowing["Task: Implement strict role narrowin"]
+  datasource-vercel-ai-gateway-models["DataSource: Vercel AI Gateway model catalo"]
+  decision-loss-reviewer-grok-4-7["Decision: Loss reviewer defaults to Grok"]
+  hypothesis-jev-search-prior["Hypothesis: Jev prior on top-K search acti"]
+  experiment-llm-jev-prior["Experiment: Challenger: Jev search prior"]
+  task-llm-layer["Task: LLM advisor and loss reviewer"]
   decision-typescript-pkmn -->|supports| goal-ladder-1
   decision-mit-only -->|supports| goal-ladder-1
   decision-search-first -->|supports| goal-ladder-1
@@ -40,3 +45,9 @@ graph TD
   hyp-tempo-switch-hazard-disadvantage -->|derived_from| learning-hazards-huge
   task-team-gen-constraints -->|tests| learning-team-gen-rules
   task-strict-role-narrowing -->|tests| learning-set-info-narrowing
+  decision-loss-reviewer-grok-4-7 -->|derived_from| datasource-vercel-ai-gateway-models
+  decision-loss-reviewer-grok-4-7 -->|supports| goal-ladder-1
+  hypothesis-jev-search-prior -->|supports| goal-ladder-1
+  experiment-llm-jev-prior -->|tests| hypothesis-jev-search-prior
+  task-llm-layer -->|produced| experiment-llm-jev-prior
+  task-llm-layer -->|supports| decision-loss-reviewer-grok-4-7

@@ -16,6 +16,8 @@
     "selfplay": "tsx src/cli/selfplay.ts",
     "ladder": "tsx src/cli/ladder.ts",
     "analyze": "tsx src/cli/analyze-losses.ts",
+    "llm:smoke": "tsx src/llm/smoke.ts",
+    "llm:review": "tsx src/llm/review-cli.ts",
     "benchmark": "tsx src/cli/benchmark.ts",
     "export-replays": "tsx src/cli/export-replays.ts",
     "lint": "eslint src/**/*.ts"
