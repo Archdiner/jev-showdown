@@ -1,4 +1,5 @@
 import { isLocalLiveGame, recordedElo, recordedOutcome } from '../client/game-record.js';
+import { cycleLines, readCycle } from './cycle.js';
 import { openDb } from './db.js';
 import { latestHeartbeats } from './heartbeat.js';
 import { readLabels } from './labels-read.js';
@@ -65,5 +66,6 @@ export function statusReport(paths: OpsPaths, now = Date.now()): string {
     lines.push(`  ${id} [${label?.labels.join('+') || 'unlabeled'}] ${wins}-${losses} rating ${ratingText}`);
   }
   lines.push(`open regressions ${regressions}`);
+  lines.push(...cycleLines(readCycle(paths), now));
   return lines.join('\n');
 }

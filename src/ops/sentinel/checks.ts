@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { percentile } from '../../client/live-metrics.js';
+import { foldCycle, stallAlert } from '../cycle.js';
 import { invalidChoiceReasonsOf } from './games.js';
 import { defaultAnalystDirs, listGameJsonl } from '../ingest.js';
 import type { CheckHit, Evidence, InvariantCheck, ObservedGame, ProcessSnapshot, SentinelContext } from './types.js';
@@ -83,6 +84,13 @@ export const CHECKS: InvariantCheck[] = [
     title: 'Two processes are heartbeating as the same ops worker',
     suggestedFix: 'Leave one process per facility. A second factory or live worker double-claims jobs and can log in twice.',
     detect: workersDuplicate,
+  },
+  {
+    id: 'improvement-stall',
+    severity: 'P1',
+    title: 'Losses were reviewed and nothing was queued for 15 minutes',
+    suggestedFix: 'Each live loss must enqueue a hypothesis variant or a mined position, or append a skip reason to state/ops/dispositions.jsonl. The factory reads open Hypothesis nodes and hypotheses.json on idle. Restart the analyst and the factory so a backlog is claimed. Do not delete analyst-seen.json.',
+    detect: improvementStall,
   },
   {
     id: 'analyst-log-dir',
@@ -169,6 +177,18 @@ export const CHECKS: InvariantCheck[] = [
     detect: malformedLines,
   },
 ];
+
+function improvementStall(ctx: SentinelContext): CheckHit[] {
+  const rows = ctx.rows.filter(row => path.basename(row.file) === 'cycle.jsonl' && row.value);
+  const alert = stallAlert(foldCycle(rows.map(row => row.value)), ctx.now);
+  if (!alert) return [];
+  const file = rows[0]?.file ?? path.join(ctx.layout.opsDir, 'cycle.jsonl');
+  return [{
+    key: 'improvement-stall',
+    detail: alert.message,
+    evidence: [{ file, detail: alert.message }],
+  }];
+}
 
 function duplicateLadderRunners(ctx: SentinelContext): CheckHit[] {
   const accounts = new Map<string, { pids: Set<number>; evidence: Evidence[] }>();

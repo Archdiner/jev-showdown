@@ -1,3 +1,4 @@
+# Opt-in posterior. The champion file stays on setInference loose (BeliefTracker).
 name: opponent-calibrated
 extends: ../champion.yaml
 opponentModel:

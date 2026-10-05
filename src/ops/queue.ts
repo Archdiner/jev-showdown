@@ -16,6 +16,8 @@ export interface JobSpec {
   axes?: Array<{ path: string; values: Array<string | number | boolean> }>;
   positionId?: string;
   labelDepth?: number;
+  /** Mechanism or eval term this challenger is testing. Same id, one job. */
+  variantId?: string;
 }
 
 export interface QueueJob {

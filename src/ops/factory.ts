@@ -5,10 +5,12 @@ import { loadPool } from '../config/positions.js';
 import { exactSearch } from '../engine/exact/search.js';
 import { ablate } from '../exp/ablate.js';
 import { playPaired, sideWinRate } from '../exp/play.js';
-import { liveProposalAllowed, tallySide } from './sprt.js';
+import { liveProposalAllowed, sprt, tallySide } from './sprt.js';
 import { sweep } from '../exp/sweep.js';
 import { tournament } from '../exp/tournament.js';
+import { recordRejected, recordTested } from './cycle.js';
 import { openDb } from './db.js';
+import { enqueueOpenHypotheses } from './hypotheses.js';
 import { beat } from './heartbeat.js';
 import type { OpsPaths } from './paths.js';
 import { readJsonl } from './paths.js';
@@ -24,6 +26,11 @@ export async function runFactory(paths: OpsPaths, opts: { once?: boolean } = {})
   do {
     const job = claimNext(paths);
     if (!job) {
+      const added = seedHypotheses(paths);
+      if (added > 0) {
+        beat(paths, 'factory', 'ok', `queued ${added} hypothesis variants`);
+        continue;
+      }
       beat(paths, 'factory', 'ok', 'idle');
       if (opts.once) break;
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -36,12 +43,15 @@ export async function runFactory(paths: OpsPaths, opts: { once?: boolean } = {})
       }
       const outcome = await execute(paths, job);
       completeJob(paths, job.id, { resultId: outcome.resultId, proposal: outcome.proposal, status: 'done' });
+      recordTested(paths, outcome.summary);
+      if (outcome.rejectedReason) recordRejected(paths, outcome.rejectedReason);
       beat(paths, 'factory', 'ok', outcome.summary);
       ran += 1;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const attempts = (job.attempts ?? 0) + 1;
       completeJob(paths, job.id, { status: attempts >= 3 ? 'rejected' : 'open', attempts });
+      if (attempts >= 3) recordRejected(paths, message);
       beat(paths, 'factory', 'error', message);
       if (opts.once) break;
     }
@@ -63,7 +73,16 @@ function alreadyDone(paths: OpsPaths, job: QueueJob): boolean {
   }
 }
 
-async function execute(paths: OpsPaths, job: QueueJob): Promise<{ resultId: string; summary: string; proposal?: Proposal }> {
+function seedHypotheses(paths: OpsPaths): number {
+  const db = openDb(paths);
+  try {
+    return enqueueOpenHypotheses(paths, db);
+  } finally {
+    db.close();
+  }
+}
+
+async function execute(paths: OpsPaths, job: QueueJob): Promise<{ resultId: string; summary: string; proposal?: Proposal; rejectedReason?: string }> {
   if (job.spec.kind === 'challenger') return runChallenger(paths, job);
   if (job.spec.kind === 'sweep') return runSweep(paths, job);
   if (job.spec.kind === 'ablation') return runAblation(paths, job);
@@ -71,7 +90,7 @@ async function execute(paths: OpsPaths, job: QueueJob): Promise<{ resultId: stri
   return runPositionReplay(paths, job);
 }
 
-async function runChallenger(paths: OpsPaths, job: QueueJob): Promise<{ resultId: string; summary: string; proposal?: Proposal }> {
+async function runChallenger(paths: OpsPaths, job: QueueJob): Promise<{ resultId: string; summary: string; proposal?: Proposal; rejectedReason?: string }> {
   const challengerPath = job.spec.challenger || 'configs/champion.yaml';
   const challenger = loadConfig(challengerPath);
   const opponent = loadConfig(job.spec.opponent || 'configs/panel/maxdamage.yaml');
@@ -86,7 +105,9 @@ async function runChallenger(paths: OpsPaths, job: QueueJob): Promise<{ resultId
     p2Invalid: game.p2Invalid,
     crashed: game.crashed,
   })), challenger.configId);
-  const summary = `${tally.wins}/${rate.games} wins, invalid ${tally.invalid}`;
+  const verdict = sprt(tally.wins, tally.losses);
+  const summary = `${tally.wins}/${rate.games} wins, invalid ${tally.invalid}, SPRT ${verdict}`;
+  const rejectedReason = verdict === 'reject' ? summary : undefined;
   const proposal = liveProposalAllowed(tally.wins, tally.losses, tally.invalid)
     ? {
         action: 'live-approved' as const,
@@ -95,7 +116,12 @@ async function runChallenger(paths: OpsPaths, job: QueueJob): Promise<{ resultId
         summary,
       }
     : undefined;
-  return { resultId: writeResult(paths, job, summary, { wins: tally.wins, games: results.length, invalid: tally.invalid }), summary, proposal };
+  return {
+    resultId: writeResult(paths, job, summary, { wins: tally.wins, games: results.length, invalid: tally.invalid, sprt: verdict }),
+    summary,
+    proposal,
+    rejectedReason,
+  };
 }
 
 async function runSweep(paths: OpsPaths, job: QueueJob): Promise<{ resultId: string; summary: string; proposal?: Proposal }> {

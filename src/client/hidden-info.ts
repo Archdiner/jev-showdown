@@ -80,11 +80,17 @@ function replayClient(log: readonly string[], side: ViewerSide, request: unknown
 export function ladderDecisionBattle(battle: SimBattle, side: SideId): SimBattle | null {
   const request = battle.getSide(side).activeRequest;
   if (!request || request.wait || request.teamPreview) return null;
-  const lines = viewerLines(battle.log, side);
-  const client = replayClient(battle.log, side, request);
+  return decisionBattleFromViewerLog(battle.log.join('\n'), side, request, battle.turn);
+}
+
+/** Replay a spectator log and the side's `|request|` into the ladder's decision battle. */
+export function decisionBattleFromViewerLog(log: string, side: ViewerSide, request: unknown, turn?: number): SimBattle | null {
+  if (!request || typeof request !== 'object') return null;
+  const lines = log.split('\n');
+  const client = replayClient(lines, side, request);
   try {
-    const position = livePositionFromClient(client, request, side, lines);
-    if (typeof battle.turn === 'number') position.turn = battle.turn;
+    const position = livePositionFromClient(client, request, side, viewerLines(lines, side));
+    if (typeof turn === 'number') position.turn = turn;
     return buildDecisionBattle(position);
   } catch {
     return null;

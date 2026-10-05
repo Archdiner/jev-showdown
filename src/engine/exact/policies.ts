@@ -1,6 +1,6 @@
 import { Battle, PRNG } from '@pkmn/sim';
 import { Action } from '../../types/index.js';
-import { SideId, legalChoices } from './battle-utils.js';
+import { SideId, legalChoices, moveSlotIndex } from './battle-utils.js';
 import { maxDamageChoice } from './max-damage.js';
 import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2, ScoredChoice, battleToState, exactSearch } from './search.js';
 
@@ -73,7 +73,7 @@ async function legacyChoice(battle: Battle, side: SideId, legal: string[]): Prom
 
 function choiceToAction(choice: string): Action {
   if (choice.startsWith('switch')) return { type: 'switch', switchIndex: Number(choice.slice(7)) };
-  return { type: 'move', moveIndex: Number(choice.slice(5)) };
+  return { type: 'move', moveIndex: moveSlotIndex(choice) + 1 };
 }
 
 function actionToChoice(action: Action): string {

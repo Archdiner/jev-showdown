@@ -4,8 +4,10 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import {
   appendGameRecord,
+  assertNewGameRow,
   buildLadderGameRecord,
   classifyEnd,
+  groupByRunId,
   configHash,
   currentGitSha,
   eloDeltaConsistent,
@@ -139,6 +141,8 @@ describe('ladder game records', () => {
     expect(record.minTimerMarginSec).toBe(12);
     expect(record).not.toHaveProperty('decisionLatencyMs');
     expect(record.replayStatus).toBe('unconfirmed');
+    expect(record.beliefErrors).toBe(0);
+    expect(buildLadderGameRecord(input({ beliefErrors: 3 })).beliefErrors).toBe(3);
     const ops = toOpsLiveGame(record);
     expect(ops.rating).toBeNull();
     expect(ops.gxe).toBeNull();
@@ -266,6 +270,23 @@ describe('ladder game records', () => {
     expect(loss.gxe).toBeNull();
   });
 
+  it('stores one invalid-choice reason per error line and caps the list', () => {
+    const lines = [
+      '|error|[Invalid choice] Can\'t undo: A trapping/disabling effect would cause undo to leak information',
+      '|c|BotAlpha|invalid choice echo',
+      '|error|[Invalid choice] Sorry, too late to make a different move; the next turn has already started',
+    ];
+    for (let i = 0; i < 10; i++) lines.push(`|bigerror|[Invalid choice] reason ${i}`);
+    const facts = factsFromTranscript(lines, 'BotAlpha');
+    expect(facts.invalidChoices).toBe(12);
+    expect(facts.invalidChoiceReasons).toHaveLength(8);
+    expect(facts.invalidChoiceReasons[0]).toContain("Can't undo");
+    expect(facts.invalidChoiceReasons[1]).toContain('too late');
+    const record = buildLadderGameRecord(input({ lines, invalidChoices: facts.invalidChoices }));
+    expect(record.invalidChoices).toBe(12);
+    expect(record.invalidChoiceReasons).toEqual(facts.invalidChoiceReasons);
+  });
+
   it('records the battle replay id and a URL only when the server confirms it', () => {
     expect(replayIdFromBattle('battle-gen9randombattle-42')).toBe('gen9randombattle-42');
     const pending = buildLadderGameRecord(input());
@@ -284,6 +305,41 @@ describe('ladder game records', () => {
     const local = buildLadderGameRecord(input({ localServer: true }));
     expect(local.replayStatus).toBe('local-only');
     expect(local.replayUrl).toBeNull();
+  });
+
+  it('requires runId on new game rows', () => {
+    const stamped = buildLadderGameRecord(input({
+      runId: '1710000000000',
+      batchLabel: 'batch-9',
+      hostname: 'live-mac',
+    }));
+    expect(stamped.runId).toBe('1710000000000');
+    expect(stamped.batchLabel).toBe('batch-9');
+    expect(stamped.hostname).toBe('live-mac');
+    expect(() => assertNewGameRow(stamped)).not.toThrow();
+    expect(buildLadderGameRecord(input()).runId).toEqual(expect.any(String));
+    expect(buildLadderGameRecord(input()).runId.length).toBeGreaterThan(0);
+    expect(() => assertNewGameRow({ schema: 'jev.ladder-game.v1' })).toThrow(/runId/);
+    expect(() => assertNewGameRow({ schema: 'jev.ladder-game.v1', runId: '   ' })).toThrow(/runId/);
+    expect(() => assertNewGameRow({ turns: 0, outcome: 'tie', endReason: 'disconnect' })).not.toThrow();
+    const previousLabel = process.env.LIVE_BATCH_LABEL;
+    process.env.LIVE_BATCH_LABEL = 'from-env';
+    try {
+      expect(buildLadderGameRecord(input()).batchLabel).toBe('from-env');
+    } finally {
+      if (previousLabel === undefined) delete process.env.LIVE_BATCH_LABEL;
+      else process.env.LIVE_BATCH_LABEL = previousLabel;
+    }
+    expect(groupByRunId([
+      { runId: 'a', batchLabel: 'batch-9', hostname: 'live-mac', outcome: 'win' },
+      { runId: 'a', outcome: 'loss' },
+      { runId: 'b', hostname: 'other', outcome: 'win' },
+      { outcome: 'tie' },
+    ])).toEqual([
+      { runId: 'a', batchLabel: 'batch-9', hostname: 'live-mac', wins: 1, losses: 1, ties: 0, games: 2 },
+      { runId: 'b', batchLabel: null, hostname: 'other', wins: 1, losses: 0, ties: 0, games: 1 },
+      { runId: 'unknown', batchLabel: null, hostname: null, wins: 0, losses: 0, ties: 1, games: 1 },
+    ]);
   });
 
   it('appends one JSON object per game', () => {
@@ -365,6 +421,7 @@ describe('BattleDriver game record', () => {
       invalidChoices: 0,
       crashes: 0,
       fallbacks: 0,
+      beliefErrors: 0,
       replayStatus: 'unconfirmed',
     });
     expect(summary.durationMs).toBeGreaterThanOrEqual(0);

@@ -410,7 +410,13 @@ export class Gen9RandomBattle implements Format {
         currentHp,
         maxHp,
       };
-      
+      if (i === 0 && Array.isArray(request.active?.[0]?.moves)) {
+        belief.moves = request.active[0].moves.map((move: { id?: string; move?: string }) => {
+          const name = move?.id || move?.move;
+          return typeof name === 'string' ? name : '';
+        });
+      }
+
       return belief;
     }) || [];
     

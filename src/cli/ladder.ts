@@ -36,7 +36,8 @@ import {
 } from '../client/drain.js';
 import { LiveMetrics } from '../client/live-metrics.js';
 import { SearchAdmission, admissionSettings, ConcurrencyGovernor } from '../client/concurrency-governor.js';
-import { currentGitSha } from '../client/game-record.js';
+import { currentGitSha, groupByRunId } from '../client/game-record.js';
+import { currentHostname, readBatchLabel } from '../client/run-stamp.js';
 import { installPosthogSink } from '../client/posthog-sink.js';
 import {
   formatLiveConfig,
@@ -258,6 +259,9 @@ async function makePlayer(input: {
   label: string;
   engine: EngineName;
   identity: LadderIdentity;
+  runId: string;
+  batchLabel: string | null;
+  hostname: string;
   autoSearch?: boolean;
   metrics?: LiveMetrics;
   admission?: SearchAdmission;
@@ -296,6 +300,9 @@ async function makePlayer(input: {
     configHash: input.identity.configHash,
     gitSha: input.identity.gitSha,
     configPath: input.identity.configPath,
+    runId: input.runId,
+    batchLabel: input.batchLabel,
+    hostname: input.hostname,
     concurrency: input.opts.concurrency,
     routeBattle: input.route ? battleId => input.route!.assign(battleId) : undefined,
     onBattleFault: input.route ? (battleId, fault) => input.route!.noteFault(battleId, fault) : undefined,
@@ -458,6 +465,7 @@ async function runLocalSeries(
   admission: SearchAdmission,
   identity: LadderIdentity,
   opponentIdentity: LadderIdentity,
+  stamp: { runId: string; batchLabel: string | null; hostname: string },
   route: AbSession,
 ): Promise<GameSummary[]> {
   console.log(`[ladder] starting local pokemon-showdown on port ${opts.port}`);
@@ -481,6 +489,9 @@ async function runLocalSeries(
       label: 'alpha',
       engine: opts.engine,
       identity,
+      runId: stamp.runId,
+      batchLabel: stamp.batchLabel,
+      hostname: stamp.hostname,
       metrics,
       admission,
       route,
@@ -495,6 +506,9 @@ async function runLocalSeries(
       label: 'bravo',
       engine: opts.opponentEngine ?? opts.engine,
       identity: opponentIdentity,
+      runId: stamp.runId,
+      batchLabel: stamp.batchLabel,
+      hostname: stamp.hostname,
       metrics,
       admission,
     });
@@ -533,6 +547,7 @@ async function runRemote(
   metrics: LiveMetrics,
   admission: SearchAdmission,
   identity: LadderIdentity,
+  stamp: { runId: string; batchLabel: string | null; hostname: string },
   route: AbSession,
 ): Promise<GameSummary[]> {
   const { username, local } = ladderIdentity(opts);
@@ -555,6 +570,9 @@ async function runRemote(
     label: toID(username) || 'ladder',
     engine: opts.engine,
     identity,
+    runId: stamp.runId,
+    batchLabel: stamp.batchLabel,
+    hostname: stamp.hostname,
     autoSearch: !opts.accept && !opts.challenge,
     metrics,
     admission,
@@ -591,7 +609,8 @@ function report(
   opts: LadderOptions,
   identity: LadderIdentity,
   route: AbSession,
-  drain?: LiveDrain,
+  drain: LiveDrain | undefined,
+  stamp: { runId: string; batchLabel: string | null; hostname: string },
 ): void {
   const played = summaries.filter(game => !game.phantom);
   const invalidChoices = played.reduce((sum, game) => sum + game.invalidChoices, 0);
@@ -629,12 +648,17 @@ function report(
     fallbacks,
     mismatches,
     wins,
+    runId: stamp.runId,
+    batchLabel: stamp.batchLabel,
+    hostname: stamp.hostname,
+    runs: groupByRunId(played),
     results: played,
   };
   fs.mkdirSync(opts.logDir, { recursive: true });
   const out = path.join(opts.logDir, 'summary.json');
   fs.writeFileSync(out, JSON.stringify(reportBody, null, 2));
   console.log(`[ladder] games=${played.length} invalid=${invalidChoices} crashes=${crashes} fallbacks=${fallbacks} mismatches=${mismatches}`);
+  console.log(`[ladder] run=${stamp.runId} batch=${stamp.batchLabel ?? 'n/a'} host=${stamp.hostname}`);
   console.log(`[ladder] summary ${out}`);
   if (drain?.isDraining) {
     console.log(`[ladder] drained (${drain.drainReason}) after ${played.length}/${opts.games} games`);
@@ -779,14 +803,15 @@ async function main(): Promise<void> {
     await dataLoader.load(gen9RandomBattle);
 
     const session = openDrain(opts.engine, identity, ladderIdentity(opts), route);
-    const metrics = openLiveMetrics(opts, identity, route);
+    const stamp = { runId: session.runId, batchLabel: readBatchLabel(), hostname: currentHostname() };
+    const metrics = openLiveMetrics(opts, identity, stamp, route);
     const admission = openAdmission(opts);
     try {
       const summaries = opts.local && !opts.server && !opts.accept && !opts.challenge
-        ? await runLocalSeries(opts, session.drain, metrics, admission, identity, opponentIdentity, route)
-        : await runRemote(opts, session.drain, metrics, admission, identity, route);
+        ? await runLocalSeries(opts, session.drain, metrics, admission, identity, opponentIdentity, stamp, route)
+        : await runRemote(opts, session.drain, metrics, admission, identity, stamp, route);
       metrics.finish({ games: summaries.length, requested: opts.games });
-      report(summaries, opts, identity, route, session.drain);
+      report(summaries, opts, identity, route, session.drain, stamp);
       drained = session.drain.isDraining;
     } finally {
       admission.stop();
@@ -874,7 +899,7 @@ function openDrain(
   identity: LadderIdentity,
   account: { username: string; local: boolean },
   route: AbSession,
-): { drain: LiveDrain; close(): void } {
+): { drain: LiveDrain; runId: string; close(): void } {
   const runId = `${Date.now()}`;
   const drain = new LiveDrain();
   writeLadderRun('live-runs', {
@@ -908,6 +933,7 @@ function openDrain(
   });
   return {
     drain,
+    runId,
     close() {
       watcher.stop();
       stopSignals();
@@ -915,12 +941,18 @@ function openDrain(
   };
 }
 
-function openLiveMetrics(opts: LadderOptions, identity: LadderIdentity, route: AbSession): LiveMetrics {
-  const runId = `${Date.now()}-${opts.engine}`;
+function openLiveMetrics(
+  opts: LadderOptions,
+  identity: LadderIdentity,
+  stamp: { runId: string; batchLabel: string | null; hostname: string },
+  route: AbSession,
+): LiveMetrics {
   const filePath = path.join(opts.logDir, 'metrics.jsonl');
   console.log(`[ladder] metrics ${filePath}`);
   return new LiveMetrics(filePath, {
-    runId,
+    runId: stamp.runId,
+    batchLabel: stamp.batchLabel,
+    hostname: stamp.hostname,
     engine: opts.engine,
     concurrency: opts.concurrency,
     configId: identity.configId,

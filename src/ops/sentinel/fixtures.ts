@@ -215,6 +215,14 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     fs.utimesSync(file, drainAt, drainAt);
   }
 
+  fs.writeFileSync(path.join(ops, 'cycle.jsonl'), `${JSON.stringify({
+    ts: now - 20 * 60 * 1000,
+    type: 'loss',
+    hypotheses: 1,
+    queued: 0,
+    reason: 'skipped: no self-play variant for hypothesis hyp-loss',
+  })}\n`);
+
   const processes: ProcessSnapshot[] = [
     { pid: 50, cmd: 'node tsx src/cli/ladder.ts --username asad', env: { SHOWDOWN_USERNAME: 'asad' } },
     { pid: 51, cmd: 'node tsx src/cli/ladder.ts --username asad', env: { SHOWDOWN_USERNAME: 'asad' } },

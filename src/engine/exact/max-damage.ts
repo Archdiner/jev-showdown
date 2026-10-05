@@ -1,6 +1,6 @@
 import { Battle, Dex } from '@pkmn/sim';
 import { calculate, Pokemon as CalcPokemon, Move, Field } from '@smogon/calc';
-import { SideId, legalChoices } from './battle-utils.js';
+import { SideId, legalChoices, moveSlotIndex } from './battle-utils.js';
 
 const WEATHER: Record<string, 'Sun' | 'Rain' | 'Sand' | 'Snow'> = {
   sunnyday: 'Sun',
@@ -87,7 +87,7 @@ export function maxDamageChoice(battle: Battle, sideId: SideId, choices?: string
   let best = moves[0];
   let bestDamage = -1;
   for (const choice of moves) {
-    const index = Number(choice.slice(5)) - 1;
+    const index = moveSlotIndex(choice);
     const moveId = attacker.moveSlots[index]?.id;
     if (!moveId) continue;
     const damage = expectedDamage(attacker, defender, moveId, weather);

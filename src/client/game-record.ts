@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { currentHostname, readBatchLabel } from './run-stamp.js';
 import { configIdOf } from '../config/hash.js';
 import { toID } from './ids.js';
 import { ourClockUpdate } from './inactive-clock.js';
@@ -21,6 +22,33 @@ import type { CalibrationSummary } from './prediction.js';
  */
 export const LADDER_GAME_SCHEMA = 'jev.ladder-game.v1' as const;
 
+/** Enough of the incident loop to classify a game without storing the whole log. */
+export const INVALID_CHOICE_REASON_CAP = 8;
+
+/**
+ * Reason text after `[Invalid choice]` on an `|error|` or `|bigerror|` line.
+ * Other lines, including a chat echo of the same words, are not a rejection.
+ */
+export function invalidChoiceReason(line: string): string | null {
+  if (!line.startsWith('|error|') && !line.startsWith('|bigerror|')) return null;
+  if (!/\[Invalid choice\]/i.test(line)) return null;
+  const text = line.replace(/^.*?\[Invalid choice\]\s*/i, '').trim();
+  return text || 'invalid choice';
+}
+
+export function cappedInvalidChoiceReasons(reasons: readonly string[]): string[] {
+  return reasons.slice(0, INVALID_CHOICE_REASON_CAP);
+}
+
+function reasonsFromLines(lines: readonly string[]): string[] {
+  const reasons: string[] = [];
+  for (const line of lines) {
+    const reason = invalidChoiceReason(line);
+    if (reason) reasons.push(reason);
+  }
+  return reasons;
+}
+
 export type GameEndReason =
   | 'ko'
   | 'opponent-forfeit'
@@ -39,6 +67,11 @@ export interface LadderGameRecord {
   /** Stable id for the ops analyst. `{battleId}-{ts}` when the caller omits it. */
   id: string;
   pid: number;
+  /** Ladder run id printed at startup (`[ladder] pid=… run=…`). */
+  runId: string;
+  /** `LIVE_BATCH_LABEL`, or the log file name when stdout is a `.log`. Null when neither is set. */
+  batchLabel: string | null;
+  hostname: string;
   ts: number;
   startedAt: number;
   battleId: string;
@@ -51,9 +84,19 @@ export interface LadderGameRecord {
   winner: string | null;
   turns: number;
   invalidChoices: number;
+  /**
+   * Server text after `[Invalid choice]`, one entry per `|error|` or `|bigerror|`
+   * line, capped at 8. A later chat echo of the same words is not an entry.
+   */
+  invalidChoiceReasons: string[];
   crashes: number;
   fallbacks: number;
   mismatches: number;
+  /**
+   * Posterior updates that threw in this game. The battle then used BeliefTracker.
+   * 0 when set inference is not calibrated.
+   */
+  beliefErrors: number;
   eloBefore: number | null;
   eloAfter: number | null;
   /** Null when the server line had no GXE. Never defaulted. */
@@ -279,9 +322,13 @@ export interface LadderGameInput {
   winner: string | null;
   turns: number;
   invalidChoices: number;
+  /** When omitted, reasons are read from `|error|` / `|bigerror|` lines. */
+  invalidChoiceReasons?: string[];
   crashes: number;
   fallbacks: number;
   mismatches: number;
+  /** Posterior throws. Omitted by older callers; the record stores 0. */
+  beliefErrors?: number;
   /** `before` on the rating update for this battle. Null when that update has no before. */
   eloBefore: number | null;
   eloAfter: number | null;
@@ -305,6 +352,9 @@ export interface LadderGameInput {
   logPath: string;
   ourSide?: 'p1' | 'p2' | null;
   pid?: number;
+  runId?: string;
+  batchLabel?: string | null;
+  hostname?: string;
   id?: string;
   source?: 'ladder' | 'ops';
   configPath?: string;
@@ -339,6 +389,9 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     source: input.source ?? 'ladder',
     id: input.id ?? `${input.battleId}-${ts}`,
     pid: input.pid ?? process.pid,
+    runId: input.runId?.trim() || `pid-${process.pid}`,
+    batchLabel: input.batchLabel !== undefined ? input.batchLabel : readBatchLabel(),
+    hostname: input.hostname?.trim() || currentHostname(),
     ts,
     startedAt: input.startedAt,
     battleId: input.battleId,
@@ -352,9 +405,11 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     turns: input.turns,
     ...(phantom ? { phantom: true as const } : {}),
     invalidChoices: input.invalidChoices,
+    invalidChoiceReasons: cappedInvalidChoiceReasons(input.invalidChoiceReasons ?? reasonsFromLines(input.lines)),
     crashes: input.crashes,
     fallbacks: input.fallbacks,
     mismatches: input.mismatches,
+    beliefErrors: input.beliefErrors ?? 0,
     eloBefore: rated.eloBefore,
     eloAfter: rated.eloAfter,
     gxe,
@@ -389,6 +444,60 @@ export function gamesJsonlPath(dir: string): string {
 export function appendGameRecord(dir: string, record: LadderGameRecord): void {
   fs.mkdirSync(dir, { recursive: true });
   fs.appendFileSync(gamesJsonlPath(dir), `${JSON.stringify(record)}\n`);
+}
+
+/** New `jev.ladder-game.v1` rows must name their run. Older rows with no schema are left alone. */
+export function assertNewGameRow(row: object): void {
+  const record = row as { schema?: unknown; runId?: unknown };
+  if (record.schema !== LADDER_GAME_SCHEMA) return;
+  if (typeof record.runId !== 'string' || record.runId.trim() === '') {
+    throw new Error('new ladder game rows require runId');
+  }
+}
+
+export interface RunGroup {
+  runId: string;
+  batchLabel: string | null;
+  hostname: string | null;
+  wins: number;
+  losses: number;
+  ties: number;
+  games: number;
+}
+
+/** One tally per run, in first-seen order. Rows with no runId share `unknown`. */
+export function groupByRunId(games: Array<{
+  runId?: string | null;
+  batchLabel?: string | null;
+  hostname?: string | null;
+  outcome: 'win' | 'loss' | 'tie';
+}>): RunGroup[] {
+  const order: string[] = [];
+  const groups = new Map<string, RunGroup>();
+  for (const game of games) {
+    const runId = game.runId?.trim() || 'unknown';
+    let group = groups.get(runId);
+    if (!group) {
+      group = {
+        runId,
+        batchLabel: game.batchLabel ?? null,
+        hostname: game.hostname ?? null,
+        wins: 0,
+        losses: 0,
+        ties: 0,
+        games: 0,
+      };
+      groups.set(runId, group);
+      order.push(runId);
+    }
+    if (!group.batchLabel && game.batchLabel) group.batchLabel = game.batchLabel;
+    if (!group.hostname && game.hostname) group.hostname = game.hostname;
+    group.games += 1;
+    if (game.outcome === 'win') group.wins += 1;
+    else if (game.outcome === 'loss') group.losses += 1;
+    else group.ties += 1;
+  }
+  return order.map(id => groups.get(id)!);
 }
 
 /** Shape of PR #5 `live-games.jsonl`, with nulls left null. */
@@ -499,6 +608,7 @@ export interface TranscriptFacts {
   gxe: number | null;
   turns: number;
   invalidChoices: number;
+  invalidChoiceReasons: string[];
   crashes: number;
   winner: string | null;
   minTimerMarginSec: number | null;
@@ -512,6 +622,7 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
   let ourSide: string | null = null;
   let turns = 0;
   let invalidChoices = 0;
+  const invalidChoiceReasons: string[] = [];
   let crashes = 0;
   let winner: string | null = null;
   let eloBefore: number | null = null;
@@ -533,7 +644,11 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
       }
     }
     if (line.startsWith('|turn|')) turns = Number(line.slice('|turn|'.length)) || turns;
-    if (/invalid choice/i.test(line)) invalidChoices += 1;
+    const reason = invalidChoiceReason(line);
+    if (reason) {
+      invalidChoices += 1;
+      if (invalidChoiceReasons.length < INVALID_CHOICE_REASON_CAP) invalidChoiceReasons.push(reason);
+    }
     if (/simulator process crashed|battle crashed/i.test(line)) crashes += 1;
     if (line.startsWith('|win|')) winner = line.slice('|win|'.length).trim() || null;
 
@@ -575,6 +690,7 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
     gxe,
     turns,
     invalidChoices,
+    invalidChoiceReasons,
     crashes,
     winner,
     minTimerMarginSec: timerMarginSec(lines, username),

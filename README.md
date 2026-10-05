@@ -207,7 +207,7 @@ Each run also appends `logs/ladder/metrics.jsonl` (one JSON object per line) nex
 
 ### Live metrics JSONL
 
-`v` is the schema version (`1`). Every line also has `ts` (unix ms), `runId`, and `engine`. A decision or game line stamps the `configId`, `configHash`, `role` (`champion` or `challenger`), and `share` of the config that played that battle. The `run` line lists every arm in `ab`. `gitSha` is the process commit.
+`v` is the schema version (`1`). Every line also has `ts` (unix ms), `runId` (the same id printed at startup), `batchLabel`, `hostname`, and `engine`. A decision or game line stamps the `configId`, `configHash`, `role` (`champion` or `challenger`), and `share` of the config that played that battle. The `run` line lists every arm in `ab`. `gitSha` is the process commit.
 
 Percentiles are nearest-rank: sort the samples and take index `ceil(p/100 * n) - 1`. An empty sample list is `null`.
 
@@ -546,6 +546,7 @@ P0 is losing games or corrupting data now. P1 is the loop or visibility broken. 
 | runner-down | P1 | A `live-runs/*.json` pid that is not `ladder.ts`, and `summary.json` is not newer |
 | ops-worker-missing | P1 | factory, gatekeeper, live, or analyst has no fresh heartbeat while another worker is up |
 | ops-worker-duplicate | P1 | Two fresh pids for one of those workers |
+| improvement-stall | P1 | Losses reviewed and nothing queued for 15 minutes |
 | analyst-log-dir | P1 | Analyst process has no `LADDER_LOG_DIR` and its default dirs have no game JSONL while the ladder log dir does |
 | circuits-all-pulled | P1 | Every entry in `circuits.json` is pulled, so ops live stays idle |
 | mixed-ratings | P1 | A local rating and a ladder rating in the same lookback window |
@@ -601,7 +602,7 @@ Other fields:
 | `opponent`, `opponentRating` | name and pre-game ladder rating from `\|player\|`. Null when the server omits them. |
 | `eloBefore`, `eloAfter` | our rating from the rating popup. `eloBefore` falls back to our `\|player\|` rating. Null when absent. Never 1000. |
 | `gxe` | from the rating line when that parser provides it. Null when absent. Never 50. |
-| `turns`, `invalidChoices`, `crashes`, `fallbacks`, `mismatches` | existing counters. Ops name for `invalidChoices` is `invalid`. |
+| `turns`, `invalidChoices`, `invalidChoiceReasons`, `crashes`, `fallbacks`, `mismatches`, `beliefErrors` | existing counters. `invalidChoiceReasons` is the text after `[Invalid choice]` on each `\|error\|` or `\|bigerror\|` line, capped at 8. A chat echo of the same words is not counted. Ops name for `invalidChoices` is `invalid`. `beliefErrors` counts posterior updates that threw; that battle then uses BeliefTracker. It is 0 when set inference is not `calibrated`. |
 | `durationMs` | wall clock from room open to the record |
 | `decisions` | number of `latencyMs` samples |
 | `latencyP50Ms`, `latencyP95Ms`, `latencyP99Ms` | nearest-rank percentiles of per-turn `latencyMs`, same rule as `metrics.jsonl`. Null when there are no samples. |
@@ -621,6 +622,9 @@ Other fields:
 | `localReplayPath` | raw protocol log on disk |
 | `logPath` | per-battle JSONL |
 | `ts`, `startedAt` | epoch ms. `pid` is the process id. |
+| `runId` | Ladder run id printed at startup (`[ladder] pid=… run=…`). The same id is on every `metrics.jsonl` line for that process. `ops live` prints its own. Required on new rows. |
+| `batchLabel` | `LIVE_BATCH_LABEL`, or the file name (without `.log` / `.txt` / `.jsonl`) when stdout is redirected. Null when neither is set. |
+| `hostname` | `os.hostname()` of the machine that wrote the row. |
 | `calibration` | present when at least one turn was compared with the protocol. Foe-action accuracy, damage MAE, KO misses, and speed-order misses. See Sim calibration below. |
 
 Per-turn rows in the battle file (not copied into `games.jsonl`):
@@ -636,7 +640,7 @@ A later `prediction_error` row (`jev.prediction-error.v1`) on the same file scor
 Example:
 
 ```json
-{"schema":"jev.ladder-game.v1","kind":"ladder-game","source":"ladder","battleId":"battle-gen9randombattle-1","opponent":"Rival","opponentRating":1400,"outcome":"win","endReason":"ko","turns":21,"invalidChoices":0,"crashes":0,"fallbacks":0,"eloBefore":1073,"eloAfter":1089,"gxe":null,"durationMs":84000,"decisions":20,"latencyP50Ms":40,"latencyP95Ms":180,"latencyP99Ms":400,"latencyMaxMs":400,"minTimerMarginSec":12,"engine":"max-damage","configId":"maxdamage-v1","configHash":"ab12","gitSha":"87b268f","concurrency":1,"replayUrl":null,"replayStatus":"unconfirmed"}
+{"schema":"jev.ladder-game.v1","kind":"ladder-game","source":"ladder","battleId":"battle-gen9randombattle-1","opponent":"Rival","opponentRating":1400,"outcome":"win","endReason":"ko","turns":21,"invalidChoices":0,"invalidChoiceReasons":[],"crashes":0,"fallbacks":0,"eloBefore":1073,"eloAfter":1089,"gxe":null,"durationMs":84000,"decisions":20,"latencyP50Ms":40,"latencyP95Ms":180,"latencyP99Ms":400,"latencyMaxMs":400,"minTimerMarginSec":12,"engine":"max-damage","configId":"maxdamage-v1","configHash":"ab12","gitSha":"87b268f","concurrency":1,"replayUrl":null,"replayStatus":"unconfirmed"}
 ```
 
 ## Sim calibration
@@ -664,7 +668,7 @@ Per-battle JSONL (`logs/ladder/{user}-{room}.jsonl`) records these events in add
 | `kind` | When |
 | --- | --- |
 | `timer` | Every `\|inactive\|` / `\|inactiveoff\|`. `secondsLeft`, `aboutUs`, `tight` (`aboutUs` and at most 4 seconds). |
-| `choice-delivery` | After `/choose`. `sent`, `cause` (`sent`, `unconfirmed`, `stale-rqid`, `socket-closed`, `send-threw`, `illegal`, `server-rejected`, `not-your-turn`, `no-legal-retry`), `retry`, `replacement`, `serverLine`, `intendedRoomId`, `sentRoomId`. `intendedRoomId` is the battle the request belonged to. `sentRoomId` is the room id on the `/choose` message, or null when nothing was sent. A false `choose` is retried. `unconfirmed` is the same choice and rqid sent again when 8 seconds pass with no new request and no later turn, and also when our clock ticks. Turn 1 is included. `|turn|1` after the move does not clear it. `stale-rqid` was not sent. When no legal replacement remains, one `no-legal-retry` row is written. |
+| `choice-delivery` | After `/choose`. `sent`, `cause` (`sent`, `unconfirmed`, `stale-rqid`, `socket-closed`, `send-threw`, `illegal`, `server-rejected`, `not-your-turn`, `no-legal-retry`), `retry`, `replacement`, `serverLine`, `intendedRoomId`, `sentRoomId`. `intendedRoomId` is the battle the request belonged to. `sentRoomId` is the room id on the `/choose` message, or null when nothing was sent. A false `choose` is retried. `unconfirmed` is the same choice and rqid sent again only when a clock line for us arrives after the send and the turn has not moved. Silence, including the wait for the opponent and `|turn|1`, does not resend. `stale-rqid` was not sent. An invalid choice that means the original choice still stands (`too late`, `Can't undo`, `nothing to choose`, `not your turn`, `nothing to cancel`) is not replaced. A rejected move is replaced with another legal slot, and that replacement counts on `fallbacks`. When no legal replacement remains, one `no-legal-retry` row is written. |
 | `popup` | `attribution` is `matched`, `only-open`, `ambiguous`, or `elsewhere`. A replay URL matches the battle id even when a password follows it. `elsewhere` is a named battle that is not open, and it is not copied onto the battles that are. An ambiguous popup is copied onto each open battle with `candidates` and is not filed on "the latest room". |
 
 `secondsLeft` is cleared on each `\|request\|`, so a later turn does not reuse the previous clock. The game `result` includes `choiceDeliveryFailures`, `noLegalRetries`, and `ambiguousPopups`. Finished battles are removed from the driver's room map.

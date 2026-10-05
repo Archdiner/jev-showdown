@@ -126,5 +126,8 @@ function heartbeatPaths(root: string): OpsPaths {
     priors: file('behavior.json'),
     pool: file('mined-pool.json'),
     variants: file('variants.json'),
+    cycle: file('cycle.jsonl'),
+    dispositions: file('dispositions.jsonl'),
+    hypotheses: file('hypotheses.json'),
   };
 }
