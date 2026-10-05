@@ -10,7 +10,9 @@ interface WorkerMessage {
 
 /**
  * Run games across all CPU cores. Each job is one game.
- * Workers stay warm and pull jobs until the queue is empty.
+ * A worker is replaced after every game. A warm worker that plays a
+ * whole panel keeps a multi-GB heap, and a garbage-collection pause
+ * then shows up as a turn over the 2s guardrail.
  */
 export async function runGamesParallel(
   jobs: GameJob[],
@@ -18,10 +20,16 @@ export async function runGamesParallel(
 ): Promise<GameResult[]> {
   if (jobs.length === 0) return [];
   const workerCount = Math.max(1, Math.min(concurrency, jobs.length));
-  const workers = Array.from({ length: workerCount }, () => new Worker(new URL('./worker.js', import.meta.url)));
   const results: GameResult[] = new Array(jobs.length);
+  const live = new Set<Worker>();
   let cursor = 0;
   let finished = 0;
+
+  const spawn = (): Worker => {
+    const worker = new Worker(new URL('./worker.js', import.meta.url));
+    live.add(worker);
+    return worker;
+  };
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -32,14 +40,22 @@ export async function runGamesParallel(
         reject(err);
       };
 
+      const retire = (worker: Worker) => {
+        live.delete(worker);
+        void worker.terminate();
+      };
+
       const assign = (worker: Worker) => {
-        if (failed) return;
-        if (cursor >= jobs.length) return;
+        if (failed || cursor >= jobs.length) {
+          retire(worker);
+          return;
+        }
         const job = jobs[cursor++];
         const onMessage = (msg: WorkerMessage) => {
           worker.off('message', onMessage);
           if (!msg.ok || !msg.result) {
             fail(new Error(msg.error || `worker failed on game ${job.index}`));
+            retire(worker);
             return;
           }
           results[job.index] = msg.result;
@@ -47,23 +63,21 @@ export async function runGamesParallel(
           if (finished % 20 === 0 || finished === jobs.length) {
             console.log(`  ${finished}/${jobs.length} games finished`);
           }
-          if (finished === jobs.length) {
-            resolve();
-            return;
-          }
-          assign(worker);
+          const done = finished === jobs.length;
+          const next = done || failed ? null : spawn();
+          retire(worker);
+          if (done && !failed) resolve();
+          if (next) assign(next);
         };
         worker.on('message', onMessage);
+        worker.on('error', err => fail(err));
         worker.postMessage({ type: 'game', job });
       };
 
-      for (const worker of workers) {
-        worker.on('error', err => fail(err));
-        assign(worker);
-      }
+      for (let i = 0; i < workerCount; i++) assign(spawn());
     });
   } finally {
-    await Promise.all(workers.map(worker => worker.terminate()));
+    await Promise.all([...live].map(worker => worker.terminate()));
   }
 
   return results;
