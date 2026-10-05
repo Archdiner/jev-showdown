@@ -10,6 +10,7 @@ hybrid:
   id: layers
   params:
     worlds: 4
+    sampler: loose
     samples: 1
     tera: true
     enrichDecisionState: true

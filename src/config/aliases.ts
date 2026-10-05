@@ -21,6 +21,7 @@ const FILES: Record<string, string> = {
   'hybrid-full': 'configs/hybrid.yaml',
   'hybrid-plan': 'configs/hybrid-plan.yaml',
   'hybrid-core': 'configs/hybrid-core.yaml',
+  'hybrid-calibrated': 'configs/hybrid-calibrated.yaml',
   'hybrid-every-qwen': 'configs/hybrid-every-qwen.yaml',
   'hybrid-every-qwen-wide': 'configs/hybrid-every-qwen-wide.yaml',
   'hybrid-every-opus': 'configs/hybrid-every-opus.yaml',

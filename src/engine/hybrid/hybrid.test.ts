@@ -8,7 +8,8 @@ import { parsePublic } from './protocol.js';
 import { regretMatch } from './regret.js';
 import { createHybridSearch } from './search.js';
 import { judgeMove } from './llm.js';
-import { assertRandbatsSpecies, itemAllowed, MIN_RANDBATS_SPECIES } from './worlds.js';
+import { assertRandbatsSpecies, itemAllowed, MIN_RANDBATS_SPECIES, sampleHybridWorlds } from './worlds.js';
+import { loadConfig } from '../../config/load.js';
 import type { FoeMon } from '../../client/decision-battle.js';
 
 function foe(partial: Partial<FoeMon> & { species: string }): FoeMon {
@@ -148,6 +149,43 @@ describe('hybrid search pieces', () => {
     expect(wide.choice).toBe('switch 2');
   });
 
+  it('draws the calibrated posterior when the sampler knob says so', () => {
+    expect(HybridParamsSchema.parse({}).sampler).toBe('loose');
+    expect(loadConfig('configs/hybrid-core.yaml').config.hybrid?.params.sampler).toBe('loose');
+    expect(loadConfig('configs/hybrid-calibrated.yaml').config.hybrid?.params.sampler).toBe('calibrated');
+
+    const stats = wideStats();
+    stats.Pikachu = {
+      level: 80,
+      abilities: { Static: 1 },
+      items: { Leftovers: 1 },
+      roles: {
+        Lead: {
+          weight: 1,
+          moves: { 'Thunder Wave': 1, Thunderbolt: 1, 'Quick Attack': 1, Protect: 1 },
+          items: { 'Heavy-Duty Boots': 1, 'Assault Vest': 1, Leftovers: 1 },
+        },
+      },
+    };
+    const evidence = {
+      knownFoes: [foe({
+        species: 'Pikachu',
+        moves: ['Thunder Wave'],
+        hazardChip: true,
+        statusMove: true,
+      })],
+    };
+    const rng = () => new PRNG([4, 5, 6, 7] as never);
+    const loose = sampleHybridWorlds(evidence, 6, stats, rng(), 'balanced', 'loose');
+    const calibrated = sampleHybridWorlds(evidence, 6, stats, rng(), 'balanced', 'calibrated');
+    expect(loose.length).toBeGreaterThan(0);
+    expect(calibrated.length).toBeGreaterThan(0);
+    const items = calibrated.flatMap(world => world.foeTeam.filter(set => set.species === 'Pikachu').map(set => set.item));
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every(item => item !== 'Heavy-Duty Boots' && item !== 'Assault Vest')).toBe(true);
+    expect(calibrated.every(world => world.foeTeam[0]?.moves.includes('Thunder Wave'))).toBe(true);
+  });
+
   it('returns a legal choice from sampled worlds', async () => {
     const teams = teamsForSeed(11);
     const battle = startRandomBattle(teams.p1, teams.p2, 11);
@@ -164,6 +202,7 @@ describe('hybrid search pieces', () => {
       hybrid: HybridParamsSchema.parse({
         worlds: 2,
         samples: 1,
+        sampler: 'calibrated',
         plan: false,
         opponent: false,
         judgment: false,

@@ -24,7 +24,7 @@ import type { SearchParams } from '../../config/schema.js';
 import { battleFromWorld } from './battle.js';
 import { decisionBrief, emptyLedger, judgeMove, maybeStartPlan, planBonus, type HybridLedger } from './llm.js';
 import { regretMatch } from './regret.js';
-import { assertRandbatsSpecies, sampleWorlds, type OpponentStyle, type WorldEvidence } from './worlds.js';
+import { assertRandbatsSpecies, sampleHybridWorlds, type OpponentStyle, type WorldEvidence } from './worlds.js';
 
 const metrics = new WeakMap<object, { costUsd: number; timeouts: number }>();
 
@@ -73,7 +73,15 @@ async function hybridSearch(
 
   const style: OpponentStyle = params.opponent && ledger.plan ? ledger.plan.style : 'balanced';
   const rng = ctx.rng ?? new PRNG([viewed.turn + 1, 2, 3, 4] as never);
-  const worlds = sampleWorlds(evidence, params.worlds, stats, rng, style);
+  const worlds = sampleHybridWorlds(
+    evidence,
+    params.worlds,
+    stats,
+    rng,
+    style,
+    params.sampler,
+    { ourSpeed: activeSpeed(viewed, side) },
+  );
   const allowed = ctx.llmAllowed !== false && (ctx.llmCostCapUsd == null || ledger.costUsd < ctx.llmCostCapUsd);
   const wantsModel = params.plan || params.judgment || params.everyTurn;
   const client = allowed && wantsModel ? clientOf() : null;
@@ -312,6 +320,17 @@ function teraGate(
   if (plan?.tera === 'hold' && turn < 10) return plain.choice;
   if (turn < 10 && plan?.tera !== 'now') return plain.choice;
   return tera.score - plain.score >= margin ? tera.choice : plain.choice;
+}
+
+function activeSpeed(battle: Battle, side: SideId): number {
+  const mon = battle.getSide(side).active[0] as { getStat?: (stat: 'spe') => number } | null;
+  if (!mon?.getStat) return 0;
+  try {
+    const speed = mon.getStat('spe');
+    return Number.isFinite(speed) ? speed : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function evidenceFrom(viewed: Battle, position: LivePosition | null): WorldEvidence & { position: LivePosition | null } {

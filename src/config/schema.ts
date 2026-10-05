@@ -55,6 +55,8 @@ export type AgentParams = z.infer<typeof AgentParamsSchema>;
 
 export const HybridParamsSchema = z.object({
   worlds: z.number().int().min(1).max(16).default(4),
+  /** `loose` is the raw randbats draw. `calibrated` is SetInference.sampleWorlds. */
+  sampler: z.enum(['loose', 'calibrated']).default('loose'),
   samples: z.number().int().min(1).max(8).default(1),
   tera: z.boolean().default(true),
   maxActions: z.number().int().min(2).max(16).default(8),

@@ -1,6 +1,8 @@
 import { Dex, PRNG, PokemonSet } from '@pkmn/sim';
 import type { RandbatsStats, RoleData, SpeciesStats } from '../../types/index.js';
 import type { FoeMon } from '../../client/decision-battle.js';
+import { inferenceFromFoes, sampleWorlds as drawCalibratedWorlds } from '../set-inference/index.js';
+import { toPokemonSet } from '../set-inference/sample.js';
 
 /** Eval and search refuse a stub. Real gen9 randbats is about 509 species. */
 export const MIN_RANDBATS_SPECIES = 500;
@@ -8,6 +10,9 @@ export const MIN_RANDBATS_SPECIES = 500;
 export const TEAM_SIZE = 6;
 
 export type OpponentStyle = 'aggressive' | 'stall' | 'balanced';
+
+/** `loose` draws from raw randbats weights. `calibrated` draws from the set-inference posterior. */
+export type WorldSampler = 'loose' | 'calibrated';
 
 export interface WorldSample {
   foeTeam: PokemonSet[];
@@ -58,6 +63,65 @@ export function sampleWorlds(
     if (world) worlds.push(world);
   }
   return dedupe(worlds);
+}
+
+/**
+ * Hybrid's world draw. `loose` is the raw randbats sampler. `calibrated` is
+ * `SetInference.sampleWorlds`, conditioned on revealed sets, hazard chip, and speed.
+ */
+export function sampleHybridWorlds(
+  evidence: WorldEvidence,
+  k: number,
+  stats: RandbatsStats,
+  rng: PRNG,
+  style: OpponentStyle = 'balanced',
+  sampler: WorldSampler = 'loose',
+  speed?: { ourSpeed: number },
+): WorldSample[] {
+  if (sampler === 'calibrated') return sampleCalibrated(evidence, k, stats, rng, speed);
+  return sampleWorlds(evidence, k, stats, rng, style);
+}
+
+function sampleCalibrated(
+  evidence: WorldEvidence,
+  k: number,
+  stats: RandbatsStats,
+  rng: PRNG,
+  speed?: { ourSpeed: number },
+): WorldSample[] {
+  assertRandbatsSpecies(stats);
+  const inference = inferenceFromFoes(stats, evidence.knownFoes.map(sketchOf), {
+    seed: 1 + rng.random(0x7ffffffe),
+    ourSide: 'p1',
+  });
+  for (const mon of evidence.knownFoes) {
+    if (mon.hazardChip) inference.noteHazard(mon.species, 'Stealth Rock');
+    if (speed && speed.ourSpeed > 0 && mon.speed) {
+      inference.noteSpeed({
+        species: mon.species,
+        foeMovedFirst: mon.speed === 'faster',
+        ourSpeed: speed.ourSpeed,
+        foeStage: mon.boosts?.spe || 0,
+        foeParalyzed: mon.status === 'par',
+      });
+    }
+  }
+  return drawCalibratedWorlds(inference, k).flatMap(world => {
+    const foeTeam = world.team.map(mon => toPokemonSet(mon)).filter(set => Dex.species.get(set.species).exists);
+    if (foeTeam.length === 0) return [];
+    return [{ foeTeam, weight: world.weight, tag: world.tag }];
+  });
+}
+
+function sketchOf(mon: FoeMon): { species: string; level: number; moves: string[]; ability?: string; item?: string; teraType?: string } {
+  return {
+    species: mon.species,
+    level: mon.level || 80,
+    moves: (mon.moves || []).filter(move => !isFillerMove(toId(move))),
+    ability: mon.ability,
+    item: mon.item,
+    teraType: mon.terastallized,
+  };
 }
 
 function sampleWorld(

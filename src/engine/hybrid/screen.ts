@@ -10,6 +10,7 @@ import { assertRandbatsSpecies } from './worlds.js';
 
 const VARIANTS = [
   'hybrid-core',
+  'hybrid-calibrated',
   'hybrid-plan',
   'hybrid',
   'hybrid-every-qwen',
@@ -17,7 +18,7 @@ const VARIANTS = [
   'hybrid-every-opus',
   'hybrid-every-grok',
 ] as const;
-const OPPONENTS = ['exact', 'maxdamage'] as const;
+const OPPONENTS = ['exact', 'maxdamage', 'loose'] as const;
 
 function arg(name: string, fallback: string): string {
   const hit = process.argv.find(item => item.startsWith(`--${name}=`));
@@ -26,6 +27,7 @@ function arg(name: string, fallback: string): string {
 
 function opponent(name: (typeof OPPONENTS)[number]): BenchPlayer {
   if (name === 'maxdamage') return { kind: 'maxdamage' };
+  if (name === 'loose') return specForAlias('hybrid-core', 'ladder');
   return { kind: 'exact', config: EXACT_1PLY };
 }
 
@@ -90,6 +92,7 @@ async function main(): Promise<void> {
   for (const variant of variants) {
     const candidate = specForAlias(variant, 'ladder');
     for (const name of opponents) {
+      if (name === 'loose' && variant !== 'hybrid-calibrated') continue;
       const other = opponent(name);
       const jobs: GameJob[] = [];
       for (let i = 0; i < pairs; i++) {

@@ -1,0 +1,9 @@
+name: hybrid-calibrated
+extends: hybrid-core.yaml
+hybrid:
+  id: layers
+  params:
+    sampler: calibrated
+    plan: false
+    opponent: false
+    judgment: false
