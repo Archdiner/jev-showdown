@@ -15,6 +15,7 @@ import {
   AccountLockHeldError,
   accountLockRefusal,
   acquireAccountLock,
+  bindLockRemoval,
 } from '../client/account-lock.js';
 import { safeError, toID } from '../client/ids.js';
 import { EngineName, MAX_LADDER_CONCURRENCY, parseEngine } from '../client/engines.js';
@@ -202,7 +203,7 @@ Each finished game records configId, configHash, and the commit. The startup lin
 --ramp steps from 3 (search) or 4 (max-damage) up to K while p95 latency and the turn timer stay healthy, and steps back when they do not.
 Backpressure always pauses new searches when p95 latency degrades, the turn timer drops under the safety margin, or Showdown throttles a search. Games already running are left in place.
 A proxy lock, ban, or ‽/! name exits immediately and does not reconnect.
-One account, one runner. Before login the process writes state/ladder-<userid>.lock with its pid and start time. If that file names a pid that is still running, this process prints that pid and start time and exits. A lock whose pid is dead is stale and is taken over. --check does not take the lock. A local two-bot series locks BotAlpha and BotBravo.
+One account, one runner. Before login the process creates state/ladder-<userid>.lock with O_EXCL, storing pid, start time, and host. If that pid is still running, or the lock is from another host, this process prints the holder and exits non-zero. A lock is stale only when its pid is dead on this host. The file is removed on exit and on SIGINT. The first SIGTERM drains and keeps the lock until the process exits, so a restart cannot log in while this one is still sending choices. --check does not take the lock. A local two-bot series locks BotAlpha and BotBravo.
 
 Graceful drain (finish in-progress games, then exit):
   kill -USR1 <pid>    or    kill -TERM <pid>
@@ -773,10 +774,10 @@ function holdAccountLocks(usernames: string[]): () => void {
       held.push(lock);
       if (lock.replacedStale) {
         console.error(
-          `[ladder] stale account lock for ${username} (pid ${lock.replacedStale.pid}, started ${lock.replacedStale.startedAt}) belonged to a dead process. Taking it.`,
+          `[ladder] stale account lock for ${username} on ${lock.replacedStale.host || 'this host'} (pid ${lock.replacedStale.pid}, started ${lock.replacedStale.startedAt}) belonged to a dead process. Taking it.`,
         );
       }
-      console.log(`[ladder] account lock user=${username} pid=${lock.pid} started=${lock.startedAt} file=${lock.path}`);
+      console.log(`[ladder] account lock user=${username} pid=${lock.pid} host=${lock.host} started=${lock.startedAt} file=${lock.path}`);
     }
   } catch (err) {
     for (const lock of held) lock.release();
@@ -785,8 +786,11 @@ function holdAccountLocks(usernames: string[]): () => void {
   const release = () => {
     for (const lock of held) lock.release();
   };
-  process.once('exit', release);
-  return release;
+  const unbind = bindLockRemoval(release);
+  return () => {
+    release();
+    unbind();
+  };
 }
 
 function openDrain(

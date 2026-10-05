@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { toID } from './ids.js';
 import { pidAlive } from './ladder-run.js';
@@ -8,9 +9,10 @@ export interface AccountLock {
   username: string;
   pid: number;
   startedAt: string;
+  host: string;
   path: string;
-  /** Set when this process replaced a lock whose pid was not running. */
-  replacedStale: { pid: number; startedAt: string } | null;
+  /** Set when this process replaced a lock whose pid was not running on this host. */
+  replacedStale: { pid: number; startedAt: string; host: string } | null;
   release(): void;
 }
 
@@ -18,6 +20,7 @@ export interface AccountLockOptions {
   stateDir?: string;
   pid?: number;
   startedAt?: string;
+  host?: string;
   alive?: (pid: number) => boolean;
 }
 
@@ -25,14 +28,16 @@ export class AccountLockHeldError extends Error {
   readonly username: string;
   readonly holderPid: number;
   readonly startedAt: string;
+  readonly host: string;
   readonly lockPath: string;
 
-  constructor(username: string, holderPid: number, startedAt: string, lockPath: string) {
-    super(`another ladder runner already holds ${username} (pid ${holderPid}, started ${startedAt})`);
+  constructor(username: string, holderPid: number, startedAt: string, host: string, lockPath: string) {
+    super(`another ladder runner already holds ${username} on ${host} (pid ${holderPid}, started ${startedAt})`);
     this.name = 'AccountLockHeldError';
     this.username = username;
     this.holderPid = holderPid;
     this.startedAt = startedAt;
+    this.host = host;
     this.lockPath = lockPath;
   }
 }
@@ -43,14 +48,31 @@ export function accountLockPath(stateDir: string, username: string): string {
   return path.join(stateDir, `ladder-${id}.lock`);
 }
 
-/** Stderr line for a second runner. Names the live pid and when it started. */
+/** Stderr line for a second runner. Names the host, the live pid, and when it started. */
 export function accountLockRefusal(err: AccountLockHeldError): string {
-  return `[ladder] another runner already holds ${err.username} (pid ${err.holderPid}, started ${err.startedAt}). Exiting so this process does not send choices into the same battles. Lock: ${err.lockPath}`;
+  return `[ladder] another runner already holds ${err.username} on ${err.host} (pid ${err.holderPid}, started ${err.startedAt}). Exiting so this process does not send choices into the same battles. Lock: ${err.lockPath}`;
+}
+
+/**
+ * Drop the lock when this process is stopping.
+ * SIGINT removes it immediately. SIGTERM removes it on the way out (`exit`),
+ * including the second SIGTERM that stops a drain. The first SIGTERM keeps
+ * the file, because that process is still logged in and still sending choices.
+ */
+export function bindLockRemoval(release: () => void): () => void {
+  const remove = () => release();
+  process.on('exit', remove);
+  process.on('SIGINT', remove);
+  return () => {
+    process.off('exit', remove);
+    process.off('SIGINT', remove);
+  };
 }
 
 interface StoredLock {
   pid: number;
   startedAt: string;
+  host: string;
   username: string;
 }
 
@@ -67,19 +89,20 @@ export function acquireAccountLock(username: string, options: AccountLockOptions
   const file = path.join(stateDir, `ladder-${id}.lock`);
   const pid = options.pid ?? process.pid;
   const startedAt = options.startedAt ?? new Date().toISOString();
+  const host = options.host ?? os.hostname();
   const alive = options.alive ?? pidAlive;
-  const body = `${JSON.stringify({ pid, startedAt, username })}\n`;
-  let replacedStale: { pid: number; startedAt: string } | null = null;
+  const body = `${JSON.stringify({ pid, startedAt, host, username })}\n`;
+  let replacedStale: { pid: number; startedAt: string; host: string } | null = null;
 
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      const fd = fs.openSync(file, 'wx');
+      const fd = fs.openSync(file, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY, 0o644);
       try {
         fs.writeFileSync(fd, body);
       } finally {
         fs.closeSync(fd);
       }
-      return heldLock(username, pid, startedAt, file, replacedStale);
+      return heldLock(username, pid, startedAt, host, file, replacedStale);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       let raw: string;
@@ -90,28 +113,36 @@ export function acquireAccountLock(username: string, options: AccountLockOptions
         throw readErr;
       }
       const holder = parseLock(raw);
-      if (holder && alive(holder.pid)) {
-        throw new AccountLockHeldError(holder.username || username, holder.pid, holder.startedAt, file);
+      if (holder && lockIsHeld(holder, alive, host)) {
+        throw new AccountLockHeldError(holder.username || username, holder.pid, holder.startedAt, holder.host || host, file);
       }
-      if (holder) replacedStale = { pid: holder.pid, startedAt: holder.startedAt };
+      if (holder) replacedStale = { pid: holder.pid, startedAt: holder.startedAt, host: holder.host };
       displaceIfUnchanged(file, raw);
     }
   }
   throw new Error(`Could not take the ladder account lock for ${username} at ${file}`);
 }
 
+/** A lock is stale only when its pid is dead on this host. Another machine's pid is not visible here. */
+function lockIsHeld(holder: StoredLock, alive: (pid: number) => boolean, localHost: string): boolean {
+  if (holder.host && holder.host !== localHost) return true;
+  return alive(holder.pid);
+}
+
 function heldLock(
   username: string,
   pid: number,
   startedAt: string,
+  host: string,
   file: string,
-  replacedStale: { pid: number; startedAt: string } | null,
+  replacedStale: { pid: number; startedAt: string; host: string } | null,
 ): AccountLock {
   let released = false;
   return {
     username,
     pid,
     startedAt,
+    host,
     path: file,
     replacedStale,
     release() {
@@ -124,7 +155,7 @@ function heldLock(
         return;
       }
       const holder = parseLock(raw);
-      if (!holder || holder.pid !== pid || holder.startedAt !== startedAt) return;
+      if (!holder || holder.pid !== pid || holder.startedAt !== startedAt || holder.host !== host) return;
       displaceIfUnchanged(file, raw);
     },
   };
@@ -132,11 +163,12 @@ function heldLock(
 
 function parseLock(raw: string): StoredLock | null {
   try {
-    const parsed = JSON.parse(raw) as { pid?: unknown; startedAt?: unknown; username?: unknown };
+    const parsed = JSON.parse(raw) as { pid?: unknown; startedAt?: unknown; host?: unknown; username?: unknown };
     if (typeof parsed.pid !== 'number' || !Number.isInteger(parsed.pid) || parsed.pid <= 0) return null;
     if (typeof parsed.startedAt !== 'string' || parsed.startedAt.length === 0) return null;
+    const host = typeof parsed.host === 'string' ? parsed.host : '';
     const username = typeof parsed.username === 'string' ? parsed.username : '';
-    return { pid: parsed.pid, startedAt: parsed.startedAt, username };
+    return { pid: parsed.pid, startedAt: parsed.startedAt, host, username };
   } catch {
     return null;
   }

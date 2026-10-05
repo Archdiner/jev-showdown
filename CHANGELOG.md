@@ -2,7 +2,7 @@
 
 ## One ladder runner per account
 
-A ladder process takes `state/ladder-<userid>.lock` before it logs in. The file stores the pid and the start time. A second process for that account prints the holder's pid and start time and exits, so two restarts cannot both send choices into the same battles. A lock whose pid is not running is stale and is replaced. `--check` does not take the lock. A local two-bot series locks BotAlpha and BotBravo.
+A ladder process creates `state/ladder-<userid>.lock` with `O_EXCL` before it logs in. The file stores the pid, the start time, and the host. A second process for that account prints the holder's host, pid, and start time and exits non-zero, so two restarts cannot both send choices into the same battles. A lock is stale only when that pid is dead on this host. A lock from another host is left in place. The file is removed on exit and on SIGINT. The first SIGTERM drains and keeps the lock until the process exits. `--check` does not take the lock. A local two-bot series locks BotAlpha and BotBravo.
 
 ## Stale battle rooms do not block the drain
 

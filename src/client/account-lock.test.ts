@@ -6,6 +6,7 @@ import {
   AccountLockHeldError,
   accountLockRefusal,
   acquireAccountLock,
+  bindLockRemoval,
 } from './account-lock.js';
 
 function tempDir(): string {
@@ -19,12 +20,14 @@ describe('ladder account lock', () => {
       stateDir: dir,
       pid: 4242,
       startedAt: '2026-10-05T03:07:00.000Z',
+      host: 'test-host',
       alive: pid => pid === 4242,
     });
     expect(path.basename(first.path)).toBe('ladder-archinder.lock');
     expect(JSON.parse(fs.readFileSync(first.path, 'utf8'))).toEqual({
       pid: 4242,
       startedAt: '2026-10-05T03:07:00.000Z',
+      host: 'test-host',
       username: 'Archinder',
     });
 
@@ -32,6 +35,7 @@ describe('ladder account lock', () => {
       stateDir: dir,
       pid: 99,
       startedAt: '2026-10-05T03:07:06.000Z',
+      host: 'test-host',
       alive: pid => pid === 4242,
     })).toThrow(AccountLockHeldError);
 
@@ -40,6 +44,7 @@ describe('ladder account lock', () => {
         stateDir: dir,
         pid: 99,
         startedAt: '2026-10-05T03:07:06.000Z',
+        host: 'test-host',
         alive: pid => pid === 4242,
       });
     } catch (err) {
@@ -47,8 +52,9 @@ describe('ladder account lock', () => {
       const held = err as AccountLockHeldError;
       expect(held.holderPid).toBe(4242);
       expect(held.startedAt).toBe('2026-10-05T03:07:00.000Z');
+      expect(held.host).toBe('test-host');
       expect(accountLockRefusal(held)).toBe(
-        '[ladder] another runner already holds Archinder (pid 4242, started 2026-10-05T03:07:00.000Z). Exiting so this process does not send choices into the same battles. Lock: '
+        '[ladder] another runner already holds Archinder on test-host (pid 4242, started 2026-10-05T03:07:00.000Z). Exiting so this process does not send choices into the same battles. Lock: '
         + first.path,
       );
     }
@@ -64,6 +70,7 @@ describe('ladder account lock', () => {
     fs.writeFileSync(file, `${JSON.stringify({
       pid: 111,
       startedAt: '2026-10-05T01:00:00.000Z',
+      host: 'test-host',
       username: 'Archinder',
     })}\n`);
 
@@ -71,15 +78,17 @@ describe('ladder account lock', () => {
       stateDir: dir,
       pid: 222,
       startedAt: '2026-10-05T03:07:06.000Z',
+      host: 'test-host',
       alive: () => false,
     });
-    expect(taken.replacedStale).toEqual({ pid: 111, startedAt: '2026-10-05T01:00:00.000Z' });
+    expect(taken.replacedStale).toEqual({ pid: 111, startedAt: '2026-10-05T01:00:00.000Z', host: 'test-host' });
     expect(JSON.parse(fs.readFileSync(file, 'utf8')).pid).toBe(222);
 
     expect(() => acquireAccountLock('Archinder', {
       stateDir: dir,
       pid: 333,
       startedAt: '2026-10-05T03:08:00.000Z',
+      host: 'test-host',
       alive: pid => pid === 222,
     })).toThrow(/pid 222/);
     taken.release();
@@ -91,11 +100,13 @@ describe('ladder account lock', () => {
       stateDir: dir,
       pid: 1,
       startedAt: '2026-10-05T03:07:00.000Z',
+      host: 'box',
       alive: () => false,
     });
     fs.writeFileSync(first.path, `${JSON.stringify({
       pid: 2,
       startedAt: '2026-10-05T03:09:00.000Z',
+      host: 'box',
       username: 'Archinder',
     })}\n`);
     first.release();
@@ -112,6 +123,53 @@ describe('ladder account lock', () => {
     expect(() => acquireAccountLock('   ', { stateDir: dir })).toThrow(/username/);
     alpha.release();
     bravo.release();
+  });
+
+  it('refuses a lock from another host even when that pid is dead locally', () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'ladder-archinder.lock');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, `${JSON.stringify({
+      pid: 111,
+      startedAt: '2026-10-05T01:00:00.000Z',
+      host: 'other-mac',
+      username: 'Archinder',
+    })}\n`);
+    expect(() => acquireAccountLock('Archinder', {
+      stateDir: dir,
+      host: 'this-mac',
+      alive: () => false,
+    })).toThrow(/other-mac/);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).host).toBe('other-mac');
+  });
+
+  it('removes the lock on SIGINT and on process exit, and keeps it on the draining SIGTERM', () => {
+    const dir = tempDir();
+    const lock = acquireAccountLock('Archinder', {
+      stateDir: dir,
+      pid: 5,
+      startedAt: 't',
+      host: 'box',
+      alive: () => true,
+    });
+    const unbind = bindLockRemoval(() => lock.release());
+    process.emit('SIGTERM');
+    expect(fs.existsSync(lock.path)).toBe(true);
+    process.emit('SIGINT');
+    expect(fs.existsSync(lock.path)).toBe(false);
+    unbind();
+
+    const again = acquireAccountLock('Archinder', {
+      stateDir: dir,
+      pid: 6,
+      startedAt: 't2',
+      host: 'box',
+      alive: () => true,
+    });
+    const unbindExit = bindLockRemoval(() => again.release());
+    process.emit('exit', 0);
+    expect(fs.existsSync(again.path)).toBe(false);
+    unbindExit();
   });
 
   it('treats a corrupt lock as stale', () => {
@@ -136,9 +194,11 @@ describe('ladder account lock', () => {
     const child = spawn(process.execPath, ['-e', `
       const fs = require('fs');
       fs.mkdirSync(${JSON.stringify(dir)}, { recursive: true });
+      const os = require('os');
       fs.writeFileSync(${JSON.stringify(file)}, JSON.stringify({
         pid: process.pid,
         startedAt: '2026-10-05T03:07:00.000Z',
+        host: os.hostname(),
         username: 'Archinder',
       }) + '\\n');
       setInterval(() => {}, 1000);
