@@ -2,6 +2,7 @@ import { Battle, Dex, PRNG, PokemonSet } from '@pkmn/sim';
 import { Action, RandbatsStats } from '../types/index.js';
 import { decide } from '../engine/exact/policies.js';
 import { legalChoices, type SideId } from '../engine/exact/battle-utils.js';
+import { applyObservedFile } from '../engine/observed-priors.js';
 import {
   completeFoeTeam,
   FOE_PRIOR_MIN_BUDGET_MS,
@@ -192,8 +193,14 @@ function priorsEnabled(position: LivePosition, budgetMs?: number): boolean {
 
 function speciesTable(position: LivePosition): RandbatsStats | null {
   if (position.speciesStats) return position.speciesStats;
-  if (position.useLoadedPriors) return loadedSpeciesStats();
-  return null;
+  if (!position.useLoadedPriors) return null;
+  const base = loadedSpeciesStats();
+  if (!base) return null;
+  try {
+    return applyObservedFile(base);
+  } catch {
+    return base;
+  }
 }
 
 /** Revealed foes, with hidden sets filled in when a prior table is available. */

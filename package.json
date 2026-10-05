@@ -16,6 +16,7 @@
     "selfplay": "tsx src/cli/selfplay.ts",
     "ladder": "tsx src/cli/ladder.ts",
     "foe-prior:compare": "tsx src/engine/foe-prior-compare.ts",
+    "priors:rebuild": "tsx src/cli/rebuild-priors.ts",
     "replays:download": "tsx src/cli/download-replays.ts",
     "analyze": "tsx src/cli/analyze-losses.ts",
     "llm:smoke": "tsx src/llm/smoke.ts",

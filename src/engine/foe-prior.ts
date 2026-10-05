@@ -201,6 +201,19 @@ function posterior(
   return roles;
 }
 
+/** Normalized role posterior. A reveal that matches no role is ignored. */
+export function speciesRolePosterior(
+  table: SpeciesStats,
+  revealed: { moves?: string[]; ability?: string; item?: string; teraType?: string },
+): Array<{ role: string; probability: number }> {
+  return posterior(table, {
+    moves: revealed.moves || [],
+    ability: revealed.ability,
+    item: revealed.item,
+    teraType: revealed.teraType,
+  }).map(role => ({ role: role.name, probability: role.p }));
+}
+
 function fillMoves(revealed: string[], roles: RoleMass[]): string[] {
   const moves = revealed.slice(0, MAX_MOVES);
   if (moves.length >= MAX_MOVES || roles.length === 0) return moves;

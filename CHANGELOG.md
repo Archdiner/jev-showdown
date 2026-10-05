@@ -1,5 +1,9 @@
 # Changelog
 
+## Ladder games recalibrate the foe set priors
+
+The randbats table is still the base. `npm run priors:rebuild` reads `logs/ladder` and `live-runs`, counts the sets the opponent actually revealed, and writes `state/meta/observed-sets.json`. Each role is mixed with that table using 40 pseudo-counts, so a couple of games cannot replace the base mode. Move frequencies update only when four real moves were revealed. Abilities, items, and tera types update only when that battle showed them. Our own sets are not counted. A missing or older file leaves the public table unchanged. The live search uses the blend only when it is already loading the randbats file.
+
 ## Foe-set priors are opt-in
 
 The live search still plays the revealed foe unless a run asks for randbats priors. `npm run ladder -- --foe-priors` turns them on. A config sets `search.params.foePriors: true` (`configs/examples/foe-priors.yaml`), and the live variant id `foe-priors` does the same for one game. The champion file does not set the flag. Factory and gatekeeper load that example like any other config: hidden self-play passes the flag into the same decision battle the ladder builds, and a battle that was already built that way is not filled a second time. A one-species stats file is not used as the table.
