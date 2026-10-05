@@ -84,11 +84,16 @@ export function ladderDecisionBattle(
 ): SimBattle | null {
   const request = battle.getSide(side).activeRequest;
   if (!request || request.wait || request.teamPreview) return null;
-  return decisionBattleFromViewerLog(battle.log.join('\n'), side, request);
+  return decisionBattleFromViewerLog(battle.log.join('\n'), side, request, options);
 }
 
 /** Replay a spectator log and the side's `|request|` into the ladder's decision battle. */
-export function decisionBattleFromViewerLog(log: string, side: ViewerSide, request: unknown): SimBattle | null {
+export function decisionBattleFromViewerLog(
+  log: string,
+  side: ViewerSide,
+  request: unknown,
+  options?: { quickWins?: boolean },
+): SimBattle | null {
   if (!request || typeof request !== 'object') return null;
   const client = replayClient(log.split('\n'), side, request);
   try {

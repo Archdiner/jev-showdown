@@ -458,7 +458,10 @@ function recordScreen(
         },
       },
     });
-    if (labeled) writeLiveApproved(writer, screen.configPath);
+    if (labeled) {
+      writeLiveApproved(writer, screen.configPath);
+      recordPromoted(paths, reason);
+    }
   } finally {
     writer.close();
   }
