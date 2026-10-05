@@ -832,7 +832,9 @@ function invalidChoices(ctx: SentinelContext): CheckHit[] {
     const count = game.invalid > 0 ? `invalidChoices=${game.invalid}` : 'invalidChoiceReasons present with invalidChoices=0';
     const detail = reasons.length ? `${count} reasons: ${reasons.join('; ')}` : count;
     const hit = fieldHit(game, key, detail);
-    hit.evidence.push(...reasons.map(reason => ({ file: game.file, line: game.line, detail: reason })));
+    for (const reason of reasons) {
+      hit.evidence.push({ file: game.file, line: game.line, detail: reason });
+    }
     hits.push(hit);
   }
   for (const [battleId, reasons] of fromRows) {

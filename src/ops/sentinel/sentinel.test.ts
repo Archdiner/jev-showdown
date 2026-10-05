@@ -667,6 +667,41 @@ describe('sentinel accuracy', () => {
     expect(procOnly).toEqual([]);
   });
 
+  test('collectRows handles large JSONL files without stack overflow', () => {
+    const { layout } = emptyRoot();
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    const rows: string[] = [];
+    const baseRow = {
+      schema: 'jev.ladder-game.v1',
+      kind: 'ladder-game',
+      source: 'ladder',
+      localServer: false,
+      battleId: 'battle-test',
+      ts: Date.now(),
+      outcome: 'win',
+      endReason: 'ko',
+      turns: 10,
+      username: 'bot',
+      format: 'gen9randombattle',
+      eloAfter: 1500,
+      invalidChoices: 0,
+      crashes: 0,
+      fallbacks: 0,
+      decisions: 10,
+      minTimerMarginSec: 5,
+      replayUrl: 'https://replay.pokemonshowdown.com/test',
+      replayStatus: 'confirmed',
+    };
+    for (let index = 0; index < 250_000; index++) {
+      rows.push(JSON.stringify({ ...baseRow, battleId: `battle-${index}` }));
+    }
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'large.jsonl'), rows.join('\n'));
+    expect(() => {
+      const ctx = loadContext(layout, { now: Date.now(), processes: [], git: quietGit });
+      expect(ctx.games.length).toBeGreaterThan(0);
+    }).not.toThrow();
+  });
+
   test('LIVE_REPO_DIR checks name the live checkout separately from ops', () => {
     const { layout } = emptyRoot();
     const live = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-live-repo-'));

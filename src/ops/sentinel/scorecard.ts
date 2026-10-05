@@ -195,7 +195,7 @@ export function formatScorecard(card: Scorecard, style: 'text' | 'md' = 'text'):
   lines.push(`             source ${card.progress.eloSource}`);
   const rate = card.progress.winRate === null ? 'n/a' : pct(card.progress.winRate);
   lines.push(`  win rate   ${rate}  ${card.progress.wins}-${card.progress.losses}-${card.progress.ties} on ${card.progress.counted} games  target ${pct(card.progress.winTarget)}`);
-  lines.push(...priorLines(card));
+  for (const line of priorLines(card)) lines.push(line);
   lines.push('  batches');
   if (card.progress.batches.length === 0) lines.push('    none');
   for (const batch of card.progress.batches) {

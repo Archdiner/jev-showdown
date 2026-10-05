@@ -261,7 +261,8 @@ function collectBatchEnds(layout: Layout, rows: LogRow[], now: number, lookbackM
     if (signal) signals.push(signal);
   }
   for (const file of listLogFiles(layout.ladderLogDir).concat(listLogFiles(layout.liveRunsDir))) {
-    signals.push(...readLogEnds(file, now, lookbackMs));
+    const fileSignals = readLogEnds(file, now, lookbackMs);
+    for (const signal of fileSignals) signals.push(signal);
   }
   return signals;
 }
@@ -444,7 +445,10 @@ function collectRows(layout: Layout): LogRow[] {
   const decisions = path.join(layout.cwd, 'state', 'decisions.jsonl');
   if (fs.existsSync(decisions)) files.add(decisions);
   const rows: LogRow[] = [];
-  for (const file of [...files].sort()) rows.push(...readLogFile(file));
+  for (const file of [...files].sort()) {
+    const fileRows = readLogFile(file);
+    for (const row of fileRows) rows.push(row);
+  }
   return rows;
 }
 
