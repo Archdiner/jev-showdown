@@ -76,6 +76,12 @@ async function hybridSearch(
   const allowed = ctx.llmAllowed !== false && (ctx.llmCostCapUsd == null || ledger.costUsd < ctx.llmCostCapUsd);
   const client = allowed && (params.plan || params.judgment) ? clientOf() : null;
   maybeStartPlan(ledger, viewed, side, evidence.knownFoes, worlds, params, client, allowed);
+  if (params.plan && ledger.inflight) {
+    await Promise.race([
+      ledger.inflight,
+      new Promise(resolve => setTimeout(resolve, 400)),
+    ]);
+  }
 
   const deadline = ctx.deadlineMs ?? Number.POSITIVE_INFINITY;
   const reserve = params.judgment && allowed ? 3500 : 0;

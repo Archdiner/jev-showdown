@@ -21,5 +21,6 @@ hybrid:
     margin: 0.75
     planEvery: 4
     model: alibaba/qwen3.8-27b
-    plannerModel: anthropic/claude-opus-5.5
+    # Opus is the optional planner (effort low). Qwen on Cerebras returns inside a turn.
+    plannerModel: alibaba/qwen3.8-27b
     maxTokens: 10000
