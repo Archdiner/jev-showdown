@@ -172,7 +172,15 @@ Connects to Pokemon Showdown, logs in, and searches for rated Gen 9 Random Battl
 
 `run-live.sh` is the live runner. It calls the ladder client.
 
-`--labeled-champion` plays the gatekeeper's current champion file for the whole batch. It is off unless you pass it. `--rollback` keeps the builtin `--engine` policy. The process logs `config live` with the config id, content hash, and commit before searching, and writes those three fields on every finished game. A promotion does not swap the engine until the next batch.
+`--labeled-champion` plays the gatekeeper's current champion file for the whole batch. It is off unless you pass it. `--rollback` keeps the builtin `--engine` policy. The process logs `config live` with the config id, content hash, and commit before searching, and writes those fields plus `role` and `share` on every finished game. A promotion does not swap the engine until the next batch.
+
+`--ab <config>:<share>` is repeatable. It splits new battles inside this one process. `<config>` is a yaml or json path, a config id of a file under `configs/`, or an engine profile (`search`, `exact`, `max-damage`). `<share>` is that config's fraction of battles, in `(0, 1]`. The shares must sum to at most 1. The rest play the champion. A hash of the room id picks the arm, so the same battle keeps it. Concurrency, the turn timer, and the choice watchdog stay shared. A challenger is pulled back to the champion after any invalid move, a loss on our timer, a crash, or 4 losses in a row. Each pull is one `jev.ab-incident.v1` line in `incidents.jsonl`. This does not take a second login. The per-account lock stays one process per account.
+
+```bash
+npm run ladder -- --games 40 --format gen9randombattle --engine search --concurrency 3 --ab configs/panel/maxdamage.yaml:0.2
+```
+
+`--check` prints one preflight canary per arm after proving each config file builds.
 
 One Showdown account can have one ladder process. Before it logs in, the runner creates `state/ladder-<userid>.lock` with `O_EXCL`. The file holds the pid, the start time, and the host. A second runner prints that host, pid, and start time and exits non-zero. A lock is stale only when its pid is dead on this host. A lock written on another machine is not taken over. The file is removed on exit and on SIGINT. The first SIGTERM drains and keeps the lock until the process exits, so a restart during that drain is refused. `--check` does not take the lock. A local two-bot series locks both BotAlpha and BotBravo.
 
@@ -199,7 +207,7 @@ Each run also appends `logs/ladder/metrics.jsonl` (one JSON object per line) nex
 
 ### Live metrics JSONL
 
-`v` is the schema version (`1`). Every line also has `ts` (unix ms), `runId`, and `engine`. A batch also stamps `configId`, `configHash`, and `gitSha` from the config chosen at startup.
+`v` is the schema version (`1`). Every line also has `ts` (unix ms), `runId`, and `engine`. A decision or game line stamps the `configId`, `configHash`, `role` (`champion` or `challenger`), and `share` of the config that played that battle. The `run` line lists every arm in `ab`. `gitSha` is the process commit.
 
 Percentiles are nearest-rank: sort the samples and take index `ceil(p/100 * n) - 1`. An empty sample list is `null`.
 
@@ -548,8 +556,10 @@ Other fields:
 | `latencyMaxMs` | largest `latencyMs` sample. Null when there are no samples. |
 | `minTimerMarginSec` | smallest Showdown seconds-left observed for us. Null if no timer line. |
 | `engine` | ladder engine name, or the ops search layer id |
-| `configId` | Builtin policy id (`champion-exact-1ply` or `maxdamage-v1`), or the gatekeeper label's id when `--labeled-champion` is on. `ops live` writes the config id. |
-| `configHash` | Builtin: sha256 of the policy object. Labeled champion: 16-hex content hash of the file, the same value as `configId` when the label still matches. |
+| `configId` | Builtin policy id (`champion-exact-1ply` or `maxdamage-v1`), the gatekeeper label's id when `--labeled-champion` is on, or the challenger file hash when `--ab` routed this battle. `ops live` writes the config id. |
+| `configHash` | Builtin: sha256 of the policy object. Labeled champion or `--ab` file: 16-hex content hash, the same value as `configId` when the label still matches. |
+| `role` | `champion` or `challenger` for a routed ladder battle. Absent on older rows and on `ops live`. |
+| `share` | Fraction of new battles that config was given. The champion's share is what remains after the `--ab` shares. |
 | `gitSha` | `JEV_GIT_SHA` or `GIT_COMMIT` or `GITHUB_SHA`, else `git rev-parse HEAD` |
 | `concurrency` | configured `--concurrency` |
 | `replayId` | Public replay id. The server's id when it confirms one, otherwise the room id with the `battle-` prefix removed (`gen9randombattle-…`). |

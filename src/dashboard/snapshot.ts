@@ -5,7 +5,7 @@ import { dailyReport } from '../ops/report.js';
 import { statusReport } from '../ops/status.js';
 import type { DashboardPaths } from './paths.js';
 import { classifyLoss, parseLog, parseSummary, runnerFromName, type GameRecord, type Heartbeat, type LatencySummary } from './parse.js';
-import { reportGames, type GameReport } from './games.js';
+import { configPanels, reportGames, type ConfigPanel, type GameReport } from './games.js';
 import { sprt, wilson } from './stats.js';
 import {
   type CalibrationSample,
@@ -51,6 +51,7 @@ export interface Snapshot {
     recent: GameRecord[];
     variants: VariantRow[];
     report: GameReport;
+    configs: ConfigPanel[];
   };
   ops: {
     available: boolean;
@@ -169,6 +170,8 @@ function combine(a: GameRecord, b: GameRecord): GameRecord {
     configId: pick(primary.configId, other.configId),
     configPath: pick(primary.configPath, other.configPath),
     configHash: pick(primary.configHash, other.configHash),
+    role: primary.role ?? other.role,
+    share: primary.share !== null ? primary.share : other.share,
     engine: pick(primary.engine, other.engine),
     gitSha: pick(primary.gitSha, other.gitSha),
     concurrency: pick(primary.concurrency, other.concurrency),
@@ -410,6 +413,7 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
     recent: ordered,
     variants,
     report: reportGames(unique),
+    configs: configPanels(unique),
   };
 
   return {

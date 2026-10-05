@@ -1,5 +1,13 @@
 # Changelog
 
+## Live A/B routing on one ladder login
+
+`--ab <config>:<share>` (repeatable) splits new battles across the champion and one or more challenger configs. The config is a yaml path, a config id under `configs/`, or an engine profile. A hash of the battle id picks the arm. Concurrency, the turn timer, and the choice watchdog stay shared, and the process still takes one login and the existing account lock. Each finished game, metrics line, and the dashboard stamp `configId`, `role`, and `share`. The dashboard has a per-config W/L, Elo change, invalid-move panel, and a scorecard per config. A challenger is pulled to champion-only after an invalid move, a timer loss, a crash, or 4 losses in a row. Each pull is an incident in `incidents.jsonl`. `--check` prints a preflight canary for every arm. A ghost room (`phantom`) does not pull a challenger.
+
+```bash
+npm run ladder -- --games 40 --format gen9randombattle --engine search --concurrency 3 --ab configs/panel/maxdamage.yaml:0.2
+```
+
 ## One ladder runner per account
 
 A ladder process creates `state/ladder-<userid>.lock` with `O_EXCL` before it logs in. The file stores the pid, the start time, and the host. A second process for that account prints the holder's host, pid, and start time and exits non-zero, so two restarts cannot both send choices into the same battles. A lock is stale only when that pid is dead on this host. A lock from another host is left in place. The file is removed on exit and on SIGINT. The first SIGTERM drains and keeps the lock until the process exits. `--check` does not take the lock. A local two-bot series locks BotAlpha and BotBravo.

@@ -43,6 +43,61 @@ export interface GameReport {
   crashLosses: number;
 }
 
+export interface ConfigPanel {
+  configId: string;
+  role: 'champion' | 'challenger' | null;
+  share: number | null;
+  wins: number;
+  losses: number;
+  ties: number;
+  games: number;
+  /** Sum of (rating after − rating before) where both were recorded. */
+  eloDelta: number | null;
+  invalidMoves: number;
+  report: GameReport;
+}
+
+/** One scorecard per config, plus W/L, Elo change, and invalid moves. */
+export function configPanels(games: GameRecord[]): ConfigPanel[] {
+  const groups = new Map<string, GameRecord[]>();
+  for (const game of games) {
+    const id = game.configId || 'unknown';
+    const rows = groups.get(id) ?? [];
+    rows.push(game);
+    groups.set(id, rows);
+  }
+  return [...groups.entries()].map(([configId, rows]) => {
+    const wins = rows.filter(game => game.outcome === 'win').length;
+    const losses = rows.filter(game => game.outcome === 'loss').length;
+    const ties = rows.filter(game => game.outcome === 'tie').length;
+    let elo = 0;
+    let eloGames = 0;
+    let invalidMoves = 0;
+    for (const game of rows) {
+      if (game.ratingBefore !== null && game.ratingAfter !== null) {
+        elo += game.ratingAfter - game.ratingBefore;
+        eloGames += 1;
+      }
+      if (game.invalid !== null) invalidMoves += game.invalid;
+    }
+    return {
+      configId,
+      role: rows.find(game => game.role)?.role ?? null,
+      share: rows.find(game => game.share !== null)?.share ?? null,
+      wins,
+      losses,
+      ties,
+      games: rows.length,
+      eloDelta: eloGames === 0 ? null : elo,
+      invalidMoves,
+      report: reportGames(rows),
+    };
+  }).sort((a, b) => {
+    const rank = (role: ConfigPanel['role']) => role === 'champion' ? 0 : role === 'challenger' ? 1 : 2;
+    return rank(a.role) - rank(b.role) || b.games - a.games || a.configId.localeCompare(b.configId);
+  });
+}
+
 /** Strategy keeps KO and forfeit games. Timer, disconnect, and crash games are counted aside. */
 export function reportGames(games: GameRecord[]): GameReport {
   const aside = new Set(['timer-ours', 'timer-theirs', 'disconnect', 'crash']);
