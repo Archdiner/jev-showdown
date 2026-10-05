@@ -1,4 +1,5 @@
 import type { Battle } from '@pkmn/sim';
+import { renderContextBrief } from '../../llm/context-brief.js';
 import type { GatewayClient } from '../../llm/gateway-client.js';
 import type { FoeMon } from '../../client/decision-battle.js';
 import type { HybridParams } from '../../config/schema.js';
@@ -8,6 +9,7 @@ import type { OpponentStyle } from './worlds.js';
 
 export const HYBRID_MODEL = 'alibaba/qwen3.8-27b';
 export const HYBRID_PLANNER = 'anthropic/claude-opus-5.5';
+export const HYBRID_GROK = 'spacexai/grok-4.7';
 
 const CEREBRAS = { gateway: { order: ['cerebras'], only: ['cerebras'] } };
 
@@ -90,22 +92,31 @@ export async function judgeMove(
   plan: HybridPlan | null,
   rows: Array<{ choice: string; score: number; koRate: number }>,
   budgetMs: number,
+  brief = '',
 ): Promise<{ choice: string | null; costUsd: number; timeout: boolean; failed: boolean }> {
-  const ranked = [...rows].sort((a, b) => b.score - a.score).slice(0, 3);
+  const cap = params.everyTurn ? 8 : 3;
+  const ranked = [...rows].sort((a, b) => b.score - a.score).slice(0, cap);
   if (ranked.length < 2) return { choice: ranked[0]?.choice ?? null, costUsd: 0, timeout: false, failed: false };
   const margin = params.margin;
-  if (ranked[0].score - ranked[1].score > margin) {
+  if (!params.everyTurn && ranked[0].score - ranked[1].score > margin) {
     return { choice: null, costUsd: 0, timeout: false, failed: false };
   }
   const offered = ranked.map(row => row.choice);
+  const planLine = plan
+    ? `Plan: win ${plan.winCondition}; preserve ${plan.preserve.join(', ') || 'none'}; tera ${plan.tera}; threats ${plan.threats.join(', ') || 'none'}; style ${plan.style}. ${plan.notes}`
+    : 'No plan yet.';
   const prompt = [
-    'Pick one of the offered choices. You may override the search only because these scores are close.',
-    'Do not switch away from a clearly better line. Return JSON: {"choice":"<one offered string>"}',
-    plan ? `Plan: win ${plan.winCondition}; preserve ${plan.preserve.join(', ') || 'none'}; tera ${plan.tera}; threats ${plan.threats.join(', ') || 'none'}; style ${plan.style}. ${plan.notes}` : 'No plan yet.',
+    params.everyTurn
+      ? 'You see the position and the search ranking on every turn. Pick one offered choice.'
+      : 'Pick one of the offered choices. You may override the search only because these scores are close.',
+    `A choice more than ${margin} below the best score is rejected. Do not leave a clearly better line.`,
+    'Return JSON: {"choice":"<one offered string>"}',
+    brief ? `Position:\n${brief}` : '',
+    planLine,
     'Choices:',
     ...ranked.map(row => `${row.choice} score=${row.score.toFixed(3)} ko=${row.koRate.toFixed(2)}`),
-  ].join('\n');
-  const result = await complete(client, params.model, 'medium', prompt, budgetMs, true);
+  ].filter(Boolean).join('\n');
+  const result = await complete(client, params, prompt, budgetMs);
   if (!result.ok) return { choice: null, costUsd: result.costUsd, timeout: result.timeout, failed: true };
   const choice = readChoice(result.text, offered);
   if (!choice) return { choice: null, costUsd: result.costUsd, timeout: false, failed: false };
@@ -114,6 +125,15 @@ export async function judgeMove(
     return { choice: null, costUsd: result.costUsd, timeout: false, failed: false };
   }
   return { choice, costUsd: result.costUsd, timeout: false, failed: false };
+}
+
+/** Compact full-section brief. A damage-calc failure drops that section instead of the turn. */
+export function decisionBrief(battle: Battle, side: SideId): string {
+  try {
+    return renderContextBrief(battle, side, 1200, 'lines').text;
+  } catch {
+    return '';
+  }
 }
 
 function planBrief(battle: Battle, side: SideId, foes: FoeMon[], worlds: WorldSample[]): string {
@@ -154,9 +174,7 @@ async function requestPlan(
     brief,
   ].join('\n');
   const model = params.plannerModel || HYBRID_PLANNER;
-  const effort = model === params.model ? 'medium' : 'low';
-  const cerebras = model === HYBRID_MODEL;
-  const result = await complete(client, model, effort, prompt, 6000, cerebras);
+  const result = await complete(client, { ...params, model, effort: model === HYBRID_GROK ? 'none' : model === HYBRID_MODEL ? 'medium' : 'low' }, prompt, 6000);
   if (!result.ok) return { plan: null, costUsd: result.costUsd, timeout: result.timeout };
   return { plan: parsePlan(result.text, ourSpecies), costUsd: result.costUsd, timeout: false };
 }
@@ -190,21 +208,20 @@ async function withBudget<T extends { ok: boolean }>(pending: Promise<T>, budget
 
 async function complete(
   client: GatewayClient,
-  model: string,
-  effort: 'low' | 'medium',
+  params: Pick<HybridParams, 'model' | 'effort' | 'maxTokens'>,
   prompt: string,
   budgetMs: number,
-  cerebras: boolean,
 ): Promise<{ ok: boolean; text: string; costUsd: number; timeout: boolean }> {
   if (budgetMs < 400) return { ok: false, text: '', costUsd: 0, timeout: true };
+  const cerebras = params.model === HYBRID_MODEL;
   const result = await withBudget(client.chat({
-    model,
+    model: params.model,
     messages: [
       { role: 'system', content: 'You are a singles random-battle planner. Reply with JSON only.' },
       { role: 'user', content: prompt },
     ],
-    maxTokens: model === HYBRID_MODEL ? 10000 : Math.min(4000, 10000),
-    reasoningEffort: effort,
+    maxTokens: params.maxTokens,
+    reasoningEffort: params.effort,
     omitTemperature: true,
     ...(cerebras ? { providerOptions: CEREBRAS } : {}),
   }), budgetMs);

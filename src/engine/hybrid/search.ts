@@ -21,7 +21,7 @@ import { rankedSwitches } from '../exact/matchup.js';
 import type { SearchCtx, SearchImpl, SearchTrace } from '../../config/layers/search.js';
 import type { SearchParams } from '../../config/schema.js';
 import { battleFromWorld } from './battle.js';
-import { emptyLedger, judgeMove, maybeStartPlan, planBonus, type HybridLedger } from './llm.js';
+import { decisionBrief, emptyLedger, judgeMove, maybeStartPlan, planBonus, type HybridLedger } from './llm.js';
 import { regretMatch } from './regret.js';
 import { assertRandbatsSpecies, sampleWorlds, type OpponentStyle, type WorldEvidence } from './worlds.js';
 
@@ -43,7 +43,7 @@ export function createHybridSearch(params: SearchParams): SearchImpl {
       const trace = await hybridSearch(battle, side, ctx, hybrid, ledger, () => {
         if (!client) {
           client = new GatewayClient({
-            timeoutMs: 6000,
+            timeoutMs: 12000,
             perTurnLatencyBudgetMs: 20000,
             maxRetries: 1,
           });
@@ -74,7 +74,8 @@ async function hybridSearch(
   const rng = ctx.rng ?? new PRNG([viewed.turn + 1, 2, 3, 4] as never);
   const worlds = sampleWorlds(evidence, params.worlds, stats, rng, style);
   const allowed = ctx.llmAllowed !== false && (ctx.llmCostCapUsd == null || ledger.costUsd < ctx.llmCostCapUsd);
-  const client = allowed && (params.plan || params.judgment) ? clientOf() : null;
+  const wantsModel = params.plan || params.judgment || params.everyTurn;
+  const client = allowed && wantsModel ? clientOf() : null;
   maybeStartPlan(ledger, viewed, side, evidence.knownFoes, worlds, params, client, allowed);
   if (params.plan && ledger.inflight) {
     await Promise.race([
@@ -84,7 +85,7 @@ async function hybridSearch(
   }
 
   const deadline = ctx.deadlineMs ?? Number.POSITIVE_INFINITY;
-  const reserve = params.judgment && allowed ? 3500 : 0;
+  const reserve = (params.judgment || params.everyTurn) && allowed ? (params.everyTurn ? 6000 : 3500) : 0;
   const searchDeadline = reserve > 0 ? Math.min(deadline, Date.now() + Math.max(250, deadline - Date.now() - reserve)) : deadline;
 
   const totals = new Map<string, { score: number; weight: number; ko: number }>();
@@ -137,12 +138,25 @@ async function hybridSearch(
   scores.sort((a, b) => b.score - a.score || a.choice.localeCompare(b.choice));
   let choice = teraGate(scores, viewed, side, params, ledger.plan);
 
-  if (params.judgment && client && allowed && Date.now() < deadline && Date.now() >= ledger.cooldownUntil) {
-    const judged = await judgeMove(client, params, ledger.plan, scores, deadline - Date.now());
-    ledger.costUsd += judged.costUsd;
-    if (judged.timeout) ledger.timeouts += 1;
-    if (judged.failed) ledger.cooldownUntil = Date.now() + 8000;
-    if (judged.choice && (rootLegal.includes(judged.choice) || rootLegal.length === 0)) choice = judged.choice;
+  if ((params.judgment || params.everyTurn) && client && allowed && Date.now() < deadline && Date.now() >= ledger.cooldownUntil) {
+    const remaining = deadline - Date.now();
+    client.startTurn();
+    try {
+      const judged = await judgeMove(
+        client,
+        params,
+        ledger.plan,
+        scores,
+        remaining,
+        params.everyTurn ? decisionBrief(viewed, side) : '',
+      );
+      ledger.costUsd += judged.costUsd;
+      if (judged.timeout) ledger.timeouts += 1;
+      if (judged.failed) ledger.cooldownUntil = Date.now() + 8000;
+      if (judged.choice && (rootLegal.includes(judged.choice) || rootLegal.length === 0)) choice = judged.choice;
+    } finally {
+      client.endTurn();
+    }
   }
 
   const switchProb = scores.some(row => row.choice.startsWith('switch'));

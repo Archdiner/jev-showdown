@@ -63,10 +63,14 @@ export const HybridParamsSchema = z.object({
   plan: z.boolean().default(false),
   opponent: z.boolean().default(false),
   judgment: z.boolean().default(false),
+  /** Call the model every turn. The margin still drops a pick that is too far behind the search. */
+  everyTurn: z.boolean().default(false),
   margin: z.number().nonnegative().default(0.75),
   planEvery: z.number().int().min(1).max(20).default(4),
   model: z.string().min(1).default('alibaba/qwen3.8-27b'),
   plannerModel: z.string().min(1).default('alibaba/qwen3.8-27b'),
+  /** Grok 4.7 uses `none`. Opus uses `low`. Qwen on Cerebras uses `medium`. */
+  effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh']).default('medium'),
   maxTokens: z.number().int().positive().default(10000),
 }).strict();
 export type HybridParams = z.infer<typeof HybridParamsSchema>;

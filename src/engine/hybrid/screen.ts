@@ -8,7 +8,15 @@ import { playerId } from '../../bench/game.js';
 import { runGamesParallel } from '../../bench/pool.js';
 import { assertRandbatsSpecies } from './worlds.js';
 
-const VARIANTS = ['hybrid-core', 'hybrid-plan', 'hybrid'] as const;
+const VARIANTS = [
+  'hybrid-core',
+  'hybrid-plan',
+  'hybrid',
+  'hybrid-every-qwen',
+  'hybrid-every-qwen-wide',
+  'hybrid-every-opus',
+  'hybrid-every-grok',
+] as const;
 const OPPONENTS = ['exact', 'maxdamage'] as const;
 
 function arg(name: string, fallback: string): string {

@@ -1,0 +1,6 @@
+name: hybrid-every-qwen-wide
+extends: hybrid-every-qwen.yaml
+hybrid:
+  id: layers
+  params:
+    margin: 3
