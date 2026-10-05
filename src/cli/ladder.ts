@@ -5,7 +5,7 @@ import * as path from 'path';
 import { dataLoader } from '../data/data-loader.js';
 import { gen9RandomBattle } from '../formats/gen9-randombattle.js';
 import { BotConfig } from '../types/index.js';
-import { ShowdownClient } from '../client/showdown-client.js';
+import { AccountBlock, AccountBlockedError, parseFormatRating, ShowdownClient } from '../client/showdown-client.js';
 import { BattleDriver, GameSummary } from '../client/battle-driver.js';
 import { DecisionClient } from '../client/decision-client.js';
 import { startLocalServer } from '../client/local-server.js';
@@ -28,6 +28,7 @@ interface LadderOptions {
   engine: EngineName;
   opponentEngine: EngineName | null;
   concurrency: number;
+  check: boolean;
   help: boolean;
 }
 
@@ -47,6 +48,7 @@ function parseArgs(argv: string[]): LadderOptions {
     engine: 'max-damage',
     opponentEngine: null,
     concurrency: 1,
+    check: false,
     help: false,
   };
 
@@ -72,6 +74,7 @@ function parseArgs(argv: string[]): LadderOptions {
     else if (arg === '--engine') opts.engine = parseEngine(next());
     else if (arg === '--opponent-engine') opts.opponentEngine = parseEngine(next());
     else if (arg === '--concurrency') opts.concurrency = clampConcurrency(Number(next()));
+    else if (arg === '--check') opts.check = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -83,14 +86,19 @@ function parseArgs(argv: string[]): LadderOptions {
 
 function printHelp(): void {
   console.log(`Usage:
+  npm run ladder -- --check
   npm run ladder -- --games N --format gen9randombattle --engine max-damage
   npm run ladder -- --local --games N --concurrency K --engine max-damage
 
-Real ladder (this process never stores the password):
+Preflight (log in, print named/locked and the current rating, exit):
+  npm run ladder -- --check
+
+Real ladder, from a residential or university network (this process never stores the password):
   SHOWDOWN_USERNAME=bot SHOWDOWN_PASSWORD=secret npm run ladder -- --games 10 --format gen9randombattle --engine max-damage --concurrency 1
 
 Engines: max-damage (default; won a local head-to-head) or search (Bot.selectAction).
 --concurrency K keeps up to K battles on one login (default 1, max ${MAX_LADDER_CONCURRENCY}).
+A proxy lock, ban, or ‽/! name exits immediately and does not reconnect.
 
 Local server, two clients, N games:
   npm run ladder -- --local --games 10 --format gen9randombattle --concurrency 4
@@ -153,6 +161,10 @@ async function makePlayer(input: {
   const queue = new LadderQueue(client, input.formatId, input.opts.concurrency, message => {
     console.warn(`[${input.label}] ${message}`);
   }, input.autoSearch !== false);
+  client.on('accountBlock', (block: AccountBlock) => {
+    console.error(`[ladder] ${block.message}`);
+    process.exit(1);
+  });
   client.on('popup', (message: string) => queue.notePopup(message));
   client.on('lobby', (line: string) => queue.noteLobby(line));
   driver.on('battleStart', (roomId: string) => queue.noteBattle(roomId));
@@ -364,6 +376,93 @@ function report(summaries: GameSummary[], opts: LadderOptions): void {
   }
 }
 
+async function runCheck(opts: LadderOptions): Promise<void> {
+  const local = opts.local;
+  const username = opts.username || (local ? 'BotAlpha' : process.env.SHOWDOWN_USERNAME || '');
+  const password = local ? '' : (process.env.SHOWDOWN_PASSWORD || '');
+  if (!username || (!local && !password)) {
+    throw new Error('Set SHOWDOWN_USERNAME and SHOWDOWN_PASSWORD. They are not read from source files.');
+  }
+
+  let localServer: Awaited<ReturnType<typeof startLocalServer>> | null = null;
+  if (local && !opts.server) {
+    console.log(`[ladder] starting local pokemon-showdown on port ${opts.port}`);
+    localServer = await startLocalServer(opts.port);
+  }
+  const server = opts.server || (local
+    ? `ws://127.0.0.1:${opts.port}/showdown/websocket`
+    : 'wss://sim3.psim.us/showdown/websocket');
+
+  const client = new ShowdownClient({
+    server,
+    username,
+    password,
+    local,
+    format: opts.format,
+    loginServer: process.env.SHOWDOWN_LOGIN_URL,
+  });
+
+  const reportBlock = (block: AccountBlock) => {
+    console.error(`[ladder] user=${username} named=yes locked=yes`);
+    console.error(`[ladder] ${block.message}`);
+    process.exitCode = 1;
+  };
+
+  try {
+    let blocked: AccountBlock | null = null;
+    client.on('accountBlock', (block: AccountBlock) => {
+      blocked = block;
+    });
+    try {
+      await client.connect();
+    } catch (err) {
+      if (blocked || err instanceof AccountBlockedError) {
+        reportBlock(blocked ?? (err as AccountBlockedError).block);
+        return;
+      }
+      throw err;
+    }
+    if (client.isBlocked()) {
+      reportBlock(blocked ?? {
+        kind: 'locked',
+        message: 'Showdown locked this account. Exiting with no reconnect.',
+      });
+      return;
+    }
+
+    const rating = await readFormatRating(client, opts.format);
+    console.log(`[ladder] user=${username} named=yes locked=no`);
+    if (rating === 'unknown') console.log(`[ladder] ${opts.format} rating=unknown`);
+    else if (rating === 'none') console.log(`[ladder] ${opts.format} rating=none`);
+    else console.log(`[ladder] ${opts.format} rating=${rating}`);
+  } finally {
+    client.disconnect();
+    if (localServer) await localServer.stop();
+  }
+}
+
+function readFormatRating(client: ShowdownClient, format: string): Promise<number | 'none' | 'unknown'> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      client.off('line', onLine);
+      resolve('unknown');
+    }, 8000);
+    const onLine = (_room: string, line: string) => {
+      const parsed = parseFormatRating(line, format);
+      if (parsed === undefined) return;
+      clearTimeout(timer);
+      client.off('line', onLine);
+      resolve(parsed === null ? 'none' : parsed);
+    };
+    client.on('line', onLine);
+    if (!client.queryRank()) {
+      clearTimeout(timer);
+      client.off('line', onLine);
+      resolve('unknown');
+    }
+  });
+}
+
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
@@ -372,6 +471,10 @@ async function main(): Promise<void> {
   }
   if (opts.format !== 'gen9randombattle') {
     throw new Error(`This client is wired for gen9randombattle (got ${opts.format})`);
+  }
+  if (opts.check) {
+    await runCheck(opts);
+    return;
   }
 
   console.log('[ladder] loading randbats data');

@@ -1,7 +1,20 @@
 import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import { Protocol } from '@pkmn/protocol';
+import {
+  AccountBlock,
+  AccountBlockedError,
+  accountBlockFromPopup,
+  parseUpdateUser,
+} from './account-block.js';
 import { redactSecrets, safeError, toID } from './ids.js';
+
+export {
+  AccountBlockedError,
+  parseFormatRating,
+  parseUpdateUser,
+  type AccountBlock,
+} from './account-block.js';
 
 export interface ShowdownClientOptions {
   /** WebSocket URL, for example wss://sim3.psim.us/showdown/websocket */
@@ -40,6 +53,8 @@ export class ShowdownClient extends EventEmitter {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private readonly rooms = new Set<string>();
   private intentionalClose = false;
+  private nonRetriable = false;
+  private blockError: AccountBlockedError | null = null;
 
   readonly options: Required<Pick<ShowdownClientOptions, 'server' | 'username' | 'format'>> &
     ShowdownClientOptions;
@@ -56,6 +71,7 @@ export class ShowdownClient extends EventEmitter {
   }
 
   async connect(): Promise<void> {
+    if (this.blockError) throw this.blockError;
     this.intentionalClose = false;
     this.shouldReconnect = true;
     await this.openAndLogin();
@@ -80,45 +96,63 @@ export class ShowdownClient extends EventEmitter {
     this.rooms.delete(roomId);
   }
 
-  search(format = this.options.format): void {
-    this.send(`|/utm null`);
-    this.send(`|/search ${format}`);
+  search(format = this.options.format): boolean {
+    if (!this.isReady()) return false;
+    return this.send(`|/utm null`) && this.send(`|/search ${format}`);
   }
 
-  cancelSearch(): void {
-    this.send('|/cancelsearch');
+  cancelSearch(): boolean {
+    if (!this.isReady()) return false;
+    return this.send('|/cancelsearch');
   }
 
-  challenge(username: string, format = this.options.format): void {
-    this.send(`|/utm null`);
-    this.send(`|/challenge ${username}, ${format}`);
+  challenge(username: string, format = this.options.format): boolean {
+    if (!this.isReady()) return false;
+    return this.send(`|/utm null`) && this.send(`|/challenge ${username}, ${format}`);
   }
 
-  accept(username: string): void {
-    this.send(`|/accept ${username}`);
+  accept(username: string): boolean {
+    return this.send(`|/accept ${username}`);
   }
 
-  choose(roomId: string, choice: string): void {
-    this.send(`${roomId}|/choose ${choice}`);
+  choose(roomId: string, choice: string): boolean {
+    return this.send(`${roomId}|/choose ${choice}`);
   }
 
-  saveReplay(roomId: string): void {
-    this.send(`${roomId}|/savereplay`);
+  saveReplay(roomId: string): boolean {
+    return this.send(`${roomId}|/savereplay`);
   }
 
-  join(roomId: string): void {
-    this.send(`|/join ${roomId}`);
+  join(roomId: string): boolean {
+    return this.send(`|/join ${roomId}`);
   }
 
-  send(message: string): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error('Not connected');
+  /** Ask the server for this account's ladder table (`/rank`). */
+  queryRank(): boolean {
+    return this.send('|/rank');
+  }
+
+  /**
+   * Returns false when the socket is down. Timers must not see a thrown
+   * "Not connected" — callers pause until `isReady()` instead.
+   */
+  send(message: string): boolean {
+    if (this.nonRetriable) return false;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      this.ws.send(message);
+      return true;
+    } catch {
+      return false;
     }
-    this.ws.send(message);
   }
 
   isReady(): boolean {
-    return this.loggedIn && this.ws?.readyState === WebSocket.OPEN;
+    return !this.nonRetriable && this.loggedIn && this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  isBlocked(): boolean {
+    return this.nonRetriable;
   }
 
   private async openAndLogin(): Promise<void> {
@@ -153,9 +187,14 @@ export class ShowdownClient extends EventEmitter {
       ws.on('message', data => {
         this.handlePayload(data.toString());
       });
-      ws.on('close', () => {
+      ws.on('close', (code: number) => {
+        if (ws !== this.ws) return;
         this.loggedIn = false;
-        this.emit('disconnect');
+        this.emit('disconnect', code);
+        if (this.nonRetriable || this.intentionalClose || !this.shouldReconnect) {
+          this.shouldReconnect = false;
+          return;
+        }
         this.scheduleReconnect();
       });
       ws.on('error', err => {
@@ -165,6 +204,7 @@ export class ShowdownClient extends EventEmitter {
   }
 
   private waitForLogin(): Promise<void> {
+    if (this.blockError) return Promise.reject(this.blockError);
     if (this.loggedIn) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -195,6 +235,7 @@ export class ShowdownClient extends EventEmitter {
           this.emit('reconnect');
         })
         .catch(err => {
+          if (this.nonRetriable || this.intentionalClose) return;
           console.error(`[client] reconnect failed: ${safeError(err)}`);
           this.scheduleReconnect();
         });
@@ -247,6 +288,11 @@ export class ShowdownClient extends EventEmitter {
 
     if (line.startsWith('|popup|')) {
       const message = line.slice('|popup|'.length);
+      const block = accountBlockFromPopup(message);
+      if (block) {
+        this.failClosed(block);
+        return;
+      }
       this.noteReplayOrRating(message);
       this.emit('popup', message);
       return;
@@ -288,35 +334,58 @@ export class ShowdownClient extends EventEmitter {
   }
 
   private onUpdateUser(line: string): void {
-    const parts = line.split('|');
-    const identity = parts[2] ?? '';
-    const username = identity.length > 0 ? identity.slice(1) : '';
-    const named = parts[3] === '1';
-    if (!username) return;
-    if (toID(username) !== toID(this.options.username)) return;
-    if (!named && !this.options.local) return;
+    const parsed = parseUpdateUser(line);
+    if (!parsed) return;
+    if (parsed.block) {
+      this.failClosed(parsed.block);
+      return;
+    }
+    if (this.nonRetriable) return;
+    if (toID(parsed.username) !== toID(this.options.username)) return;
+    if (!parsed.named && !this.options.local) return;
     this.loggedIn = true;
-    this.loginWaiters.splice(0).forEach(resolve => resolve(username));
+    this.loginWaiters.splice(0).forEach(resolve => resolve(parsed.username));
     this.loginRejecters.splice(0);
-    this.emit('login', username);
+    this.emit('login', parsed.username);
+  }
+
+  private failClosed(block: AccountBlock): void {
+    if (this.nonRetriable) return;
+    this.nonRetriable = true;
+    this.shouldReconnect = false;
+    this.loggedIn = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const error = new AccountBlockedError(block);
+    this.blockError = error;
+    this.loginRejecters.splice(0).forEach(reject => reject(error));
+    this.loginWaiters.splice(0);
+    this.emit('accountBlock', block);
+    try {
+      this.ws?.close();
+    } catch {
+      // The server may already be closing the socket with code 1000.
+    }
   }
 
   private async login(): Promise<void> {
     if (!this.challstr) throw new Error('No challstr available');
 
-    if (this.options.local || !this.options.password) {
-      this.send(`|/trn ${this.options.username},0,`);
-      return;
+    const assertion = this.options.local || !this.options.password
+      ? ''
+      : await requestAssertion({
+        loginServer: this.options.loginServer || DEFAULT_LOGIN_SERVER,
+        username: this.options.username,
+        password: this.options.password,
+        challstr: this.challstr,
+      });
+    if (assertion) this.assertion = assertion;
+    if (this.nonRetriable) return;
+    if (!this.send(`|/trn ${this.options.username},0,${assertion}`)) {
+      throw new Error('Login could not be sent because the socket is closed');
     }
-
-    const assertion = await requestAssertion({
-      loginServer: this.options.loginServer || DEFAULT_LOGIN_SERVER,
-      username: this.options.username,
-      password: this.options.password,
-      challstr: this.challstr,
-    });
-    this.assertion = assertion;
-    this.send(`|/trn ${this.options.username},0,${assertion}`);
   }
 }
 
