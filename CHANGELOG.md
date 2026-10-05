@@ -1,5 +1,9 @@
 # Changelog
 
+## Replay links are confirmed before the game row is written
+
+`/savereplay` still asks the Showdown server to upload the battle. The game row keeps `replayUrl` only when that upload comes back as a `replay.pokemonshowdown.com` link, and it is written as soon as the link arrives (the public client waits up to 8 seconds). `replayId` is always the battle's replay id, including when the server never confirms the upload. The raw protocol log stays on disk at `localReplayPath`. A local server is `replayStatus: "local-only"` and does not wait on a public URL.
+
 ## Each finished game is one JSONL record
 
 `logs/ladder/games.jsonl` and `ops live`'s `live-games.jsonl` append the same `jev.ladder-game.v1` fields when a battle finishes. The row has the opponent and their pre-game rating, our Elo before and after, GXE when the line includes it, why the game ended, wall-clock duration, and which engine, config, git commit, and concurrency ran it. Decision timing uses the live-metrics names: per-turn `latencyMs`, and `latencyP50Ms`, `latencyP95Ms`, `latencyP99Ms`, `latencyMaxMs`, and `minTimerMarginSec` on the game. Missing Elo and GXE stay null. Turns, invalid choices, crashes, fallbacks, and the ladder stdout line are unchanged.

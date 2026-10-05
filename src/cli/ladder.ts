@@ -250,6 +250,7 @@ async function makePlayer(input: {
     gitSha: currentGitSha(),
     concurrency: input.opts.concurrency,
     localServer: input.local,
+    settleMs: input.local ? 400 : 8000,
   });
   const queue = new LadderQueue(client, input.formatId, input.opts.concurrency, message => {
     console.warn(`[${input.label}] ${message}`);
