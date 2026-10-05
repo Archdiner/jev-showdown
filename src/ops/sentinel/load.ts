@@ -127,6 +127,10 @@ export function relevantProcess(cmd: string): boolean {
   return /src\/cli\/ladder\.ts|src\/ops\/cli\.ts|run-live\.sh/.test(cmd);
 }
 
+/**
+ * Runner liveness is this `ps` list, or `kill -0` on a run-file pid.
+ * `/proc` is not a liveness source. When it exists it only adds env to a pid `ps` already listed.
+ */
 export function scanProcesses(deps: { ps?: () => string; procRoot?: string } = {}): ProcessSnapshot[] {
   const procRoot = deps.procRoot ?? '/proc';
   let psRows: ProcessSnapshot[] = [];
@@ -142,13 +146,28 @@ export function scanProcesses(deps: { ps?: () => string; procRoot?: string } = {
   } catch {
     psRows = [];
   }
-  const procRows = readProc(procRoot);
-  if (psRows.length === 0) return procRows;
-  const envByPid = new Map(procRows.map(row => [row.pid, row.env]));
+  if (psRows.length === 0) return [];
+  const envByPid = new Map(readProc(procRoot).map(row => [row.pid, row.env]));
   return psRows.map(row => {
     const env = envByPid.get(row.pid);
     return env ? { ...row, env } : row;
   });
+}
+
+/** Git root of `dir`, or null when `dir` is missing or not inside a work tree. */
+export function gitTopLevel(dir: string): string | null {
+  if (!dir || !fs.existsSync(dir)) return null;
+  try {
+    const out = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: dir,
+      encoding: 'utf8',
+      timeout: 4000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
 }
 
 export function readGit(cwd: string): GitStatus {
@@ -293,6 +312,12 @@ function findDrains(layout: Layout): DrainFile[] {
   add(path.join(layout.cwd, 'state', 'DRAIN'), 'ops');
   if (layout.liveRepoDir && path.resolve(layout.liveRepoDir) !== path.resolve(layout.cwd)) {
     add(path.join(layout.liveRepoDir, 'state', 'DRAIN'), 'live');
+    const liveRuns = path.join(layout.liveRepoDir, 'live-runs');
+    if (path.resolve(liveRuns) !== path.resolve(layout.liveRunsDir) && fs.existsSync(liveRuns)) {
+      for (const name of fs.readdirSync(liveRuns)) {
+        if (name.endsWith('.drain')) add(path.join(liveRuns, name), 'live');
+      }
+    }
   }
   const runsCheckout = layout.liveRepoDir && path.resolve(layout.liveRunsDir).startsWith(path.resolve(layout.liveRepoDir))
     ? 'live'

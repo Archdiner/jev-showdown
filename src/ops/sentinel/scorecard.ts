@@ -309,26 +309,38 @@ function signedPoints(value: number): string {
 }
 
 function liveRunnerUptime(ctx: SentinelContext, since: number): { ratio: number | null; detail: string } {
-  const runs = ctx.runs.filter(run => !run.local);
+  const file = path.join(ctx.layout.ladderLogDir, 'games.jsonl');
   const windowMs = ctx.now - since;
-  if (runs.length === 0 || windowMs <= 0) {
-    return { ratio: null, detail: `no ladder run files in ${ctx.layout.liveRunsDir}` };
+  const games = uniqueLadderGames(ctx, ctx.games).filter(game =>
+    !game.local
+    && !game.phantom
+    && game.ts !== null
+    && game.ts >= since
+    && game.ts <= ctx.now
+    && !abortedUnlabeled(ctx, game),
+  );
+  if (games.length === 0 || windowMs <= 0) {
+    return { ratio: null, detail: `no ladder games in ${file}` };
   }
-  const intervals: Array<[number, number]> = [];
-  for (const run of runs) {
-    const alive = ctx.processes.some(proc => proc.pid === run.pid) || ctx.pidAlive(run.pid);
-    if (!alive) continue;
-    const start = run.startedAt ?? run.mtimeMs;
-    const from = Math.max(since, start);
-    if (ctx.now > from) intervals.push([from, ctx.now]);
+  const groups = new Map<string, [number, number]>();
+  const labels: string[] = [];
+  for (const game of games) {
+    const id = batchId(game);
+    const ts = game.ts as number;
+    const span = groups.get(id);
+    if (!span) {
+      groups.set(id, [ts, ts]);
+      labels.push(id);
+    } else {
+      span[0] = Math.min(span[0], ts);
+      span[1] = Math.max(span[1], ts);
+    }
   }
+  const intervals = [...groups.values()].filter(([from, to]) => to > from);
   const up = mergeIntervals(intervals).reduce((sum, [from, to]) => sum + (to - from), 0);
-  const playing = ctx.decisionSamples.length > 0 || ctx.games.some(game => game.ladder && game.ts !== null && game.ts >= since && game.ts <= ctx.now);
-  const ratio = Math.min(1, up / windowMs);
-  const state = playing && up > 0 ? 'alive and playing' : up > 0 ? 'alive' : 'not alive';
   return {
-    ratio,
-    detail: `ladder process ${state}, from run files in ${ctx.layout.liveRunsDir}`,
+    ratio: Math.min(1, up / windowMs),
+    detail: `games.jsonl play spans for ${labels.join(', ')}`,
   };
 }
 
@@ -385,23 +397,39 @@ function mergeIntervals(intervals: Array<[number, number]>): Array<[number, numb
   return merged;
 }
 
+function abortedUnlabeled(ctx: SentinelContext, game: ObservedGame): boolean {
+  return Boolean(
+    ctx.runSummary
+    && ctx.runSummary.games === 0
+    && ctx.runSummary.gitSha
+    && game.gitSha === ctx.runSummary.gitSha
+    && !game.batchLabel
+    && !game.runId,
+  );
+}
+
+function batchId(game: ObservedGame): string {
+  if (game.batchLabel && game.runId) return `${game.batchLabel} ${game.runId}`;
+  return game.batchLabel || game.runId || game.gitSha || 'unlabeled';
+}
+
 function batchRows(ctx: SentinelContext, games: ObservedGame[]): Scorecard['progress']['batches'] {
-  const groups = new Map<string, ObservedGame[]>();
-  const anySha = games.some(game => game.gitSha);
   const ordered = [...games].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
-  if (anySha) {
-    for (const game of ordered) {
-      const id = game.gitSha ?? 'no-git';
-      if (ctx.runSummary && ctx.runSummary.games === 0 && ctx.runSummary.gitSha === id) continue;
-      const list = groups.get(id) ?? [];
-      list.push(game);
-      groups.set(id, list);
-    }
-  } else {
+  const named = ordered.some(game => game.batchLabel || game.runId);
+  const groups = new Map<string, ObservedGame[]>();
+  if (!named && !ordered.some(game => game.gitSha)) {
     for (let index = 0; index < ordered.length; index += ctx.batchSize) {
       const slice = ordered.slice(index, index + ctx.batchSize);
       groups.set(`batch ${index / ctx.batchSize + 1}`, slice);
     }
+    return [...groups.entries()].map(([id, rows]) => ({ id, ...tallyOf(rows) }));
+  }
+  for (const game of ordered) {
+    if (abortedUnlabeled(ctx, game)) continue;
+    const id = named ? batchId(game) : (game.gitSha ?? 'unlabeled');
+    const list = groups.get(id) ?? [];
+    list.push(game);
+    groups.set(id, list);
   }
   return [...groups.entries()].map(([id, rows]) => ({ id, ...tallyOf(rows) }));
 }

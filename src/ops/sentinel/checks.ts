@@ -166,7 +166,7 @@ export const CHECKS: InvariantCheck[] = [
     id: 'checkout-behind',
     severity: 'P2',
     title: 'A checkout is behind origin/main',
-    suggestedFix: 'Fast-forward the ops checkout and the live runner checkout (LIVE_REPO_DIR) to origin/main before the next ladder session.',
+    suggestedFix: 'Fast-forward the ops checkout and the ladder checkout (LIVE_REPO_DIR, or the git root of LADDER_LOG_DIR) to origin/main before the next ladder session.',
     detect: checkoutBehind,
   },
   {

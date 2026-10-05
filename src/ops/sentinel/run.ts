@@ -13,7 +13,7 @@ import {
   reconcile,
   writeIncidents,
 } from './incidents.js';
-import { loadContext, type LoadOptions } from './load.js';
+import { gitTopLevel, loadContext, type LoadOptions } from './load.js';
 import { buildScorecard, formatScorecard, parseSince } from './scorecard.js';
 import { DEFAULTS, type CheckHit, type InvariantCheck, type Layout, type SentinelContext } from './types.js';
 
@@ -149,15 +149,25 @@ export function layoutFromEnv(cwd = process.cwd(), env: NodeJS.ProcessEnv = proc
     : path.resolve(opsDir) === path.resolve(cwd, 'state', 'ops')
       ? path.join(cwd, 'state', 'graph.db')
       : path.join(opsDir, 'graph.db');
+  const ladderLogDir = env.LADDER_LOG_DIR ? path.resolve(cwd, env.LADDER_LOG_DIR) : path.join(cwd, 'logs', 'ladder');
   return {
     cwd,
-    liveRepoDir: env.LIVE_REPO_DIR ? expandHome(env.LIVE_REPO_DIR, cwd) : null,
+    liveRepoDir: liveCheckout(cwd, ladderLogDir, env),
     opsDir,
-    ladderLogDir: env.LADDER_LOG_DIR ? path.resolve(cwd, env.LADDER_LOG_DIR) : path.join(cwd, 'logs', 'ladder'),
+    ladderLogDir,
     liveRunsDir: env.LIVE_RUNS_DIR ? path.resolve(cwd, env.LIVE_RUNS_DIR) : path.join(cwd, 'live-runs'),
     dataDir: env.JEV_DATA_DIR ? path.resolve(cwd, env.JEV_DATA_DIR) : path.join(cwd, 'data'),
     graphDb,
   };
+}
+
+/** Explicit `LIVE_REPO_DIR`, otherwise the git root of `LADDER_LOG_DIR` when that root is not the ops cwd. */
+function liveCheckout(cwd: string, ladderLogDir: string, env: NodeJS.ProcessEnv): string | null {
+  const explicit = env.LIVE_REPO_DIR ? expandHome(env.LIVE_REPO_DIR, cwd) : null;
+  const found = explicit ?? gitTopLevel(ladderLogDir);
+  if (!found) return null;
+  if (path.resolve(found) === path.resolve(cwd)) return null;
+  return found;
 }
 
 function expandHome(value: string, cwd: string): string {

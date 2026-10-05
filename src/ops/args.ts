@@ -20,7 +20,7 @@ export const OPS_USAGE = `usage: npm run ops -- factory|gatekeeper|live|analyst|
       --since or SENTINEL_SINCE is that baseline. When both are unset, it is the current ladder run's start.
       --once --json prints those incidents as one JSON object. Acknowledged and fixing P0s do not change the exit code.
       --ack ID, --fixing ID --pr URL, and --root-cause ID --text REASON move an incident.
-      LIVE_REPO_DIR is the ladder checkout when it is not the ops cwd. Process checks use ps, with /proc when it exists.
+      LIVE_REPO_DIR, or the git root of LADDER_LOG_DIR when that root is not the ops cwd, is the ladder checkout. Runner liveness uses ps or kill -0, never /proc.
   incidents ack|resolve --before ISO --reason TEXT
   incidents ack|resolve --sha SHA --reason TEXT
   incidents link ID REF

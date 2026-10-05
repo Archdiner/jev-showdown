@@ -153,6 +153,7 @@ export interface ObservedGame {
   ladder: boolean;
   gitSha: string | null;
   runId: string | null;
+  batchLabel: string | null;
   variantId: string | null;
   configId: string | null;
   username: string | null;

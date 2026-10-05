@@ -57,6 +57,7 @@ export function observeGames(rows: LogRow[]): ObservedGame[] {
       ladder: isLadder(value, local),
       gitSha: text(value.gitSha) ?? text(value.git) ?? text(value.commit),
       runId: text(value.runId),
+      batchLabel: text(value.batchLabel),
       variantId: text(value.variantId),
       configId: text(value.configId),
       username: text(value.username),

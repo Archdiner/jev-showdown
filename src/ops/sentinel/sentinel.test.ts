@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -478,6 +478,8 @@ describe('sentinel accuracy', () => {
     const psOnly = scanProcesses({ ps: () => PS_84701, procRoot: path.join(root, 'missing') });
     expect(psOnly.map(row => row.pid)).toEqual([84701]);
     expect(psOnly[0].env).toBeUndefined();
+    const procOnly = scanProcesses({ ps: () => '', procRoot: path.join(root, 'proc') });
+    expect(procOnly).toEqual([]);
   });
 
   test('LIVE_REPO_DIR checks name the live checkout separately from ops', () => {
@@ -505,6 +507,32 @@ describe('sentinel accuracy', () => {
     expect(drains.some(hit => hit.detail.includes('live checkout') && hit.detail.includes(drain))).toBe(true);
     const locks = result.hits.filter(hit => hit.id === 'stale-lock');
     expect(locks.some(hit => hit.detail.includes('live checkout'))).toBe(true);
+  });
+
+  test('LADDER_LOG_DIR git root is the ladder checkout for behind and drain', () => {
+    const ops = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-ops-'));
+    const live = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-search-'));
+    execFileSync('git', ['init'], { cwd: live, stdio: 'ignore' });
+    const ladder = path.join(live, 'logs', 'ladder');
+    fs.mkdirSync(ladder, { recursive: true });
+    const layout = layoutFromEnv(ops, { LADDER_LOG_DIR: ladder });
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: live, encoding: 'utf8' }).trim();
+    expect(layout.liveRepoDir).toBe(top);
+    expect(path.resolve(layout.cwd)).toBe(path.resolve(ops));
+    const now = Date.now();
+    const drain = path.join(live, 'state', 'DRAIN');
+    fs.mkdirSync(path.dirname(drain), { recursive: true });
+    fs.writeFileSync(drain, '');
+    const old = (now - 11 * 60 * 1000) / 1000;
+    fs.utimesSync(drain, old, old);
+    const result = scanOnce(layout, { now, processes: [], git: quietGit, liveGit: behindGit });
+    const behind = result.hits.filter(hit => hit.id === 'checkout-behind');
+    expect(behind.map(hit => hit.key)).toEqual(['live']);
+    expect(behind[0].detail).toContain(top);
+    expect(behind[0].detail).not.toContain(ops);
+    const drains = result.hits.filter(hit => hit.id === 'drain-pending');
+    expect(drains.some(hit => hit.detail.includes('live checkout') && hit.detail.includes(drain))).toBe(true);
+    expect(drains.some(hit => hit.detail.includes(ops))).toBe(false);
   });
 
   test('a repeat scan keeps count on the snapshot and does not append an updated line', () => {
@@ -621,6 +649,51 @@ describe('sentinel accuracy', () => {
     expect(text).not.toContain('n=15');
     expect(text).toContain('live runner');
     expect(text).toContain('ops workers');
+  });
+
+  test('scorecard uptime and batch records come from games.jsonl batchLabel and runId', () => {
+    const { layout } = emptyRoot();
+    const now = Date.parse('2026-10-05T23:52:00.000Z');
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    const batch11 = [
+      ladderRow({
+        battleId: 'battle-b11-a',
+        ts: now - 40 * 60 * 1000,
+        outcome: 'win',
+        gitSha: 'c105e48',
+        runId: 'r11',
+        batchLabel: 'batch 11',
+      }),
+      ladderRow({
+        battleId: 'battle-b11-b',
+        ts: now - 10 * 60 * 1000,
+        outcome: 'win',
+        gitSha: 'c105e48',
+        runId: 'r11',
+        batchLabel: 'batch 11',
+      }),
+    ];
+    const batch10 = ladderRow({
+      battleId: 'battle-b10',
+      ts: now - 5 * 60 * 1000,
+      outcome: 'loss',
+      gitSha: 'c105e48',
+      runId: 'r10',
+      batchLabel: 'batch 10',
+    });
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'games.jsonl'), [...batch11, batch10].join('\n') + '\n');
+    fs.writeFileSync(path.join(layout.opsDir, 'live-games.jsonl'), batch11.map(line => line.replace('"source":"ladder"', '"source":"ops"')).join('\n') + '\n');
+    fs.writeFileSync(path.join(layout.opsDir, 'heartbeats.jsonl'), `${JSON.stringify({
+      facility: 'factory', pid: 1, ts: now - 50 * 60 * 1000, status: 'error',
+    })}\n`);
+    const text = renderScorecard(layout, { now, since: '1h', processes: [], git: quietGit, scanProcesses: false });
+    expect(text).toContain('live runner  50.0%');
+    expect(text).toContain('games.jsonl play spans');
+    expect(text).toContain('batch 11 r11');
+    expect(text).toContain('batch 10 r10');
+    expect(text).toMatch(/batch 11 r11\s+2-0-0\s+100\.0%\s+n=2/);
+    expect(text).toMatch(/batch 10 r10\s+0-1-0\s+0\.0%\s+n=1/);
+    expect(text).not.toContain('2-1-0');
   });
 
   test('opened counts incidents in the file, and a ledger ref is on the scorecard', () => {
