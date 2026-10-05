@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { parse as parseYaml } from 'yaml';
+import { loadConcurrencyFile } from '../client/concurrency-config.js';
 import { assertEnvOnly } from '../config/env.js';
 import { loadConfig } from '../config/load.js';
 import { ExperimentSpecSchema } from './spec.js';
@@ -22,8 +23,10 @@ export function validateConfigs(root = path.join(process.cwd(), 'configs')): Val
       } else if (rel.startsWith('experiments/')) {
         const raw = file.endsWith('.json') ? JSON.parse(fs.readFileSync(file, 'utf8')) : parseYaml(fs.readFileSync(file, 'utf8'));
         ExperimentSpecSchema.parse(raw);
+      } else if (rel === 'live/concurrency.json') {
+        loadConcurrencyFile(file);
       } else if (rel.startsWith('live/')) {
-        // Live knobs (concurrency profiles) are not strategy configs.
+        // Other live knobs are not strategy configs.
         const text = fs.readFileSync(file, 'utf8');
         if (file.endsWith('.json')) JSON.parse(text);
         else parseYaml(text);
