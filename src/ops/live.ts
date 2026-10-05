@@ -357,6 +357,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
           mismatches: 0,
           eloBefore: facts.eloBefore,
           eloAfter: facts.eloAfter,
+          preRating: facts.preRating,
           gxe: facts.gxe,
           latencies: watched?.latencies ?? [],
           minTimerMarginSec: facts.minTimerMarginSec,

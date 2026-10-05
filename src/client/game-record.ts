@@ -288,8 +288,11 @@ export interface LadderGameInput {
   crashes: number;
   fallbacks: number;
   mismatches: number;
+  /** `before` on the rating update for this battle. Null when that update has no before. */
   eloBefore: number | null;
   eloAfter: number | null;
+  /** `|player|` rating for us. Kept on the row when the update is dropped. */
+  preRating?: number | null;
   gxe: number | null;
   latencies: number[];
   minTimerMarginSec: number | null;
@@ -330,6 +333,15 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
   });
   const phantom = isPhantomGame({ turns: input.turns, winner: input.winner, lines: input.lines });
   const replay = replayStatusOf({ replayUrl: input.replayUrl, localServer: input.localServer });
+  const rated = eloForGame({
+    outcome: classified.outcome,
+    ratingBefore: input.eloBefore,
+    ratingAfter: input.eloAfter,
+    preRating: input.preRating ?? null,
+  });
+  const gxe = rated.eloAfter === null
+    ? null
+    : (typeof input.gxe === 'number' && Number.isFinite(input.gxe) ? input.gxe : null);
   return {
     schema: LADDER_GAME_SCHEMA,
     kind: 'ladder-game',
@@ -355,9 +367,9 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     crashes: input.crashes,
     fallbacks: input.fallbacks,
     mismatches: input.mismatches,
-    eloBefore: input.eloBefore,
-    eloAfter: input.eloAfter,
-    gxe: typeof input.gxe === 'number' && Number.isFinite(input.gxe) ? input.gxe : null,
+    eloBefore: rated.eloBefore,
+    eloAfter: rated.eloAfter,
+    gxe,
     durationMs: Math.max(0, ts - input.startedAt),
     ...latencyFields(input.latencies, tighterMargin(input.minTimerMarginSec, timerMarginSec(input.lines, input.username))),
     engine: input.engine,
@@ -491,6 +503,52 @@ export function recordedOutcome(game: {
   return value === 'win' || value === 'loss' || value === 'tie' ? value : null;
 }
 
+/**
+ * A win must raise Elo and a loss must lower it.
+ * Null on either side is not a contradiction: the incident check can keep the row
+ * and treat a missing number as unknown. A tie is not judged.
+ */
+export function eloDeltaConsistent(
+  outcome: 'win' | 'loss' | 'tie',
+  eloBefore: number | null,
+  eloAfter: number | null,
+): boolean {
+  if (eloBefore === null || eloAfter === null) return true;
+  if (!Number.isFinite(eloBefore) || !Number.isFinite(eloAfter)) return true;
+  if (outcome === 'win') return eloAfter > eloBefore;
+  if (outcome === 'loss') return eloAfter < eloBefore;
+  return true;
+}
+
+function finiteRating(value: number | null): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Keep `eloAfter` only when it and `ratingBefore` are one update for this battle
+ * and the move matches the result. Otherwise `eloAfter` is null.
+ * `eloBefore` falls back to the `|player|` rating so the start of the battle is still on the row.
+ */
+export function eloForGame(input: {
+  outcome: 'win' | 'loss' | 'tie';
+  ratingBefore: number | null;
+  ratingAfter: number | null;
+  preRating: number | null;
+}): { eloBefore: number | null; eloAfter: number | null } {
+  const ratingBefore = finiteRating(input.ratingBefore);
+  const ratingAfter = finiteRating(input.ratingAfter);
+  const preRating = finiteRating(input.preRating);
+  if (
+    ratingBefore !== null
+    && ratingAfter !== null
+    && eloDeltaConsistent(input.outcome, ratingBefore, ratingAfter)
+    && (input.outcome === 'tie' || ratingBefore !== ratingAfter)
+  ) {
+    return { eloBefore: ratingBefore, eloAfter: ratingAfter };
+  }
+  return { eloBefore: preRating ?? ratingBefore, eloAfter: null };
+}
+
 /** Elo after the game. Prefers `eloAfter`. Older ops rows used `rating`. Null stays null. */
 export function recordedElo(game: { eloAfter?: number | null; rating?: number | null }): number | null {
   const value = typeof game.eloAfter === 'number' ? game.eloAfter : game.rating;
@@ -503,6 +561,7 @@ export interface TranscriptFacts {
   opponentRating: number | null;
   eloBefore: number | null;
   eloAfter: number | null;
+  preRating: number | null;
   gxe: number | null;
   turns: number;
   invalidChoices: number;
@@ -523,6 +582,7 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
   let winner: string | null = null;
   let eloBefore: number | null = null;
   let eloAfter: number | null = null;
+  let preRating: number | null = null;
   let gxe: number | null = null;
   let replayId: string | null = null;
   let replayUrl: string | null = null;
@@ -552,7 +612,8 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
     }
     const pipe = line.trim().match(/^\|rating\|(\d+(?:\.\d+)?)(?:\|(\d+(?:\.\d+)?))?/);
     if (pipe) {
-      eloAfter = Number(pipe[1]);
+      eloBefore = null;
+      eloAfter = pipe[1] === undefined ? null : Number(pipe[1]);
       gxe = pipe[2] === undefined ? null : Number(pipe[2]);
     }
 
@@ -566,8 +627,8 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
   const opponentSide = ourSide === 'p1' ? 'p2' : ourSide === 'p2' ? 'p1' : null;
   const opponent = opponentSide ? players[opponentSide]?.name ?? null : null;
   const opponentRating = opponentSide ? players[opponentSide]?.rating ?? null : null;
-  if (eloBefore === null && ourSide && players[ourSide]?.rating !== null && players[ourSide]?.rating !== undefined) {
-    eloBefore = players[ourSide].rating;
+  if (ourSide && players[ourSide]?.rating !== null && players[ourSide]?.rating !== undefined) {
+    preRating = players[ourSide].rating;
   }
 
   return {
@@ -576,6 +637,7 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
     opponentRating,
     eloBefore,
     eloAfter,
+    preRating,
     gxe,
     turns,
     invalidChoices,

@@ -40,9 +40,10 @@ export async function startLocalServer(port = 0): Promise<LocalServer> {
         void startBattle(socket, rooms, username, seq, () => {
           games += 1;
           return { games, bump: (won: boolean | null) => {
+            const before = rating;
             if (won === true) rating += 8;
             if (won === false) rating -= 6;
-            return rating;
+            return { before, after: rating };
           } };
         });
       }
@@ -66,7 +67,7 @@ function startBattle(
   rooms: Map<string, ReturnType<typeof BattleStreams.getPlayerStreams>>,
   username: string,
   seq: number,
-  account: () => { games: number; bump: (won: boolean | null) => number },
+  account: () => { games: number; bump: (won: boolean | null) => { before: number; after: number } },
 ): void {
   const room = `battle-local-${seq}`;
   const stream = new BattleStreams.BattleStream({ keepAlive: false });
@@ -95,10 +96,10 @@ function startBattle(
       const ended = Boolean(wonLine || tieLine);
       if (ended) {
         const won = wonLine?.slice(5).trim() === username ? true : tieLine ? null : false;
-        const { games, bump } = account();
-        const next = bump(won);
-        const gxe = Math.max(0, Math.min(100, 50 + (next - 1000) / 8));
-        const ratingLine = `|rating|${next}|${gxe.toFixed(1)}|${games}`;
+        const { bump } = account();
+        const { before, after } = bump(won);
+        const gxe = Math.max(0, Math.min(100, 50 + (after - 1000) / 8));
+        const ratingLine = `|raw|${username}'s rating: ${before} &rarr; <strong>${after}</strong><br />(GXE: ${gxe.toFixed(1)}%)`;
         body = body.replace(wonLine || tieLine || '|win|', `${ratingLine}\n${wonLine || tieLine}`);
       }
       if (socket.readyState === socket.OPEN) socket.send(`>${room}\n${body}`);

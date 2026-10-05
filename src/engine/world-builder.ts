@@ -1,18 +1,33 @@
 import { Battle, BattleStreams, Dex, Teams } from '@pkmn/sim';
 import { GameState, Action, PokemonBelief } from '../types/index.js';
 import { Format } from '../types/format.js';
+import type { SetInference } from './set-inference/index.js';
+import type { ConcretePokemon } from './set-inference/sample.js';
 
 /**
  * Build determinized worlds from a game state.
  * Each world samples opponent hidden information (unrevealed sets, unknown mons).
+ * When a SetInference is passed, the opponent team is a concrete draw from sampleWorlds.
  */
 export class WorldBuilder {
   constructor(private format: Format) {}
   
   /**
    * Create N determinized worlds by sampling opponent sets.
+   * Identical posterior draws are merged inside sampleWorlds; this repeats a
+   * merged world so the caller still receives `count` states.
    */
-  buildWorlds(state: GameState, count: number): GameState[] {
+  buildWorlds(state: GameState, count: number, inference?: SetInference): GameState[] {
+    if (inference) {
+      const sampled = inference.sampleWorlds(count);
+      if (sampled.length > 0) {
+        const worlds: GameState[] = [];
+        for (let i = 0; i < count; i++) {
+          worlds.push(this.materialize(state, sampled[i % sampled.length].team));
+        }
+        return worlds;
+      }
+    }
     const worlds: GameState[] = [];
     
     for (let i = 0; i < count; i++) {
@@ -20,6 +35,13 @@ export class WorldBuilder {
     }
     
     return worlds;
+  }
+
+  private materialize(state: GameState, team: ConcretePokemon[]): GameState {
+    const world = this.cloneGameState(state);
+    world.opponentTeam = team.map(mon => beliefFromConcrete(mon));
+    world.opponentActive = 0;
+    return world;
   }
   
   /**
@@ -149,4 +171,18 @@ export class WorldBuilder {
       },
     };
   }
+}
+
+function beliefFromConcrete(mon: ConcretePokemon): PokemonBelief {
+  return {
+    species: mon.species,
+    level: mon.level,
+    possibleSets: new Map([[mon.role, 1]]),
+    revealedMoves: new Set(mon.moves),
+    revealedAbility: mon.ability || undefined,
+    revealedItem: mon.item || undefined,
+    revealedTeraType: mon.teraType || undefined,
+    moves: mon.moves.slice(),
+    stats: { ...mon.stats },
+  };
 }

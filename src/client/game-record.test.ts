@@ -10,6 +10,8 @@ import {
   groupByRunId,
   configHash,
   currentGitSha,
+  eloDeltaConsistent,
+  eloForGame,
   factsFromTranscript,
   gxeOf,
   isPhantomRecord,
@@ -215,16 +217,55 @@ describe('ladder game records', () => {
       ourSide: 'p1',
       opponent: 'Rival',
       opponentRating: 1400,
-      eloBefore: 1073,
+      eloBefore: null,
+      preRating: 1073,
       eloAfter: null,
       gxe: null,
       minTimerMarginSec: 9,
       winner: 'BotAlpha',
     });
+    const kept = buildLadderGameRecord(input({
+      eloBefore: facts.eloBefore,
+      eloAfter: facts.eloAfter,
+      preRating: facts.preRating,
+      lines: [
+        '|player|p1|BotAlpha|1|1073',
+        '|win|BotAlpha',
+      ],
+    }));
+    expect(kept.eloBefore).toBe(1073);
+    expect(kept.eloAfter).toBeNull();
     const rated = factsFromTranscript(['|rating|1100|62.4|1', '|win|Rival'], 'BotAlpha');
     expect(rated.eloAfter).toBe(1100);
     expect(rated.gxe).toBe(62.4);
     expect(rated.eloBefore).toBeNull();
+  });
+
+  it('drops an eloAfter that does not move with the result', () => {
+    expect(eloDeltaConsistent('win', 1148, 1124)).toBe(false);
+    expect(eloDeltaConsistent('win', 1072, 1088)).toBe(true);
+    expect(eloDeltaConsistent('loss', 1185, 1169)).toBe(true);
+    expect(eloDeltaConsistent('loss', 1185, 1200)).toBe(false);
+    expect(eloDeltaConsistent('win', null, 1101)).toBe(true);
+    expect(eloDeltaConsistent('win', 1072, null)).toBe(true);
+    const down = eloForGame({ outcome: 'win', ratingBefore: 1148, ratingAfter: 1124, preRating: 1072 });
+    expect(down).toEqual({ eloBefore: 1072, eloAfter: null });
+    const up = eloForGame({ outcome: 'win', ratingBefore: 1072, ratingAfter: 1088, preRating: 1072 });
+    expect(up).toEqual({ eloBefore: 1072, eloAfter: 1088 });
+    const bare = eloForGame({ outcome: 'win', ratingBefore: null, ratingAfter: 1101, preRating: 1072 });
+    expect(bare).toEqual({ eloBefore: 1072, eloAfter: null });
+    const loss = buildLadderGameRecord(input({
+      winner: 'Rival',
+      lines: ['|win|Rival'],
+      eloBefore: 1185,
+      eloAfter: 1200,
+      preRating: 1185,
+      gxe: 51,
+    }));
+    expect(loss.outcome).toBe('loss');
+    expect(loss.eloBefore).toBe(1185);
+    expect(loss.eloAfter).toBeNull();
+    expect(loss.gxe).toBeNull();
   });
 
   it('records the battle replay id and a URL only when the server confirms it', () => {

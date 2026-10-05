@@ -16,9 +16,11 @@ export interface PokemonSet {
 export interface RoleData {
   weight: number;
   moves: Record<string, number>;
+  abilities?: Record<string, number>;
   items?: Record<string, number>;
   teraTypes?: Record<string, number>;
   evs?: Record<string, number>;
+  ivs?: Record<string, number>;
   nature?: string;
 }
 
@@ -27,6 +29,8 @@ export interface SpeciesStats {
   abilities: Record<string, number>;
   items: Record<string, number>;
   roles: Record<string, RoleData>;
+  evs?: Record<string, number>;
+  ivs?: Record<string, number>;
 }
 
 export interface RandbatsStats {
