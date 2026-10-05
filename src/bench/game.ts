@@ -3,8 +3,8 @@ import { PolicySpec, decide } from '../engine/exact/policies.js';
 import { PokemonSet } from '@pkmn/sim';
 import {
   SideId,
+  commitChoice,
   legalChoices,
-  safeChoose,
   startRandomBattle,
 } from '../engine/exact/battle-utils.js';
 import { clearMatchupCache } from '../engine/exact/matchup.js';
@@ -98,32 +98,34 @@ export async function runGame(job: GameJob): Promise<GameResult> {
     const battle = startRandomBattle(job.p1Team, job.p2Team, job.seed);
     while (!battle.ended && loops < MAX_LOOPS) {
       loops++;
-      const p1Legal = legalChoices(battle, 'p1');
-      const p2Legal = legalChoices(battle, 'p2');
-      if (p1Legal.length === 0 && p2Legal.length === 0) {
+      // Both players choose before either choice is sent. Choosing p1
+      // first used to leave that move on the battle, and p2's search
+      // then treated a simultaneous turn as a known opponent move.
+      const planned: Array<{ side: SideId; legal: string[]; decision: Awaited<ReturnType<typeof decide>> }> = [];
+      for (const side of ['p1', 'p2'] as const) {
+        const legal = legalChoices(battle, side);
+        if (legal.length === 0) continue;
+        planned.push({ side, legal, decision: await decide(side === 'p1' ? job.p1 : job.p2, battle, side, rng) });
+      }
+      if (planned.length === 0) {
         result.crashed = true;
         result.error = `stuck at turn ${battle.turn} request=${battle.requestState}`;
         break;
       }
 
-      if (p1Legal.length) {
-        const decision = await decide(job.p1, battle, 'p1', rng);
-        result.p1TurnTimes.push(decision.ms);
-        notePlay(result, 'p1', p1Legal, decision);
-        if (!p1Legal.includes(decision.choice)) result.p1Invalid++;
-        const ok = safeChoose(battle, 'p1', decision.choice);
-        if (!ok) result.p1Invalid++;
-        if (job.logDecisions && result.decisions && result.winner === 'tie') {
+      for (const { side, legal, decision } of planned) {
+        if (battle.ended) break;
+        const times = side === 'p1' ? result.p1TurnTimes : result.p2TurnTimes;
+        times.push(decision.ms);
+        notePlay(result, side, legal, decision);
+        const accepted = commitChoice(battle, side, decision.choice);
+        if (!accepted) {
+          if (side === 'p1') result.p1Invalid++;
+          else result.p2Invalid++;
+        }
+        if (side === 'p1' && job.logDecisions && result.decisions && result.winner === 'tie') {
           result.decisions.push({ side: 'p1', turn: battle.turn, choice: decision.choice, scores: decision.scores });
         }
-      }
-      if (!battle.ended && p2Legal.length) {
-        const decision = await decide(job.p2, battle, 'p2', rng);
-        result.p2TurnTimes.push(decision.ms);
-        notePlay(result, 'p2', p2Legal, decision);
-        if (!p2Legal.includes(decision.choice)) result.p2Invalid++;
-        const ok = safeChoose(battle, 'p2', decision.choice);
-        if (!ok) result.p2Invalid++;
       }
     }
 

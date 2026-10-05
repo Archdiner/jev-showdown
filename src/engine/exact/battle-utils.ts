@@ -73,6 +73,34 @@ export function cloneFromSnapshot(snap: string): Battle {
 }
 
 /**
+ * Choices the request lists, minus switches the simulator will reject.
+ * A hidden trap is not written on the request (`trapped === 'hidden'`),
+ * but `choose('switch')` still fails and rewrites the request.
+ */
+export function playableChoices(battle: Battle, sideId: SideId): string[] {
+  const choices = legalChoices(battle, sideId);
+  const active = battle.getSide(sideId).active[0];
+  if (!active?.trapped) return choices;
+  const withoutSwitch = choices.filter(choice => !choice.startsWith('switch'));
+  return withoutSwitch.length > 0 ? withoutSwitch : choices;
+}
+
+/**
+ * A cloned battle keeps a choice that was already typed in. Search has to
+ * score the pair it was given, not that leaked earlier choice.
+ */
+function releasePendingChoices(battle: Battle): void {
+  for (const side of battle.sides) {
+    if (!side.choice?.actions?.length) continue;
+    try {
+      side.clearChoice();
+    } catch {
+      // Nothing left to undo.
+    }
+  }
+}
+
+/**
  * Apply the choices that are actually being requested.
  * Returns false when the sim rejects a choice. Never throws.
  */
@@ -82,6 +110,7 @@ export function playChoices(
   myChoice: string | undefined,
   oppChoice: string | undefined,
 ): boolean {
+  releasePendingChoices(battle);
   const opp = otherSide(side);
   const plan: Array<[SideId, string | undefined]> = [
     [side, myChoice],
@@ -126,6 +155,40 @@ export function hpEval(battle: Battle, sideId: SideId): number {
     score += battle.winner === me.name ? 1000 : -1000;
   }
   return score;
+}
+
+/**
+ * Submit `choice`. Returns false when that exact string was rejected.
+ * Some other legal choice is sent so the battle does not stall, and the
+ * caller counts the rejection once.
+ */
+export function commitChoice(battle: Battle, sideId: SideId, choice: string): boolean {
+  const legal = legalChoices(battle, sideId);
+  if (legal.length === 0) return true;
+
+  if (legal.includes(choice)) {
+    try {
+      if (battle.choose(sideId, choice)) return true;
+    } catch {
+      // The sim rejected it. Fall through and send something else.
+    }
+    try {
+      battle.getSide(sideId).clearChoice();
+    } catch {
+      // already clear
+    }
+  }
+
+  const refreshed = legalChoices(battle, sideId);
+  const retry = refreshed.find(option => option !== choice) || refreshed[0] || legal.find(option => option !== choice) || legal[0];
+  if (retry) {
+    try {
+      battle.choose(sideId, retry);
+    } catch {
+      // The battle stays on this request. The loop notices if it sticks.
+    }
+  }
+  return false;
 }
 
 export function safeChoose(battle: Battle, sideId: SideId, choice: string): boolean {

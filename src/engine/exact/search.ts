@@ -7,6 +7,7 @@ import {
   hpEval,
   legalChoices,
   otherSide,
+  playableChoices,
   playChoices,
   snapshot,
 } from './battle-utils.js';
@@ -126,8 +127,15 @@ function evaluate(battle: Battle, sideId: SideId, config: ExactConfig): number {
   return hpEval(battle, sideId);
 }
 
+function listedChoices(battle: Battle, sideId: SideId, config: ExactConfig): string[] {
+  // The switch search submits every string it returns. Drop switches the
+  // simulator rejects. The 1-ply champion keeps the raw request list.
+  if (config.opponentModel === 'switch') return playableChoices(battle, sideId);
+  return legalChoices(battle, sideId);
+}
+
 function opponentDistribution(battle: Battle, opp: SideId, config: ExactConfig): WeightedChoice[] {
-  const legal = legalChoices(battle, opp);
+  const legal = listedChoices(battle, opp, config);
   if (legal.length === 0) return [];
   if (config.opponentModel === 'switch') {
     return pruneReplies(
@@ -145,7 +153,7 @@ function opponentDistribution(battle: Battle, opp: SideId, config: ExactConfig):
 }
 
 function ownChoices(battle: Battle, sideId: SideId, config: ExactConfig, atRoot: boolean): string[] {
-  const legal = legalChoices(battle, sideId);
+  const legal = listedChoices(battle, sideId, config);
   const cap = config.deeperChoices ?? 0;
   if (atRoot || cap <= 0 || legal.length <= cap) return legal;
   const moves = legal.filter(choice => choice.startsWith('move '));
@@ -153,7 +161,8 @@ function ownChoices(battle: Battle, sideId: SideId, config: ExactConfig, atRoot:
   const kept = [...moves];
   for (const choice of switches) {
     if (kept.length >= cap) break;
-    if (!kept.includes(choice)) kept.push(choice);
+    if (!legal.includes(choice) || kept.includes(choice)) continue;
+    kept.push(choice);
   }
   if (kept.length === 0) return legal.slice(0, cap);
   return kept.slice(0, cap);
