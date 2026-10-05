@@ -44,8 +44,17 @@ export interface DecisionLogger {
   games(): GameLogRecord[];
 }
 
+/** In-memory window. JSONL still receives every row when the sink persists. */
+export const LOGGER_DECISION_CAP = 2000;
+export const LOGGER_GAME_CAP = 500;
+
 function logDir(): string {
   return process.env.JEV_LOG_DIR || path.join(process.cwd(), 'state');
+}
+
+function remember<T>(bucket: T[], record: T, cap: number): void {
+  bucket.push(record);
+  if (bucket.length > cap) bucket.splice(0, bucket.length - cap);
 }
 
 export function createLogger(env: EnvProfile): DecisionLogger {
@@ -54,11 +63,11 @@ export function createLogger(env: EnvProfile): DecisionLogger {
   const persist = env.logSink !== 'memory';
   return {
     decision(record) {
-      decisions.push(record);
+      remember(decisions, record, LOGGER_DECISION_CAP);
       if (persist) append('decisions.jsonl', record);
     },
     game(record) {
-      games.push(record);
+      remember(games, record, LOGGER_GAME_CAP);
       if (persist) append('games.jsonl', record);
     },
     decisions: () => decisions,
