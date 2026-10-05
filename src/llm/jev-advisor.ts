@@ -7,6 +7,7 @@ import type { AdvisorAssessment, AdvisorCandidate } from './types.js';
 import type { GameState, RandbatsStats } from '../types/index.js';
 import type { ScoredAction } from './types.js';
 import { dataLoader } from '../data/data-loader.js';
+import { installPosthogSink } from '../client/posthog-sink.js';
 
 export interface AdviseOptions {
   /** Extra context from the config context layer, prepended to the calc sheet. */
@@ -56,6 +57,7 @@ export class JevAdvisor {
     pools?: RandbatsStats,
     options?: AdviseOptions
   ): Promise<AdvisorAssessment> {
+    installPosthogSink();
     if (candidates.length === 0) {
       return emptyAssessment(this.model, true, 'no_candidates');
     }

@@ -7,6 +7,7 @@ import type { CallMetrics } from './gateway-client.js';
 import { buildBattleFacts } from './battle-facts.js';
 import type { GameState, RandbatsStats } from '../types/index.js';
 import type { AdvisorCandidate } from './types.js';
+import { installPosthogSink } from '../client/posthog-sink.js';
 
 export const MISTAKE_CLASSES = [
   'speed-control',
@@ -92,6 +93,7 @@ export class LossReviewer {
       pools?: RandbatsStats;
     } = {}
   ): Promise<ReviewResult> {
+    installPosthogSink();
     const clipped = battleText.length > MAX_LOG_CHARS;
     const transcript = clipped ? battleText.slice(0, MAX_LOG_CHARS) : battleText;
     const calcText = opts.calcText ?? (opts.state ? buildBattleFacts(opts.state, opts.candidates ?? [], opts.pools).text : undefined);

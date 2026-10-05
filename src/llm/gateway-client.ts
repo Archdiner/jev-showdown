@@ -24,6 +24,28 @@ export interface CallMetrics {
   attempts: number;
 }
 
+type LlmObserver = (metrics: CallMetrics) => void;
+const llmObservers: LlmObserver[] = [];
+
+/** Fired after a gateway call returns. Observers must not throw or block the turn. */
+export function observeLlmCalls(observer: LlmObserver): () => void {
+  llmObservers.push(observer);
+  return () => {
+    const index = llmObservers.indexOf(observer);
+    if (index >= 0) llmObservers.splice(index, 1);
+  };
+}
+
+export function notifyLlmObservers(metrics: CallMetrics): void {
+  for (const observer of llmObservers) {
+    try {
+      observer(metrics);
+    } catch {
+      // A metrics sink must not change the move.
+    }
+  }
+}
+
 export interface GatewaySuccess<T> {
   ok: true;
   data: T;
@@ -328,6 +350,7 @@ export class GatewayClient {
         `tokens_in=${metrics.tokensInput} tokens_out=${metrics.tokensOutput} ` +
         `cost_usd=${metrics.costUsd.toFixed(8)} status=${metrics.status} attempts=${metrics.attempts}`
     );
+    notifyLlmObservers(metrics);
   }
 
   private metrics(

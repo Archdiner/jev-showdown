@@ -30,6 +30,7 @@ import {
 import { LiveMetrics } from '../client/live-metrics.js';
 import { SearchAdmission, admissionSettings, ConcurrencyGovernor } from '../client/concurrency-governor.js';
 import { configHash, currentGitSha } from '../client/game-record.js';
+import { installPosthogSink } from '../client/posthog-sink.js';
 
 interface LadderOptions {
   games: number;
@@ -236,6 +237,7 @@ async function makePlayer(input: {
     format: input.formatId,
     loginServer: process.env.SHOWDOWN_LOGIN_URL,
   });
+  const posthog = installPosthogSink();
   const driver = new BattleDriver({
     client,
     username: input.username,
@@ -270,6 +272,7 @@ async function makePlayer(input: {
   driver.on('battleStart', (roomId: string) => queue.noteBattle(roomId));
   input.metrics?.attach(driver);
   input.admission?.watch({ queue, driver });
+  driver.on('gameEnd', summary => posthog?.captureGame(summary));
   await decisions.start();
   await client.connect();
   console.log(`[${input.label}] logged in as ${input.username} engine=${input.engine} concurrency=${input.opts.concurrency}`);
@@ -638,36 +641,41 @@ function readFormatRating(client: ShowdownClient, format: string): Promise<numbe
 }
 
 async function main(): Promise<void> {
-  const opts = parseArgs(process.argv.slice(2));
-  if (opts.help) {
-    printHelp();
-    return;
-  }
-  if (opts.format !== 'gen9randombattle') {
-    throw new Error(`This client is wired for gen9randombattle (got ${opts.format})`);
-  }
-  if (opts.check) {
-    await runCheck(opts);
-    return;
-  }
-
-  applyLiveConcurrency(opts);
-  console.log('[ladder] loading randbats data');
-  await dataLoader.load(gen9RandomBattle);
-
-  const session = openDrain(opts.engine);
-  const metrics = openLiveMetrics(opts);
-  const admission = openAdmission(opts);
+  const posthog = installPosthogSink();
   try {
-    const summaries = opts.local && !opts.server && !opts.accept && !opts.challenge
-      ? await runLocalSeries(opts, session.drain, metrics, admission)
-      : await runRemote(opts, session.drain, metrics, admission);
-    metrics.finish({ games: summaries.length, requested: opts.games });
-    report(summaries, opts, session.drain);
+    const opts = parseArgs(process.argv.slice(2));
+    if (opts.help) {
+      printHelp();
+      return;
+    }
+    if (opts.format !== 'gen9randombattle') {
+      throw new Error(`This client is wired for gen9randombattle (got ${opts.format})`);
+    }
+    if (opts.check) {
+      await runCheck(opts);
+      return;
+    }
+
+    applyLiveConcurrency(opts);
+    console.log('[ladder] loading randbats data');
+    await dataLoader.load(gen9RandomBattle);
+
+    const session = openDrain(opts.engine);
+    const metrics = openLiveMetrics(opts);
+    const admission = openAdmission(opts);
+    try {
+      const summaries = opts.local && !opts.server && !opts.accept && !opts.challenge
+        ? await runLocalSeries(opts, session.drain, metrics, admission)
+        : await runRemote(opts, session.drain, metrics, admission);
+      metrics.finish({ games: summaries.length, requested: opts.games });
+      report(summaries, opts, session.drain);
+    } finally {
+      admission.stop();
+      session.close();
+      await metrics.close();
+    }
   } finally {
-    admission.stop();
-    session.close();
-    await metrics.close();
+    await posthog?.shutdown();
   }
 }
 
