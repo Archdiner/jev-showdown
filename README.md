@@ -567,6 +567,7 @@ P0 is losing games or corrupting data now. P1 is the loop or visibility broken. 
 | win-rate-batch | P2 | A 10-game batch (grouped by git sha) more than 10 points under a 50% target |
 | checkout-behind | P2 | `HEAD` is behind `origin/main` |
 | malformed-log-line | P3 | A JSONL line that is not an object |
+| stale-lock | P3 | A ladder account lock is held by a pid that is not running |
 | duplicate-battle-id | P0 | The same battle id on more than one game row |
 | null-replay-url | P2 | `replayUrl` null on a non-phantom game |
 | null-required-field | P2 | A required field null, except a reasoned null opponent rating or `eloAfter` |

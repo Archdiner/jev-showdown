@@ -693,7 +693,10 @@ describe('sentinel accuracy', () => {
     expect(text).toContain('batch 10 r10');
     expect(text).toMatch(/batch 11 r11\s+2-0-0\s+100\.0%\s+n=2/);
     expect(text).toMatch(/batch 10 r10\s+0-1-0\s+0\.0%\s+n=1/);
-    expect(text).not.toContain('2-1-0');
+    // The total 2-1-0 can appear in vs prior and variants sections, just not as a batch
+    expect(text).toContain('2-1-0');
+    expect(text).toContain('win rate   66.7%  2-1-0 on 3 games');
+    expect(text).toContain('record     0-0-0 on 0 games → 2-1-0 on 3 games');
   });
 
   test('opened counts incidents in the file, and a ledger ref is on the scorecard', () => {
