@@ -1,5 +1,22 @@
 # Changelog
 
+## Fitted team eval and selective depth-2 search
+
+The leaf score is no longer only HP and faints. `fitted-team` averages the 1v1 matchup of every remaining Pokémon (Sarantinos 2022), then adds speed control, hazard chip on each side unless the Pokémon holds Heavy-Duty Boots, status, boosts, whether Tera is still available, and how many healthy checks remain. The weights are a logistic regression fit on self-play (even seeds max-damage and sometimes Terastallize; odd seeds play a random legal choice). Seeds split 60% train, 20% dev, 20% held-out before the fit. Held-out was scored once, after the weights were frozen. The randbats generator covers 508 species. `eval-weights.json` is that fit.
+
+Dev (n=780): team log loss 0.5615, accuracy 70.5%. HP-only log loss 0.5536, accuracy 70.4%. Constant log loss 0.6931. Held-out (n=800): team log loss 0.6092, accuracy 65.3%. HP-only log loss 0.6255, accuracy 65.3%.
+
+`selective-depth2` scores every legal move at depth 1, then spends the remaining deadline on the top-N of those moves against the opponent's top-M replies. Damaging rolls are two buckets, KO and non-KO. A transposition table remembers finished nodes for that decision. Both pieces are config components (`fitted-team`, `selective-depth2`). `exactSearch` honors `evalMode: 'fitted'` and `selective`, so sampled-world search and the hybrid engine pass the same config.
+
+Info-honest bench, 60 pairs, sides swapped, 120 games, each policy sees only its public observation. Opponent is exact 1-ply (8 samples, HP eval). Invalid choices 0, crashes 0, view misses 0. Randbats generator species 508.
+
+| Policy | Result | Wilson 95% CI | p50 | p95 |
+| --- | --- | --- | --- | --- |
+| fitted 1-ply | 70W-50L-0T (58.3%) | 49.4–66.8% | 77ms | 126ms |
+| fitted depth-2 | 58W-62L-0T (48.3%) | 39.6–57.2% | 119ms | 313ms |
+
+A Revival Blessing follow-up now switches to a fainted teammate. The previous switch list offered a healthy Pokémon, which the sim rejects. The hidden-info battle copies the request's `reviving` flag, so the search and the real battle agree.
+
 ## Live losses reach the factory
 
 A ladder loss used to write a hypothesis and then stop. Per-battle logs have no `>start` input log, so position mining returned nothing and no factory job was enqueued. The same generic fallback text for every loss never became a self-play variant. Each reviewed loss now queues a challenger for that mechanism or eval term, or a mined position when the log can be reconstructed, or a line in `state/ops/dispositions.jsonl` saying why it was skipped. The factory claims open hypotheses, including `state/meta/hypotheses.json` rows, and plays them against max-damage. `npm run ops -- status` prints the cycle counts. The sentinel check `improvement-stall` is a P1 when losses were reviewed and nothing was queued for 15 minutes.

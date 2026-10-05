@@ -17,10 +17,69 @@ function averageDamage(damage: number | number[] | number[][]): number {
   return flat.reduce((sum, n) => sum + n, 0) / flat.length;
 }
 
+/** The roll chart for one damaging move. Multi-hit uses the fullest hit row. */
+export function damageRollChart(damage: unknown): number[] {
+  if (typeof damage === 'number') return [damage];
+  if (!Array.isArray(damage) || damage.length === 0) return [];
+  if (Array.isArray(damage[0])) {
+    const rows = damage as number[][];
+    const fullest = rows.reduce((best, row) => (row.length > best.length ? row : best), rows[0]);
+    return fullest.filter(value => typeof value === 'number');
+  }
+  return (damage as unknown[]).filter((value): value is number => typeof value === 'number');
+}
+
+/**
+ * Damage rolls from @smogon/calc. Null when the move is status or has no base power.
+ */
+export function damageRolls(attacker: any, defender: any, moveName: string, weatherId?: string): number[] | null {
+  try {
+    const move = new Move(9, moveName);
+    if (move.category === 'Status' || !move.bp) return null;
+    const weather = weatherId ? WEATHER[weatherId] : undefined;
+    const field = new Field(weather ? { weather } : {});
+    const result = calculate(9, calcMon(attacker), calcMon(defender), move, field);
+    const rolls = damageRollChart(result.damage);
+    return rolls.length ? rolls : null;
+  } catch {
+    return null;
+  }
+}
+
 function dexName(kind: 'abilities' | 'items' | 'natures', raw: unknown): string | undefined {
   if (typeof raw !== 'string' || raw.length === 0) return undefined;
   const entry = Dex[kind].get(raw);
   return entry?.exists ? entry.name : raw;
+}
+
+const calcSpeciesCache = new Map<string, string>();
+
+/**
+ * Name @smogon/calc can build. Cosmetic formes (Gastrodon-East) are not in
+ * its dex; the base forme has the same battle stats. A forme the calc lists
+ * (Ogerpon-Wellspring) is kept.
+ */
+export function speciesForCalc(species: string): string {
+  const known = calcSpeciesCache.get(species);
+  if (known) return known;
+  const dex = Dex.species.get(species);
+  const primary = dex.exists ? dex.name : species;
+  const candidates = [primary];
+  if (dex.baseSpecies && !candidates.includes(dex.baseSpecies)) candidates.push(dex.baseSpecies);
+  let picked = primary;
+  for (const name of candidates) {
+    try {
+      const mon = new CalcPokemon(9, name, { level: 80 });
+      if (mon.species?.baseStats?.hp) {
+        picked = name;
+        break;
+      }
+    } catch {
+      // Try the base forme.
+    }
+  }
+  calcSpeciesCache.set(species, picked);
+  return picked;
 }
 
 function calcMon(pokemon: any): CalcPokemon {
@@ -29,7 +88,7 @@ function calcMon(pokemon: any): CalcPokemon {
   // The sim stores ids ("levitate"). @smogon/calc only applies the display
   // name ("Levitate"). Passing the id overrides the species ability and
   // Ground moves hit Levitate targets.
-  return new CalcPokemon(9, pokemon.species.name, {
+  return new CalcPokemon(9, speciesForCalc(pokemon.species.name), {
     level: pokemon.level,
     ability: dexName('abilities', pokemon.ability || set.ability),
     item: dexName('items', pokemon.item || set.item),

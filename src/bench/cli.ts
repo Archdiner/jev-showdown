@@ -2,7 +2,9 @@ import { informationMode, type InformationMode } from '../client/hidden-info.js'
 import { specForAlias } from '../config/aliases.js';
 import { BenchPlayer, GameJob, GameResult, playerId } from './game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
-import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2 } from '../engine/exact/search.js';
+import { EXACT_1PLY, ExactConfig, FITTED_1PLY, FITTED_DEPTH2, SWITCH_DEPTH2 } from '../engine/exact/search.js';
+import { assertRandbatsSpecies, randbatsSpeciesCount, statsFileSpeciesCount } from '../engine/exact/team-features.js';
+import { wilson } from '../dashboard/stats.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
 import { p99, runGamesParallel } from './pool.js';
 
@@ -17,6 +19,8 @@ function policy(name: string): BenchPlayer {
   if (name === 'maxdamage') return { kind: 'maxdamage' };
   if (name === 'legacy') return { kind: 'legacy' };
   if (name === 'exact') return { kind: 'exact', config: EXACT_1PLY };
+  if (name === 'fitted' || name === 'fitted-1ply') return { kind: 'exact', config: FITTED_1PLY };
+  if (name === 'fitted-depth2' || name === 'fitted-d2') return { kind: 'exact', config: FITTED_DEPTH2 };
   if (name === 'switch') return { kind: 'exact', config: SWITCH_DEPTH2 };
   if (name.startsWith('exact')) {
     const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',');
@@ -30,6 +34,11 @@ function policy(name: string): BenchPlayer {
     return { kind: 'exact', config };
   }
   return specForAlias(name, 'selfplay');
+}
+
+function usesFitted(player: BenchPlayer): boolean {
+  if (!('kind' in player) || player.kind !== 'exact') return false;
+  return player.config.evalMode === 'fitted';
 }
 
 function informationArg(): InformationMode {
@@ -81,6 +90,8 @@ export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate
   invalid: number;
   crashes: number;
   p99ms: number;
+  p50ms: number;
+  p95ms: number;
   maxMs: number;
 } {
   let wins = 0;
@@ -111,8 +122,17 @@ export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate
     invalid,
     crashes,
     p99ms: p99(times),
+    p50ms: percentile(times, 0.5),
+    p95ms: percentile(times, 0.95),
     maxMs: times.length ? Math.max(...times) : 0,
   };
+}
+
+function percentile(values: number[], p: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * p) - 1));
+  return sorted[index];
 }
 
 function playRate(results: GameResult[], jobs: GameJob[], candidate: BenchPlayer): {
@@ -163,6 +183,10 @@ async function main() {
   const b = policy(arg('b', 'random'));
   const seed = Number(arg('seed', '1'));
   const information = informationArg();
+  const species = randbatsSpeciesCount();
+  const statsSpecies = statsFileSpeciesCount();
+  console.log(`randbats generator species=${species} statsFile=${statsSpecies ?? 'missing'}`);
+  if (usesFitted(a) || usesFitted(b)) assertRandbatsSpecies();
   console.log(`Paired benchmark: ${pairs} seeds x 2 sides, information=${information}`);
   console.log(`A: ${JSON.stringify(a)}`);
   console.log(`B: ${JSON.stringify(b)}`);
@@ -173,8 +197,12 @@ async function main() {
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   console.log('\n=== Result ===');
   console.log(`A win rate: ${(summary.winRate * 100).toFixed(1)}% (${summary.wins}W-${summary.losses}L-${summary.ties}T / ${summary.games})`);
+  const decided = summary.wins + summary.losses;
+  const interval = wilson(summary.wins, decided > 0 ? decided : summary.games);
+  const pct = (value: number | null) => value == null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
+  console.log(`Wilson 95% CI: [${pct(interval.low)}, ${pct(interval.high)}]`);
   const viewMiss = results.reduce((sum, game) => sum + game.p1ViewMiss + game.p2ViewMiss, 0);
-  console.log(`invalid=${summary.invalid} crashes=${summary.crashes} viewMiss=${viewMiss} p99=${summary.p99ms.toFixed(0)}ms max=${summary.maxMs.toFixed(0)}ms`);
+  console.log(`invalid=${summary.invalid} crashes=${summary.crashes} viewMiss=${viewMiss} p50=${summary.p50ms.toFixed(0)}ms p95=${summary.p95ms.toFixed(0)}ms p99=${summary.p99ms.toFixed(0)}ms max=${summary.maxMs.toFixed(0)}ms`);
   const play = playRate(results, jobs, a);
   console.log(`switch rate ${(play.switchRate * 100).toFixed(1)}% (${play.switches}/${play.decisions}) predicted-switch punish ${(play.punishRate * 100).toFixed(1)}% (${play.answered}/${play.predicted})`);
   console.log(`elapsed ${seconds}s`);
