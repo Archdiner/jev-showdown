@@ -174,4 +174,17 @@ describe('config parity', () => {
     expect(cfg('stacked-qw-fitted').configId).toBe('a582e1386f6392ce');
     expect(cfg('stacked-qw-fitted').config.search.params.foeBelief).toBeUndefined();
   });
+
+  it('stacked-qw-fitted-belief differs from stacked-qw-fitted only by search.params.foeBelief', () => {
+    const stacked = cfg('stacked-qw-fitted').config as any;
+    const belief = cfg('stacked-qw-fitted-belief').config as any;
+    expect(belief.search.params.foeBelief).toBe(true);
+    const strip = (config: any) => {
+      const copy = JSON.parse(JSON.stringify(config));
+      delete copy.name;
+      delete copy.search.params.foeBelief;
+      return copy;
+    };
+    expect(strip(belief)).toEqual(strip(stacked));
+  });
 });
