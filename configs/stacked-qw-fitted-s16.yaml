@@ -1,0 +1,8 @@
+name: stacked-qw-fitted-s16
+extends: stacked-qw-fitted.yaml
+# stacked-qw-fitted with 16 RNG draws per (choice, reply) instead of 8.
+search:
+  id: exact-1ply-qw
+  params:
+    depth: 1
+    samples: 16
