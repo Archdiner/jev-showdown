@@ -8,6 +8,7 @@ import {
   parseUpdateUser,
 } from './account-block.js';
 import { redactSecrets, safeError, toID } from './ids.js';
+import { roomLines } from './protocol-frames.js';
 
 export {
   AccountBlockedError,
@@ -252,18 +253,8 @@ export class ShowdownClient extends EventEmitter {
   }
 
   private handlePayload(payload: string): void {
-    let roomid = '';
-    let body = payload;
-    if (body.startsWith('>')) {
-      const nl = body.indexOf('\n');
-      roomid = nl === -1 ? body.slice(1) : body.slice(1, nl);
-      body = nl === -1 ? '' : body.slice(nl + 1);
-    }
-    if (roomid.startsWith('battle-')) this.rooms.add(roomid);
-
-    const lines = body.split('\n');
-    for (const line of lines) {
-      if (!line) continue;
+    for (const { roomid, line } of roomLines(payload)) {
+      if (roomid.startsWith('battle-')) this.rooms.add(roomid);
       this.emit('line', roomid, line);
       this.handleLine(roomid, line);
     }
@@ -450,9 +441,19 @@ export function parseRatingLine(text: string): RatingUpdate | null {
 }
 
 export function parseReplayUrl(text: string): ReplayNotice | null {
-  const match = text.match(/https?:\/\/replay\.pokemonshowdown\.com\/([a-z0-9-]+)/i);
+  // The public URL is `{format}-{number}` plus an optional `-{password}`.
+  // The password is not part of the battle room id.
+  const match = text.match(/https?:\/\/replay\.pokemonshowdown\.com\/([a-z0-9]+-\d+)(-[a-z0-9]+)?/i);
   if (!match) return null;
   return { id: match[1], url: match[0] };
+}
+
+/** True when a replay id names this battle room, and not a longer room id. */
+export function replayMatchesRoom(roomId: string, replayId: string): boolean {
+  if (!replayId) return false;
+  if (roomId === replayId || roomId === `battle-${replayId}`) return true;
+  const bare = roomId.startsWith('battle-') ? roomId.slice('battle-'.length) : roomId;
+  return bare === replayId;
 }
 
 /**

@@ -114,6 +114,12 @@ describe('login and result parsing', () => {
       id: 'gen9randombattle-123',
       url: 'https://replay.pokemonshowdown.com/gen9randombattle-123',
     });
+    expect(parseReplayUrl(
+      'replay https://replay.pokemonshowdown.com/gen9randombattle-2692967020-vf14y87snr046p0x7g86l2ffrf1912epw',
+    )).toEqual({
+      id: 'gen9randombattle-2692967020',
+      url: 'https://replay.pokemonshowdown.com/gen9randombattle-2692967020-vf14y87snr046p0x7g86l2ffrf1912epw',
+    });
   });
 
   it('reads GXE from the HTML rating popup and leaves it null when absent', () => {
