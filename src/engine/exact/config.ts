@@ -7,7 +7,7 @@ export interface SearchProfile {
   id: string;
   depth: number;
   opponentModel: 'max-damage' | 'uniform' | 'switch';
-  evalMode: 'hp' | 'full' | 'team';
+  evalMode: 'hp' | 'full' | 'team' | 'nn';
   errorAsLoss: boolean;
   samples: number;
   /** Highest-probability opponent replies kept after the switch model. */

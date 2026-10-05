@@ -6,12 +6,13 @@ import { register } from '../registry.js';
 import { EvaluatorParamsSchema, defaultWeights, type EvaluatorParams, type Weights } from '../schema.js';
 import type { GamePlan } from '../interfaces.js';
 import { bestStat, boostSum, hazardScore, hpFrac, otherSide } from './battle.js';
+import { nnEval, loadNNWeights, isNNLoaded } from '../../engine/neural/nn-eval.js';
 
 export interface EvalImpl {
   id: string;
   params: EvaluatorParams;
   /** `exact` leaves are scored by exactSearch. `weighted` is scored here. */
-  kind: 'hp' | 'full' | 'weighted';
+  kind: 'hp' | 'full' | 'weighted' | 'nn';
   score(battle: Battle, side: SideId, plan: GamePlan | null): number;
 }
 
@@ -55,6 +56,39 @@ export function registerEvaluators(): void {
       kind: 'weighted' as const,
       score: (battle: Battle, side: SideId, plan: GamePlan | null) => weightedScore(battle, side, params.weights, plan),
     }),
+  });
+
+  register<EvaluatorParams>({
+    layer: 'evaluator',
+    id: 'neural',
+    schema: EvaluatorParamsSchema,
+    defaults: { weights: defaultWeights(), modelPath: 'data/neural/weights.json' },
+    create: params => {
+      // Load model weights if not already loaded
+      const modelPath = params.modelPath || 'data/neural/weights.json';
+      if (!isNNLoaded()) {
+        try {
+          loadNNWeights(modelPath);
+        } catch (err) {
+          console.error(`[nn-eval] Failed to load weights from ${modelPath}:`, err);
+          console.error('[nn-eval] Falling back to hp-eval');
+        }
+      }
+      
+      return {
+        id: 'neural',
+        params,
+        kind: 'nn' as const,
+        score: (battle: Battle, side: SideId) => {
+          try {
+            return nnEval(battle, side);
+          } catch (err) {
+            // Fallback to hpEval if neural eval fails
+            return hpEval(battle, side);
+          }
+        },
+      };
+    },
   });
 }
 

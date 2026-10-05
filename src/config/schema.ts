@@ -66,6 +66,7 @@ export type SearchParams = z.infer<typeof SearchParamsSchema>;
 
 export const EvaluatorParamsSchema = z.object({
   weights: WeightsSchema.default({}),
+  modelPath: z.string().optional(),
 }).strict();
 export type EvaluatorParams = z.infer<typeof EvaluatorParamsSchema>;
 

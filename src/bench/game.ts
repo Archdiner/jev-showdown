@@ -31,6 +31,11 @@ export interface GameJob {
    * omniscient battle. `JEV_INFORMATION` sets the default when this is omitted.
    */
   information?: InformationMode;
+  /**
+   * Optional callback to log positions during the game.
+   * Called before each decision with the battle state and which side is choosing.
+   */
+  onPosition?: (battle: any, side: SideId, turn: number) => void;
 }
 
 export interface SideSituations {
@@ -176,6 +181,7 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         break;
       }
       if (p1Legal.length) {
+        job.onPosition?.(battle, 'p1', battle.turn);
         const decision = await chooseSeen(p1, battle, 'p1', rng, gameId, job.seed, result.information, p1Legal);
         if (decision.viewMiss) result.p1ViewMiss++;
         result.p1TurnTimes.push(decision.ms);
@@ -192,6 +198,7 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         });
       }
       if (!battle.ended && p2Legal.length) {
+        job.onPosition?.(battle, 'p2', battle.turn);
         const decision = await chooseSeen(p2, battle, 'p2', rng, gameId, job.seed, result.information, p2Legal);
         if (decision.viewMiss) result.p2ViewMiss++;
         result.p2TurnTimes.push(decision.ms);

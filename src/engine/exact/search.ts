@@ -16,11 +16,12 @@ import switchProfile from '../../../experiments/switch-depth2/config.json' with 
 import { rankedSwitches } from './matchup.js';
 import { pruneReplies, replyDistribution, WeightedChoice } from './switch-model.js';
 import { teamEval } from './team-eval.js';
+import { nnEval, isNNLoaded } from '../neural/nn-eval.js';
 
 export interface ExactConfig {
   depth: number;
   opponentModel: 'max-damage' | 'uniform' | 'switch';
-  evalMode: 'hp' | 'full' | 'team';
+  evalMode: 'hp' | 'full' | 'team' | 'nn';
   /**
    * Legacy bug: a branch whose choice the sim rejects is scored as a loss
    * instead of being ignored. The old search did this for every
@@ -130,6 +131,13 @@ function evaluate(battle: Battle, sideId: SideId, config: ExactConfig): number {
     return raw / unit;
   }
   if (config.evalMode === 'team') return teamEval(battle, sideId);
+  if (config.evalMode === 'nn') {
+    if (!isNNLoaded()) {
+      // Fallback to hpEval if neural network not loaded
+      return hpEval(battle, sideId);
+    }
+    return nnEval(battle, sideId);
+  }
   return hpEval(battle, sideId);
 }
 
