@@ -39,6 +39,8 @@ export interface LoadOptions {
   scanProcesses?: boolean;
   /** When set, this list is the process snapshot. /proc and ps are not read. */
   processes?: ProcessSnapshot[];
+  /** Overrides `process.kill(pid, 0)` for claim-owner checks. */
+  pidAlive?: (pid: number) => boolean;
   /** When set, git is not invoked for the ops checkout. */
   git?: GitStatus;
   /** When set, git is not invoked for LIVE_REPO_DIR. */
@@ -48,8 +50,6 @@ export interface LoadOptions {
    * non-local run. Null disables the cutoff.
    */
   baselineMs?: number | null;
-  /** When set, this replaces `process.kill(pid, 0)`. */
-  pidAlive?: (pid: number) => boolean;
 }
 
 export function loadContext(layout: Layout, options: LoadOptions = {}): SentinelContext {

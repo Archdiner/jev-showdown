@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { pidAlive } from './ladder-run.js';
 import { currentHostname, readBatchLabel } from './run-stamp.js';
 import { configIdOf } from '../config/hash.js';
 import { toID } from './ids.js';
@@ -342,6 +343,29 @@ export function replayIdFromBattle(battleId: string): string {
 }
 
 /**
+ * The ops local server restarts at `battle-local-1` every process.
+ * A bare id is the games.jsonl key plus the server run, so two lives of the
+ * server do not share a row. The protocol room and the replay filename stay
+ * the id the server sent; this is only the stored identity for that bare form.
+ * A room that already names its server run is unchanged.
+ */
+const BARE_LOCAL_ROOM = /^battle-local-\d+$/;
+
+export function recordBattleId(roomId: string, localServerRun: string | null | undefined): string {
+  if (!BARE_LOCAL_ROOM.test(roomId)) return roomId;
+  const run = sanitizeServerRun(localServerRun);
+  if (!run) return roomId;
+  const suffix = `--${run}`;
+  return roomId.endsWith(suffix) ? roomId : `${roomId}${suffix}`;
+}
+
+function sanitizeServerRun(run: string | null | undefined): string | null {
+  if (!run) return null;
+  const clean = run.replace(/[^a-zA-Z0-9]+/g, '');
+  return clean || null;
+}
+
+/**
  * Shareable replay URL. Showdown's room id is `battle-{format}-{n}` or, after
  * `setPrivate`, `battle-{format}-{n}-{password}pw`. The public path is that id
  * without the `battle-` prefix, so a hidden room keeps `-{password}pw`.
@@ -569,53 +593,88 @@ export function gamesJsonlPath(dir: string): string {
 const CLAIMS_FILE = 'battle-claims.jsonl';
 const CONTAMINATION_FILE = 'games.contamination.jsonl';
 const LOCK_FILE = '.games.lock';
+const LIVE_CLIENT = /src\/cli\/ladder\.ts|src\/ops\/cli\.ts|dist\/cli\/ladder\.js|run-live\.sh/;
 
 export interface AppendResult {
   written: boolean;
   reason: 'appended' | 'duplicate' | 'non-owning-process' | 'conflicting-result';
 }
 
+/** How to tell a live owner from a dead one or a recycled pid. Tests inject both. */
+export interface OwnershipOptions {
+  /** `process.kill(pid, 0)` by default. Works on macOS, where `/proc` does not exist. */
+  alive?: (pid: number) => boolean;
+  /**
+   * True when the pid is still a ladder or ops client. False when the number
+   * belongs to something else. Null when `ps` cannot tell.
+   */
+  liveClient?: (pid: number) => boolean | null;
+}
+
 interface ClaimRow {
   battleId: string;
   pid: number;
   ts: number;
+  runId?: string;
 }
 
-/** The first process to open the room owns the battle id in this log directory. */
-export function claimBattle(dir: string, battleId: string, pid = process.pid): { owned: boolean; ownerPid: number } {
+interface Claimant {
+  pid: number;
+  runId?: string;
+}
+
+/**
+ * The first process to open the room owns the battle id in this log directory.
+ * A later process takes the claim when that owner is dead, or when the pid is
+ * alive only because the number was reused by a process that is not a client.
+ * Two live clients in the same room keep the first claim.
+ */
+export function claimBattle(
+  dir: string,
+  battleId: string,
+  pid = process.pid,
+  options: OwnershipOptions & { runId?: string } = {},
+): { owned: boolean; ownerPid: number } {
   fs.mkdirSync(dir, { recursive: true });
   return withGameLock(dir, () => {
-    const existing = readClaims(dir).find(row => row.battleId === battleId);
-    if (existing) return { owned: existing.pid === pid, ownerPid: existing.pid };
-    appendLine(path.join(dir, CLAIMS_FILE), { battleId, pid, ts: Date.now() });
-    return { owned: true, ownerPid: pid };
+    const taken = takeClaim(dir, battleId, { pid, runId: options.runId }, options);
+    return { owned: taken.owned, ownerPid: taken.ownerPid };
   });
 }
 
 /**
  * One game row per battle id. A second write from this process is a no-op.
- * A different process does not append; it flags the attempt and leaves the raw log.
+ * A different live client does not append. A dead owner, or a pid from another
+ * run that is no longer a client, does not block the process that finished the game.
  */
-export function appendGameRecord(dir: string, record: LadderGameRecord, fileName = 'games.jsonl'): AppendResult {
+export function appendGameRecord(
+  dir: string,
+  record: LadderGameRecord,
+  fileName = 'games.jsonl',
+  options: OwnershipOptions = {},
+): AppendResult {
   fs.mkdirSync(dir, { recursive: true });
-  return withGameLock(dir, () => appendOwned(dir, path.join(dir, fileName), record));
+  return withGameLock(dir, () => appendOwned(dir, path.join(dir, fileName), record, options));
 }
 
-function appendOwned(dir: string, file: string, record: LadderGameRecord): AppendResult {
-  const claim = readClaims(dir).find(row => row.battleId === record.battleId);
+function appendOwned(dir: string, file: string, record: LadderGameRecord, options: OwnershipOptions): AppendResult {
+  const taken = takeClaim(dir, record.battleId, { pid: record.pid, runId: record.runId }, options);
   const rows = readStoredGames(file).filter(row => row.battleId === record.battleId);
-  const ownerPid = claim?.pid ?? rows.find(row => typeof row.pid === 'number')?.pid ?? record.pid;
-  if (ownerPid !== record.pid) {
+  if (!taken.owned) {
+    const ownerPid = taken.ownerPid;
+    const ownerRunId = taken.ownerRunId;
     writeContamination(dir, {
       battleId: record.battleId,
       pid: record.pid,
       ts: record.ts,
       reason: 'non-owning-process',
-      note: `owner pid ${ownerPid}`,
+      note: ownerRunId ? `owner pid ${ownerPid} run ${ownerRunId}` : `owner pid ${ownerPid}`,
+      ownerPid,
+      ownerRunId,
+      runId: record.runId,
     });
     return { written: false, reason: 'non-owning-process' };
   }
-  if (!claim) appendLine(path.join(dir, CLAIMS_FILE), { battleId: record.battleId, pid: record.pid, ts: Date.now() });
   const signature = `${record.outcome}|${record.endReason}|${record.winner ?? ''}`;
   if (rows.length > 0) {
     const conflict = rows.some(row => `${row.outcome ?? ''}|${row.endReason ?? ''}|${row.winner ?? ''}` !== signature);
@@ -637,12 +696,72 @@ function appendOwned(dir: string, file: string, record: LadderGameRecord): Appen
   return { written: true, reason: 'appended' };
 }
 
+/**
+ * Last claim for this battle wins. A dead owner is replaced. A live client is not.
+ * Caller holds the game-log lock.
+ */
+function takeClaim(
+  dir: string,
+  battleId: string,
+  claimant: Claimant,
+  options: OwnershipOptions,
+): { owned: boolean; ownerPid: number; ownerRunId: string | null } {
+  const existing = activeClaim(dir, battleId);
+  if (existing && ownerBlocks(existing, claimant, options)) {
+    return { owned: false, ownerPid: existing.pid, ownerRunId: existing.runId ?? null };
+  }
+  if (!existing || existing.pid !== claimant.pid) {
+    appendLine(path.join(dir, CLAIMS_FILE), {
+      battleId,
+      pid: claimant.pid,
+      ts: Date.now(),
+      ...(claimant.runId ? { runId: claimant.runId } : {}),
+    });
+  }
+  return { owned: true, ownerPid: claimant.pid, ownerRunId: claimant.runId ?? null };
+}
+
+/**
+ * Block only while another client is still in the room.
+ * A dead pid is not that client. A different run whose pid is alive but is not
+ * a ladder or ops process is a recycled pid, not a second runner.
+ */
+function ownerBlocks(claim: ClaimRow, claimant: Claimant, options: OwnershipOptions): boolean {
+  if (claim.pid === claimant.pid) return false;
+  const alive = options.alive ?? pidAlive;
+  if (!alive(claim.pid)) return false;
+  if (claim.runId && claimant.runId && claim.runId !== claimant.runId) {
+    const client = (options.liveClient ?? defaultLiveClient)(claim.pid);
+    if (client === false) return false;
+  }
+  return true;
+}
+
+/** `ps -p PID -o command=`. macOS and Linux. Null when the listing fails. */
+function defaultLiveClient(pid: number): boolean | null {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    const cmd = execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
+      encoding: 'utf8',
+      timeout: 2000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    if (!cmd) return false;
+    return LIVE_CLIENT.test(cmd);
+  } catch {
+    return null;
+  }
+}
+
 function writeContamination(dir: string, flag: {
   battleId: string;
   pid: number;
   ts: number | null;
   reason: 'non-owning-process' | 'conflicting-result';
   note: string;
+  ownerPid?: number;
+  ownerRunId?: string | null;
+  runId?: string;
 }): void {
   appendLine(path.join(dir, CONTAMINATION_FILE), {
     schema: 'jev.game-contamination.v1',
@@ -652,11 +771,19 @@ function writeContamination(dir: string, flag: {
     reason: flag.reason,
     exclude: true,
     note: flag.note,
+    ...(typeof flag.ownerPid === 'number' ? { ownerPid: flag.ownerPid } : {}),
+    ...(flag.ownerRunId ? { ownerRunId: flag.ownerRunId } : {}),
+    ...(flag.runId ? { runId: flag.runId } : {}),
   });
 }
 
 function appendLine(file: string, value: object): void {
   fs.appendFileSync(file, `${JSON.stringify(value)}\n`);
+}
+
+function activeClaim(dir: string, battleId: string): ClaimRow | null {
+  const matches = readClaims(dir).filter(row => row.battleId === battleId);
+  return matches.length > 0 ? matches[matches.length - 1] : null;
 }
 
 function readClaims(dir: string): ClaimRow[] {
@@ -668,7 +795,11 @@ function readClaims(dir: string): ClaimRow[] {
     if (!trimmed) continue;
     try {
       const row = JSON.parse(trimmed) as ClaimRow;
-      if (row && typeof row.battleId === 'string' && typeof row.pid === 'number') claims.push(row);
+      if (row && typeof row.battleId === 'string' && typeof row.pid === 'number') {
+        if (typeof row.runId !== 'string' || !row.runId.trim()) delete row.runId;
+        else row.runId = row.runId.trim();
+        claims.push(row);
+      }
     } catch {
       // A torn claim line does not grant ownership.
     }

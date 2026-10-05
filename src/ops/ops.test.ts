@@ -17,10 +17,11 @@ import { countsFromLiveGames, loadVariantPool, thompsonDraw } from './variants.j
 import { runAnalyst } from './analyst.js';
 import { openDb } from './db.js';
 import { runFactory } from './factory.js';
-import { bootstrapChampion, diagnosticsForConfig, exactDiagnosticsConfig, ingestRecordedEvidence, judge, reviewProposals, sprt } from './gatekeeper.js';
+import { bootstrapChampion, diagnosticsForConfig, exactDiagnosticsConfig, ingestRecordedEvidence, judge, reviewHandoffs, reviewProposals, sprt } from './gatekeeper.js';
 import type { GameResult } from '../bench/game.js';
 import { loadConfig } from '../config/load.js';
 import { liveProposalAllowed, tallySide } from './sprt.js';
+import { queueHypothesisVariant } from './hypotheses.js';
 import { completeJob, claimNext, enqueue, listJobs, listProposals } from './queue.js';
 import { readLabels } from './labels-read.js';
 import { startLocalServer } from './local-server.js';
@@ -453,7 +454,7 @@ describe('recorded screens', () => {
     wilson95: [0.506, 0.641] as [number, number],
   };
 
-  function writeScreen(dir: string, patch: Partial<typeof screen> = {}): void {
+  function writeScreen(dir: string, patch: Partial<typeof screen> & { evaluatorId?: string } = {}): void {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'exact-1ply-qw.json'), JSON.stringify({ ...screen, ...patch }));
   }
@@ -508,6 +509,75 @@ describe('recorded screens', () => {
     });
     expect(verdict[0].labeled).toBe(false);
     expect(verdict[0].sprt).toBe('continue');
+    expect(labelsOf(paths)).toHaveLength(0);
+  });
+
+  test('the fitted-1ply screen is live-approved and is not the champion', () => {
+    const loaded = loadConfig(path.join(process.cwd(), 'configs/fitted-1ply.yaml'));
+    expect(loaded.config.search.id).toBe('greedy-1ply');
+    expect(loaded.config.search.params.depth).toBe(1);
+    expect(loaded.config.search.params.samples).toBe(8);
+    expect(loaded.config.evaluator.id).toBe('fitted-team');
+    expect(exactDiagnosticsConfig(loaded)?.evalMode).toBe('hp');
+    const raw = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'state/ops/recorded/fitted-1ply.json'), 'utf8'));
+    expect(raw).toMatchObject({
+      policyId: 'fitted-1ply',
+      searchId: 'greedy-1ply',
+      evaluatorId: 'fitted-team',
+      configId: loaded.configId,
+      configPath: 'configs/fitted-1ply.yaml',
+      games: 200,
+      wins: 119,
+      losses: 81,
+      ties: 0,
+      invalid: 0,
+      crashes: 0,
+      viewMiss: 0,
+    });
+    const paths = tempPaths();
+    const dir = path.join(paths.root, 'recorded');
+    fs.mkdirSync(dir);
+    fs.copyFileSync(path.join(process.cwd(), 'state/ops/recorded/fitted-1ply.json'), path.join(dir, 'fitted-1ply.json'));
+    const verdict = ingestRecordedEvidence(paths, {
+      dir,
+      diagnostics: () => ({ passed: 22, failed: 0, total: 22 }),
+    });
+    expect(verdict[0].labeled).toBe(true);
+    expect(verdict[0].sprt).toBe('continue');
+    expect(labelsOf(paths)).toEqual([expect.objectContaining({
+      configId: loaded.configId,
+      labels: ['live-approved'],
+    })]);
+    expect(listProposals(paths)).toHaveLength(0);
+    const db = openDb(paths);
+    const result = db.getNodesByType('Result')[0];
+    db.close();
+    expect(result?.metrics).toMatchObject({
+      wins: 119,
+      losses: 81,
+      invalid: 0,
+      p50ms: 74,
+      p99ms: 156,
+      evaluatorId: 'fitted-team',
+      policyId: 'fitted-1ply',
+    });
+  });
+
+  test('a recorded evaluator that does not match the yaml stays unlabeled', () => {
+    const paths = tempPaths();
+    const dir = path.join(paths.root, 'recorded');
+    writeScreen(dir, {
+      configPath: 'configs/fitted-1ply.yaml',
+      searchId: 'greedy-1ply',
+      evaluatorId: 'hp-fraction',
+      policyId: 'fitted-1ply',
+    });
+    const verdict = ingestRecordedEvidence(paths, {
+      dir,
+      diagnostics: () => ({ passed: 22, failed: 0, total: 22 }),
+    });
+    expect(verdict[0].labeled).toBe(false);
+    expect(verdict[0].reason).toContain('evaluator');
     expect(labelsOf(paths)).toHaveLength(0);
   });
 });
@@ -672,6 +742,127 @@ describe('factory', () => {
     expect(result?.description).toContain('disagrees');
     expect(await runFactory(paths, { once: true })).toBe(0);
   }, 60_000);
+
+  test('SPRT continue plays the next seeds until the budget and the gatekeeper records the handoff', async () => {
+    const paths = tempPaths();
+    enqueue(paths, {
+      kind: 'challenger',
+      challenger: 'configs/panel/random.yaml',
+      opponent: 'configs/panel/maxdamage.yaml',
+      games: 4,
+      variantId: 'budget',
+    });
+    const seeds: number[] = [];
+    const play = async (a: { configId: string }, b: { configId: string }, games: number, seed: number) => {
+      seeds.push(seed);
+      return Array.from({ length: games }, (_, index) => scriptedGame(
+        index,
+        index % 2 === 0 ? 'p1' : 'p2',
+        a.configId,
+        b.configId,
+      ));
+    };
+    expect(await runFactory(paths, { once: true, maxGames: 8, play })).toBe(1);
+    expect(listJobs(paths)[0].status).toBe('open');
+    expect(seeds).toEqual([1000]);
+    expect(await runFactory(paths, { once: true, maxGames: 8, play })).toBe(1);
+    expect(seeds).toEqual([1000, 1002]);
+    const job = listJobs(paths)[0];
+    expect(job.status).toBe('done');
+    expect(job.handoff).toMatchObject({ sprt: 'continue', games: 8, opponent: 'max-damage' });
+    expect(job.proposal).toBeUndefined();
+    const verdicts = reviewHandoffs(paths, { diagnostics: () => ({ passed: 1, failed: 0, total: 1 }) });
+    expect(verdicts).toHaveLength(1);
+    expect(verdicts[0].labeled).toBe(false);
+    expect(labelsOf(paths)).toHaveLength(0);
+    const db = openDb(paths);
+    try {
+      expect(db.getNodesByType('Decision').length).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test('a series SPRT would promote is proposed and not labeled against max-damage', async () => {
+    const paths = tempPaths();
+    enqueue(paths, {
+      kind: 'challenger',
+      challenger: 'configs/panel/random.yaml',
+      opponent: 'configs/panel/maxdamage.yaml',
+      games: 120,
+      variantId: 'promote-vs-damage',
+    });
+    const play = async (a: { configId: string }, b: { configId: string }, games: number) => (
+      Array.from({ length: games }, (_, index) => scriptedGame(index, 'p1', a.configId, b.configId))
+    );
+    expect(await runFactory(paths, { once: true, maxGames: 200, play })).toBe(1);
+    const job = listJobs(paths)[0];
+    expect(job.status).toBe('done');
+    expect(job.proposal?.action).toBe('live-approved');
+    expect(job.handoff).toBeUndefined();
+    expect(listProposals(paths)).toHaveLength(1);
+    expect(labelsOf(paths)).toHaveLength(0);
+  });
+
+  test('a series SPRT rejects is handed to the gatekeeper and not labeled', async () => {
+    const paths = tempPaths();
+    enqueue(paths, {
+      kind: 'challenger',
+      challenger: 'configs/panel/random.yaml',
+      opponent: 'configs/panel/maxdamage.yaml',
+      games: 120,
+      variantId: 'reject-vs-damage',
+    });
+    const play = async (a: { configId: string }, b: { configId: string }, games: number) => (
+      Array.from({ length: games }, (_, index) => scriptedGame(index, 'p2', a.configId, b.configId))
+    );
+    expect(await runFactory(paths, { once: true, maxGames: 200, play })).toBe(1);
+    const verdicts = reviewHandoffs(paths, { diagnostics: () => ({ passed: 1, failed: 0, total: 1 }) });
+    expect(verdicts).toHaveLength(1);
+    expect(verdicts[0].labeled).toBe(false);
+    expect(verdicts[0].reason).toContain('max-damage');
+    expect(labelsOf(paths)).toHaveLength(0);
+  });
+
+  test('two variants reach the factory as different configs and the champion file stays hp-fraction', async () => {
+    const paths = tempPaths();
+    const db = openDb(paths);
+    const now = Date.now();
+    for (const node of [
+      { id: 'h-pres', title: 'eval-term: preservation', description: 'preservation' },
+      { id: 'h-switch', title: 'mechanism: switch-timing', description: 'switch timing' },
+    ]) {
+      db.addNode({
+        id: node.id,
+        type: 'Hypothesis',
+        status: 'open',
+        title: node.title,
+        description: node.description,
+        created_at: now,
+        updated_at: now,
+        rationale: node.description,
+        expected_effect: 'Paired win rate against max-damage.',
+        test_plan: 'Self-play the mapped term. Do not add a species rule.',
+      });
+    }
+    queueHypothesisVariant(paths, db, { id: 'h-pres', title: 'eval-term: preservation', description: 'preservation' });
+    queueHypothesisVariant(paths, db, { id: 'h-switch', title: 'mechanism: switch-timing', description: 'switch timing' });
+    db.close();
+    const seen: string[] = [];
+    const play = async (a: { configId: string }, b: { configId: string }, games: number) => {
+      seen.push(a.configId);
+      return Array.from({ length: games }, (_, index) => scriptedGame(index, 'p2', a.configId, b.configId));
+    };
+    await runFactory(paths, { once: true, maxGames: 2, play });
+    await runFactory(paths, { once: true, maxGames: 2, play });
+    expect(new Set(seen).size).toBe(2);
+    const champion = loadConfig('configs/champion.yaml');
+    expect(champion.config.evaluator.id).toBe('hp-fraction');
+    const preservation = loadConfig(path.join(paths.root, 'challengers', 'preservation.yaml'));
+    expect(preservation.config.evaluator.params.weights.preservation).toBe(1.5);
+    expect(preservation.config.evaluator.params.weights.hpDifference).toBe(1);
+    expect(preservation.configId).not.toBe(champion.configId);
+  });
 });
 
 function scriptedGame(

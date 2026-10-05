@@ -1,5 +1,29 @@
 # Changelog
 
+## Closed loop reads ladder losses and finishes SPRT
+
+A live loss was reviewed from the per-battle JSONL as if it were a self-play `>start` log. Those files are turn and result events. The result row does not embed the protocol, and a short `log` that already contains `|` hid the replay. With nothing to classify, every loss became critical turn 0, class `other`, which is the one variant `eval-term: preservation`. Mining then skipped with "no >start input and no |request|". The analyst now reads the turn choice and the request object stored on that row, and appends a `|request|` line when the replay does not already have one. New ladder turns store that request object. The champion policy is unchanged.
+
+The factory job key ignored status, so a finished preservation job was still "already queued" and later losses queued nothing. A done job that SPRT still calls `continue` is resumed. A job that already accepted or rejected is finished, and the skip says so.
+
+A challenger used to play four games at seed 1000, mark itself done on SPRT `continue`, and attach a proposal only when SPRT already said promote. Four games cannot reach that boundary, so the gatekeeper never saw the series. The factory now keeps the same job open and plays further batches, on the next seeds, until SPRT accepts, rejects, or `OPS_SPRT_MAX_GAMES` (default 1200) is spent. A promote against max-damage becomes a live-approved proposal for the gatekeeper to retest against the champion. Anything else is a handoff the gatekeeper records without labeling. The result stores the config id. The summary line does not, so eight identical scores still show up as one string.
+
+`npm run ops -- status` and the scorecard print a P1 when the loop is degenerate: three passes in a row queue nothing, every mine fails, every loss names one variant, or every challenger result is the same. The sentinel check is `degenerate-loop`.
+
+## Fitted 1-ply is a live A/B challenger
+
+`configs/fitted-1ply.yaml` plays the fitted-team evaluator through greedy 1-ply (depth 1, 8 samples, max-damage opponent). Config id `b010a726fd447898`. Champion exact 1-ply is unchanged.
+
+Paired hidden-info screen, 100 seeds, sides swapped, 200 games, seed 1. Each policy sees only its public observation. Opponent is exact 1-ply (8 samples, HP eval). Randbats generator species 508. Invalid choices 0, crashes 0, view misses 0.
+
+119W-81L-0T (59.5%). Wilson 95% CI 52.6–66.1%. Decision latency p50 74ms, p95 123ms, p99 156ms, max 357ms.
+
+SPRT (elo0=0, elo1=+10, α=β=0.05) is still `continue`, so this is a live-approved explore share and not a champion promotion. The gatekeeper reads `state/ops/recorded/fitted-1ply.json` on startup. The diagnostic suite for this search id is the HP suite (22/22).
+
+```
+npm run ladder -- --engine search --ab configs/fitted-1ply.yaml:0.5
+```
+
 ## Stack supervisor
 
 `scripts/stack.sh start|stop|status|restart` runs ladder, the ops roles (including sentinel, which `supervise` does not start), and the dashboard as separate process groups. The pgid is `state/pids/<component>.pid`. Logs are `logs/stack/<component>.log`. `LADDER_LOG_DIR` and `LIVE_RUNS_DIR` are set. The script re-execs under bash when a zsh login shell invokes it, then enables `set -euo pipefail` and `nullglob`. Pgids are read into an array, so an orphan kill still reaches every group. `start ladder` deletes `state/DRAIN` and `live-runs/*.drain` and refuses to detach if a drain file remains. `stop` signals the group with SIGINT, then SIGTERM, then SIGKILL, and then any leftover process with that component's command line. `status` exits non-zero when a component is missing, duplicated, or orphaned. `start ladder` runs live preflight before the client, which records the account lock. See `OPERATIONS.md`.
@@ -15,6 +39,12 @@ Unit tests write sets and stats under `JEV_DATA_DIR` (a temp directory) and set 
 `npm run live:preflight` runs before `run-live.sh` logs in. It requires a clean tree on a commit that is contained in `origin/main`, at least 500 species, no other public ladder process for the account, and a 2-game local canary with the same engine flags.
 
 Unit tests clear `VERCEL_AI_GATEWAY_KEY`, `AI_GATEWAY_API_KEY`, `XAI_API_KEY`, `OPENAI_API_KEY`, `CEREBRAS_API_KEY`, and `POSTHOG_API_KEY`, and replace `fetch` with a stub that throws. A test fails if any attempt was recorded, including when the caller catches the error.
+
+## A finished game is recorded when the previous owner is gone
+
+A ladder restart that Showdown rejoined onto the in-flight rooms, and a local server whose room ids started again at `battle-local-1`, were both dropped. The recorder treated any other pid on the battle id as contamination (`non-owning-process`) and did not write the row. The owner pid was already dead, so `games.jsonl` skipped real games and the Elo chain and the batch record jumped. On the local server the same id was a new game, so every game after a restart was dropped and the live circuit never saw it.
+
+The claim still blocks a second client that is alive in that room. A dead pid does not. A pid that is alive but is not a ladder or ops client, and belongs to another run, is a recycled pid and does not block. The ops local server puts its run id in the room (`battle-local-<run>-<n>`), so a restart cannot collide with the previous life. A bare `battle-local-<n>` is stored with the run appended. The sentinel check `genuine-game-dropped` is P1 when a `non-owning-process` row names an owner that is not alive or a different run, or when finished heartbeats and progress lines outnumber the rows written. It uses `process.kill(pid, 0)` and `ps`, not `/proc`.
 
 ## The live breaker cannot idle the only champion
 

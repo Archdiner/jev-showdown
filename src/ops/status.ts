@@ -1,6 +1,6 @@
 import { countableGameRows, loadContaminationFlags } from '../client/game-integrity.js';
 import { isLocalLiveGame, recordedElo, recordedOutcome } from '../client/game-record.js';
-import { cycleLines, readCycle } from './cycle.js';
+import { cycleLines, degenerateAlert, foldCycle } from './cycle.js';
 import { openDb } from './db.js';
 import { latestHeartbeats } from './heartbeat.js';
 import { readLabels } from './labels-read.js';
@@ -67,6 +67,9 @@ export function statusReport(paths: OpsPaths, now = Date.now()): string {
     lines.push(`  ${id} [${label?.labels.join('+') || 'unlabeled'}] ${wins}-${losses} rating ${ratingText}`);
   }
   lines.push(`open regressions ${regressions}`);
-  lines.push(...cycleLines(readCycle(paths), now));
+  const cycleRows = readJsonl<unknown>(paths.cycle);
+  lines.push(...cycleLines(foldCycle(cycleRows), now));
+  const degenerate = degenerateAlert(cycleRows);
+  if (degenerate) lines.push(`alert ${degenerate.level}  ${degenerate.message}`);
   return lines.join('\n');
 }

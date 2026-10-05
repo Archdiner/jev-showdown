@@ -44,6 +44,7 @@ export interface HypothesisSource {
 
 export interface VariantQueueResult {
   created: boolean;
+  resumed?: boolean;
   jobId?: string;
   variantId?: string;
   reason: string;
@@ -81,8 +82,9 @@ export function hypothesisGames(env: NodeJS.ProcessEnv = process.env): number {
 
 /**
  * Turn one hypothesis into a challenger that differs from the champion by one
- * mechanism or eval term. The same variant is one job. A later copy is skipped
- * with the existing job id.
+ * mechanism or eval term. The same variant is one job. `games` on that job is
+ * one SPRT batch, not the budget. A copy of an open job is skipped. A finished
+ * job that SPRT still calls `continue` is resumed. A terminal job is finished.
  */
 export function queueHypothesisVariant(paths: OpsPaths, db: GraphDB, source: HypothesisSource): VariantQueueResult {
   const text = `${source.title}\n${source.description ?? ''}\n${source.rationale ?? ''}`;
@@ -109,6 +111,16 @@ export function queueHypothesisVariant(paths: OpsPaths, db: GraphDB, source: Hyp
     games: hypothesisGames(),
     variantId,
   });
+  if (queued.resumed) {
+    const reason = `resumed variant ${variantId} as ${queued.id}`;
+    remember(db, source.id, meta, { status: 'in_progress', variantId, jobId: queued.id });
+    return { created: false, resumed: true, jobId: queued.id, variantId, reason };
+  }
+  if (queued.finished) {
+    const reason = `skipped: variant ${variantId} already finished as ${queued.id}`;
+    remember(db, source.id, meta, { status: 'blocked', skipReason: reason, variantId, jobId: queued.id });
+    return { created: false, jobId: queued.id, variantId, reason };
+  }
   if (!queued.created) {
     const reason = `skipped: variant ${variantId} already queued as ${queued.id}`;
     remember(db, source.id, meta, { status: 'blocked', skipReason: reason, variantId, jobId: queued.id });

@@ -192,7 +192,7 @@ export interface SentinelContext {
   batchSize: number;
   processesScanned: boolean;
   processes: ProcessSnapshot[];
-  /** True when `pid` is alive. Injected in tests. Production uses `process.kill(pid, 0)` after the process list. */
+  /** `process.kill(pid, 0)`. Injected in tests. Does not read `/proc`. */
   pidAlive: (pid: number) => boolean;
   /** Null means every game in the lookback is in the evaluation baseline. */
   baselineMs: number | null;
