@@ -9,6 +9,7 @@
 3. All claims verified with numbers (commit SHA + game count)
 4. Small atomic commits, push frequently
 5. Changes through gate (champion/challenger) - no manual overrides
+6. No overfitting to examples (see below)
 
 ## Start Session
 
@@ -72,6 +73,19 @@ npm run graph -- render             # export graph
 
 See `src/graph/gate.ts` for full gate spec.
 
+## No overfitting to examples
+
+Hand-written positions are smoke alarms, not the target. That includes the diagnostic suite and any single matchup such as Garchomp versus Rotom-Wash.
+
+- Do not special-case a species, move, item, ability, or fixture in engine code. No `if (species === 'Garchomp')`.
+- Do not tune a weight, a sample count, or a threshold until one named test passes.
+- A fix has to be a general mechanism: accuracy-weighted expectation, the sign of the eval, the opponent model, or an exact battle clone.
+- The sets that count are generated and then held out.
+  - Sample positions from seeded `gen9randombattle` games. Label the correct move with a forced-win check or a deeper exact-sim search. Do not label it by hand.
+  - Mine further positions from live and high-Elo replay logs. Keep a position only while this sim still matches the spectator log.
+- `state/positions/dev.json` is the only split that may be inspected. `state/positions/heldout.json` stays closed while tuning. Report agreement on both.
+- Promotion requires gate win rates against the frozen panel and the held-out set. Passing the hand-written fixtures is not enough to promote.
+
 ## Where Creativity Allowed
 
 ✓ New hypotheses (strategy, eval, search improvements)  
@@ -83,7 +97,8 @@ See `src/graph/gate.ts` for full gate spec.
 ✗ Champion (changes only via gate)  
 ✗ Guardrails (hard limits)  
 ✗ Gate verdict (no overrides)  
-✗ Non-negotiables above
+✗ Non-negotiables above  
+✗ Held-out positions (no peeking, no editing labels to fit the bot)
 
 ---
 

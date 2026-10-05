@@ -86,8 +86,9 @@ function must(choice: string | null, label: string): string {
 }
 
 /**
- * Twenty positions. Every choice offered to search is legal in the live battle.
- * The expected choice is the unique move a 1-ply HP search should make.
+ * Hand-written smoke alarms. Every choice offered to search is legal.
+ * These positions are not a tuning target and cannot promote a challenger.
+ * See AGENTS.md, "No overfitting to examples".
  */
 export function buildPositions(): Position[] {
   const positions: Position[] = [];
