@@ -1,6 +1,6 @@
 import { appendJsonl, readJsonl, type OpsPaths } from './paths.js';
 
-export type FacilityName = 'factory' | 'gatekeeper' | 'live' | 'analyst' | 'supervisor';
+export type FacilityName = 'factory' | 'gatekeeper' | 'live' | 'analyst' | 'supervisor' | 'sentinel';
 
 export interface Heartbeat {
   facility: FacilityName;

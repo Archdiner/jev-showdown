@@ -209,7 +209,7 @@ Engines: max-damage (default; @smogon/calc maxDamageChoice), search (exact 1-ply
 A missing label, a file whose hash no longer matches the label, or two active champions rolls back to that builtin policy and logs the reason.
 The config is chosen once, before the first search. A promotion during the batch does not change it. Drain and start again to pick up a new champion.
 Each finished game records configId, configHash, role (champion or challenger), share, and the commit. The startup line is: config live source=... id=... hash=... commit=...
---ab <config>:<share> is repeatable. <config> is a yaml/json path, a config id under configs/, or an engine profile (search, exact, max-damage). <share> is that config's fraction of new battles, in (0, 1]. The shares must sum to at most 1. The rest play the champion (--engine, or --labeled-champion). A battle keeps the arm chosen from a hash of its room id. Concurrency, the turn timer, and the choice watchdog stay shared. One process, one login.
+--ab <config>:<share> is repeatable. <config> is a yaml/json path, a config id under configs/, or an engine profile (search, exact, max-damage). <share> is that config's fraction of new battles, in (0, 1]. The shares must sum to at most 1. The rest play the champion (--engine, or --labeled-champion). A battle keeps the arm chosen from a hash of its room id. Concurrency, the turn timer, and the choice watchdog stay shared. The account lock below is taken once, before login, for this whole process. Every arm shares that one lock.
 A challenger is pulled to champion-only after an invalid move, a timer loss, a crash, or 4 losses in a row. Each pull is one line in incidents.jsonl.
   npm run ladder -- --games 40 --format gen9randombattle --engine search --concurrency 3 --ab configs/panel/maxdamage.yaml:0.2
 --concurrency K keeps up to K battles on one login (default 1, absolute max ${MAX_LADDER_CONCURRENCY}).
@@ -752,6 +752,7 @@ async function main(): Promise<void> {
       return;
     }
 
+    // One lock for the whole process. --ab adds arms inside it and does not lock again.
     const releaseLocks = holdAccountLocks(accountsFor(opts));
     applyLiveConcurrency(opts);
     const gitSha = currentGitSha();

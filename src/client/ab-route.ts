@@ -11,9 +11,9 @@ import { ladderConfigId, ladderPolicy, policyHash } from './ladder-engine.js';
  *
  * A battle's config is a hash of its room id, so the same room keeps the
  * same arm. Concurrency, the turn timer, and the choice watchdog stay on
- * the shared driver. This module does not log in and does not take the
- * per-account exclusive lock. That lock is what keeps a second process
- * off the same Showdown account.
+ * the shared driver. The ladder CLI takes the per-account exclusive lock
+ * once for the whole process, before login. This module does not log in
+ * and does not take that lock again.
  */
 
 export type AbRole = 'champion' | 'challenger';

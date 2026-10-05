@@ -1,5 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { compareIncidents, incidentStore, loadIncidents, readEvents } from '../ops/sentinel/incidents.js';
+import { loadContext } from '../ops/sentinel/load.js';
+import { buildScorecard, formatScorecard } from '../ops/sentinel/scorecard.js';
 import type { OpsPaths } from '../ops/paths.js';
 import { dailyReport } from '../ops/report.js';
 import { statusReport } from '../ops/status.js';
@@ -69,9 +72,25 @@ export interface Snapshot {
   /** Sim-versus-protocol totals across every logged turn, not only the recent table. */
   calibration: CalibrationSummary | null;
   agents: { available: false; path: string; note: string };
+  reliability: {
+    scorecard: string;
+    incidents: Array<{
+      id: string;
+      checkId: string;
+      severity: string;
+      status: string;
+      count: number;
+      title: string;
+      detail: string;
+      firstSeen: number;
+      lastSeen: number;
+      pr: string | null;
+      rootCause: string | null;
+    }>;
+  };
 }
 
-const FACILITIES = ['factory', 'gatekeeper', 'live', 'analyst', 'supervisor'] as const;
+const FACILITIES = ['factory', 'gatekeeper', 'live', 'analyst', 'supervisor', 'sentinel'] as const;
 const STALE_MS = 60_000;
 const TAIL = 2_000_000;
 
@@ -416,6 +435,7 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
     configs: configPanels(unique),
   };
 
+  const reliability = reliabilityView(paths, now);
   return {
     apiVersion: 1,
     generatedAt: now,
@@ -424,6 +444,7 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
     gaps,
     games: gameView,
     ops: { available: fs.existsSync(heartbeatsPath) || fs.existsSync(liveGamesPath) || graphReady, statusText, reportText, facilities },
+    reliability,
     runs: { logs },
     metrics: {
       variants,
@@ -472,4 +493,45 @@ function calibrationOf(games: GameRecord[], byBattle: Map<string, CalibrationSum
     parts.push(summary);
   }
   return combineCalibrations(parts);
+}
+
+function reliabilityView(paths: DashboardPaths, now: number): Snapshot['reliability'] {
+  try {
+    const ctx = loadContext({
+      cwd: paths.cwd,
+      opsDir: paths.opsDir,
+      ladderLogDir: paths.ladderLogDir,
+      liveRunsDir: paths.searchLogDir,
+      dataDir: path.join(paths.cwd, 'data'),
+      graphDb: paths.graphDb,
+    }, {
+      now,
+      scanProcesses: false,
+      git: { behind: null, ref: 'origin/main', detail: 'not scanned by the dashboard' },
+    });
+    const store = incidentStore(paths.opsDir);
+    const incidents = loadIncidents(store)
+      .filter(incident => incident.status !== 'verified')
+      .sort(compareIncidents)
+      .map(incident => ({
+        id: incident.id,
+        checkId: incident.checkId,
+        severity: incident.severity,
+        status: incident.status,
+        count: incident.count,
+        title: incident.title,
+        detail: incident.detail,
+        firstSeen: incident.firstSeen,
+        lastSeen: incident.lastSeen,
+        pr: incident.pr,
+        rootCause: incident.rootCause,
+      }));
+    const events = fs.existsSync(store.eventsPath) ? readEvents(store.eventsPath) : [];
+    return { scorecard: formatScorecard(buildScorecard(ctx, loadIncidents(store), events, 24 * 60 * 60 * 1000)), incidents };
+  } catch (err) {
+    return {
+      scorecard: err instanceof Error ? err.message : 'scorecard failed',
+      incidents: [],
+    };
+  }
 }
