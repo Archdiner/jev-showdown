@@ -42,7 +42,7 @@
     "@pkmn/randoms": "^0.10.11",
     "@pkmn/sim": "^0.10.11",
     "@smogon/calc": "^0.12.0",
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^13.0.3",
     "ws": "^8.18.0",
     "yaml": "^2.9.1",
     "zod": "^3.23.8"
