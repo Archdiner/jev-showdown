@@ -3,7 +3,7 @@ import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { filterGames, ratingBand, reportGames } from './games.js';
+import { configPanels, filterGames, ratingBand, reportGames } from './games.js';
 import { resolvePaths } from './paths.js';
 import { classifyLoss, normalizeEndReason, parseLadderLine, parseLog, type GameRecord } from './parse.js';
 import { GraphDB } from '../graph/db.js';
@@ -32,6 +32,8 @@ function game(partial: Partial<GameRecord> & Pick<GameRecord, 'outcome'>): GameR
     configId: null,
     configPath: null,
     configHash: null,
+    role: null,
+    share: null,
     engine: null,
     gitSha: null,
     runId: null,
@@ -44,6 +46,7 @@ function game(partial: Partial<GameRecord> & Pick<GameRecord, 'outcome'>): GameR
     fallbacks: null,
     source: 'test',
     progress: null,
+    calibration: null,
     ...partial,
     lossClass: partial.lossClass ?? classifyLoss(partial.outcome, partial.endReason ?? null),
   };
@@ -151,6 +154,59 @@ describe('game feed parsers', () => {
     expect(ratingBand(null)).toBe('unknown');
   });
 
+  it('breaks the scorecard out per config', () => {
+    const panels = configPanels([
+      game({
+        outcome: 'win',
+        endReason: 'ko',
+        configId: 'champ',
+        role: 'champion',
+        share: 0.8,
+        ratingBefore: 1000,
+        ratingAfter: 1016,
+        invalid: 0,
+      }),
+      game({
+        outcome: 'loss',
+        endReason: 'ko',
+        configId: 'chall',
+        role: 'challenger',
+        share: 0.2,
+        ratingBefore: 1016,
+        ratingAfter: 1000,
+        invalid: 2,
+      }),
+      game({
+        outcome: 'loss',
+        endReason: 'timer-ours',
+        configId: 'chall',
+        role: 'challenger',
+        share: 0.2,
+        invalid: 0,
+      }),
+    ]);
+    expect(panels.map(panel => panel.configId)).toEqual(['champ', 'chall']);
+    expect(panels[0]).toMatchObject({
+      role: 'champion',
+      share: 0.8,
+      wins: 1,
+      losses: 0,
+      eloDelta: 16,
+      invalidMoves: 0,
+    });
+    expect(panels[0].report.strategy).toMatchObject({ wins: 1, losses: 0 });
+    expect(panels[1]).toMatchObject({
+      role: 'challenger',
+      share: 0.2,
+      wins: 0,
+      losses: 2,
+      eloDelta: -16,
+      invalidMoves: 2,
+    });
+    expect(panels[1].report.strategy).toMatchObject({ wins: 0, losses: 1 });
+    expect(panels[1].report.timerDisconnect).toMatchObject({ wins: 0, losses: 1 });
+  });
+
   it('builds a snapshot from the fixtures', () => {
     const paths = resolvePaths({ DASHBOARD_FIXTURE_DIR: fixtureDir }, process.cwd());
     const snapshot = buildSnapshot(paths, 10_000);
@@ -175,6 +231,21 @@ describe('game feed parsers', () => {
     expect(snapshot.games.elo).toBe(1190);
     expect(snapshot.games.report.timerDisconnectLosses).toBe(1);
     expect(snapshot.games.report.strategyLosses).toBe(1);
+    expect(snapshot.calibration).toMatchObject({
+      turns: 3,
+      compared: 3,
+      foeActions: 3,
+      foeActionCorrect: 2,
+      foeActionAccuracy: 0.6667,
+      damageDealtMae: 0.15,
+      damageTakenMae: 0.1667,
+      koErrors: 1,
+      speedOrderErrors: 1,
+    });
+    const withTurns = snapshot.games.recent.find(row => row.battleId === 'battle-gen9randombattle-9');
+    expect(withTurns?.calibration?.foeActionCorrect).toBe(0);
+    const withSummary = snapshot.games.recent.find(row => row.battleId === 'battle-rich-2');
+    expect(withSummary?.calibration?.foeActionCorrect).toBe(2);
     expect(snapshot.ops.facilities.find(row => row.name === 'supervisor')?.health).toBe('down');
     expect(snapshot.ops.facilities.find(row => row.name === 'live')?.health).toBe('ok');
     expect(snapshot.gaps.some(gap => gap.id === 'malformed')).toBe(true);
@@ -212,6 +283,7 @@ describe('game feed parsers', () => {
     const snapshot = buildSnapshot(paths, 10_000);
     expect(snapshot.gaps.map(gap => gap.id)).toEqual(expect.arrayContaining(['heartbeats', 'live-games', 'ladder-logs', 'search-logs']));
     expect(snapshot.games.recent).toEqual([]);
+    expect(snapshot.calibration).toBeNull();
   });
 
   it('serves the feed and the filtered games API', async () => {
@@ -226,6 +298,10 @@ describe('game feed parsers', () => {
       expect(page.status).toBe(200);
       expect(page.body).toContain('End reason');
       expect(page.body).toContain('>Run</th>');
+      expect(page.body).toContain('Sim calibration');
+      expect(page.body).toContain('Per config');
+      expect(page.body).toContain('Incidents');
+      expect(page.body).toContain('Scorecard');
       const games = await get(`${server.url}/api/games?endReason=timer-ours&band=1400-1599`);
       expect(games.status).toBe(200);
       const payload = JSON.parse(games.body);
@@ -241,6 +317,10 @@ describe('game feed parsers', () => {
       expect((await get(`${server.url}/api/runs`)).status).toBe(200);
       expect((await get(`${server.url}/api/agents`)).status).toBe(200);
       expect((await get(`${server.url}/api/snapshot`)).status).toBe(200);
+      expect((await get(`${server.url}/api/incidents`)).status).toBe(200);
+      const scorecard = await get(`${server.url}/api/scorecard`);
+      expect(scorecard.status).toBe(200);
+      expect(JSON.parse(scorecard.body).scorecard).toContain('jev scorecard');
     } finally {
       await server.close();
     }

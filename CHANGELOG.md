@@ -1,5 +1,21 @@
 # Changelog
 
+## Reliability sentinel
+
+`npm run ops -- sentinel` reads the ladder logs, ops heartbeats, circuits, drain files, and the process list every minute. Each broken invariant becomes an incident in `state/ops/incidents.jsonl` (folded into `state/ops/incidents.json`). A P0 is a game being lost or data being corrupted now. The incident stays open until the check is clear, and it is verified only after a 10 minute soak. `npm run ops -- scorecard` is the owner screen: uptime, open P0/P1, incidents opened and verified, MTTR, Elo, batch and variant records, and what the gate promoted or rejected. Phantom rows (`phantom: true`, or a 0-turn tie with end reason disconnect or unknown) are left out of those rates, and the files the numbers came from are named. The dashboard shows the same incidents and scorecard. `npm run ops -- sentinel --once --json` prints the current incidents as one JSON object and exits 1 when a P0 is open. `npm run ops -- scorecard --md --since <iso>` compares Elo, win rate, and record with the previous window of the same length. When a game row carries `invalidChoiceReasons`, those reasons are added to the invalid-choice incident. The bot's move choice is unchanged.
+
+## Live A/B routing on one ladder login
+
+`--ab <config>:<share>` (repeatable) splits new battles across the champion and one or more challenger configs. The config is a yaml path, a config id under `configs/`, or an engine profile. A hash of the battle id picks the arm. Concurrency, the turn timer, and the choice watchdog stay shared. The process takes one login and takes the account lock once for every arm. Each finished game, metrics line, and the dashboard stamp `configId`, `role`, and `share`. The dashboard has a per-config W/L, Elo change, invalid-move panel, and a scorecard per config. A challenger is pulled to champion-only after an invalid move, a timer loss, a crash, or 4 losses in a row. Each pull is an incident in `incidents.jsonl`. `--check` prints a preflight canary for every arm. A ghost room (`phantom`) does not pull a challenger.
+
+```bash
+npm run ladder -- --games 40 --format gen9randombattle --engine search --concurrency 3 --ab configs/panel/maxdamage.yaml:0.2
+```
+
+## One ladder runner per account
+
+A ladder process creates `state/ladder-<userid>.lock` with `O_EXCL` before it logs in. The file stores the pid, the start time, and the host. A second process for that account prints the holder's host, pid, and start time and exits non-zero, so two restarts cannot both send choices into the same battles. A lock is stale only when that pid is dead on this host. A lock from another host is left in place. The file is removed on exit and on SIGINT. The first SIGTERM drains and keeps the lock until the process exits. `--check` does not take the lock. A local two-bot series locks BotAlpha and BotBravo.
+
 ## Stale battle rooms do not block the drain
 
 A room left over from an earlier session is rejoined when the runner logs in. If its newest `|t:|` is more than 70 minutes old, the client forfeits it and does not deliver its lines, so it is not an in-progress game and does not use a concurrency slot. A room with no `|t:|` (a local battle) stays live. A battle id that already has a result is not counted again, so a second `game_start` cannot hold the drain. The first SIGTERM or SIGUSR1 still drains real games; once every real game has a result the process exits.
@@ -44,6 +60,14 @@ If `POSTHOG_API_KEY` is set, each finished ladder game is also sent to PostHog a
 ## Ladder timers and undelivered choices are logged
 
 A turn no longer reuses the previous `|inactive|` clock: `secondsLeft` is cleared when the next request arrives. If `/choose` returns false, the client writes a `choice-delivery` row and retries. When the server rejects the last legal move, one `no-legal-retry` row is written. Popups name a battle when the text contains its room id; with several battles and no id, each open battle logs the popup as ambiguous instead of attaching it to whichever room ended last. Finished battles are dropped from memory. The game result counts delivery failures, exhausted retries, and ambiguous popups. `createLogger` keeps the last 2000 decisions and 500 games in memory. The JSONL files still receive every row.
+
+## Sim prediction error
+
+Each live turn now records what the search assumed and, once the protocol catches up, how that assumption compared with the turn that actually happened. The choice is sent before any of this is written. A failure in the forecast or the log does not change the move.
+
+The per-battle JSONL `turn` row gains `prediction` (`jev.turn-forecast.v1`): the foe's modal reply, both actions as move ids or `switch:<species>`, HP fractions before and after, damage dealt and taken, whether each active was expected to faint, and who was expected to move first. Damage and KOs are the mean of that reply across the search's sample count, capped at eight draws (eight for the champion, one draw for max-damage). That rollout happens after `/choose`.
+
+When the next request or the battle result arrives, a `prediction_error` row (`jev.prediction-error.v1`) records the actual action, damage, KOs, and speed order, plus match flags and absolute damage error. The finished game's `jev.ladder-game.v1` row gains `calibration` when at least one turn was compared: foe-action accuracy, damage MAE both ways, KO misses, and speed-order misses. The dashboard shows those totals as a Sim calibration panel. `npm run calibration -- --log-dir logs/ladder` prints the same report from the JSONL, and fills a missing error row from `prediction` plus the replay log when the two still line up.
 
 ## Rating and GXE stay null when the server omits them
 

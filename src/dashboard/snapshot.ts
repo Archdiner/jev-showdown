@@ -1,13 +1,23 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { compareIncidents, incidentStore, loadIncidents, readEvents } from '../ops/sentinel/incidents.js';
+import { loadContext } from '../ops/sentinel/load.js';
+import { buildScorecard, formatScorecard } from '../ops/sentinel/scorecard.js';
 import type { OpsPaths } from '../ops/paths.js';
 import { dailyReport } from '../ops/report.js';
 import { statusReport } from '../ops/status.js';
 import type { DashboardPaths } from './paths.js';
 import { groupByRunId } from '../client/game-record.js';
 import { classifyLoss, parseLog, parseSummary, runnerFromName, type GameRecord, type Heartbeat, type LatencySummary } from './parse.js';
-import { reportGames, type GameReport } from './games.js';
+import { configPanels, reportGames, type ConfigPanel, type GameReport } from './games.js';
 import { sprt, wilson } from './stats.js';
+import {
+  type CalibrationSample,
+  type CalibrationSummary,
+  combineCalibrations,
+  dedupeSamples,
+  summarizeSamples,
+} from '../client/prediction.js';
 
 export interface Gap {
   id: string;
@@ -46,6 +56,7 @@ export interface Snapshot {
     variants: VariantRow[];
     byRun: ReturnType<typeof groupByRunId>;
     report: GameReport;
+    configs: ConfigPanel[];
   };
   ops: {
     available: boolean;
@@ -60,10 +71,28 @@ export interface Snapshot {
     variants: VariantRow[];
     regressions: { available: boolean; note: string };
   };
+  /** Sim-versus-protocol totals across every logged turn, not only the recent table. */
+  calibration: CalibrationSummary | null;
   agents: { available: false; path: string; note: string };
+  reliability: {
+    scorecard: string;
+    incidents: Array<{
+      id: string;
+      checkId: string;
+      severity: string;
+      status: string;
+      count: number;
+      title: string;
+      detail: string;
+      firstSeen: number;
+      lastSeen: number;
+      pr: string | null;
+      rootCause: string | null;
+    }>;
+  };
 }
 
-const FACILITIES = ['factory', 'gatekeeper', 'live', 'analyst', 'supervisor'] as const;
+const FACILITIES = ['factory', 'gatekeeper', 'live', 'analyst', 'supervisor', 'sentinel'] as const;
 const STALE_MS = 60_000;
 const TAIL = 2_000_000;
 
@@ -162,6 +191,8 @@ function combine(a: GameRecord, b: GameRecord): GameRecord {
     configId: pick(primary.configId, other.configId),
     configPath: pick(primary.configPath, other.configPath),
     configHash: pick(primary.configHash, other.configHash),
+    role: primary.role ?? other.role,
+    share: primary.share !== null ? primary.share : other.share,
     engine: pick(primary.engine, other.engine),
     gitSha: pick(primary.gitSha, other.gitSha),
     runId: pick(primary.runId, other.runId),
@@ -171,7 +202,14 @@ function combine(a: GameRecord, b: GameRecord): GameRecord {
     invalid: pick(primary.invalid, other.invalid),
     crashes: pick(primary.crashes, other.crashes),
     fallbacks: pick(primary.fallbacks, other.fallbacks),
+    calibration: preferCalibration(primary.calibration, other.calibration),
   };
+}
+
+function preferCalibration(left: CalibrationSummary | null, right: CalibrationSummary | null): CalibrationSummary | null {
+  if (!left) return right;
+  if (!right) return left;
+  return left.compared >= right.compared ? left : right;
 }
 
 function opsBundle(root: string, graph: string): OpsPaths {
@@ -224,6 +262,7 @@ function variantsOf(games: GameRecord[]): VariantRow[] {
 export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot {
   const games: GameRecord[] = [];
   const beats: Heartbeat[] = [];
+  const scores: CalibrationSample[] = [];
   const logs: Snapshot['runs']['logs'] = [];
   const sources: Snapshot['sources'] = [];
   const gaps: Gap[] = [];
@@ -244,6 +283,7 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
     skipped += parsed.skipped;
     games.push(...parsed.games);
     beats.push(...parsed.heartbeats);
+    scores.push(...parsed.scores);
     logs.push({ path: file, runner: runner || 'log', games: parsed.games.length, openBattles: parsed.openBattles });
   };
 
@@ -351,7 +391,16 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
     return { name, health, ageMs, pid: beat.pid, detail: beat.detail };
   });
 
+  const rolled = rollScores(dedupeSamples(scores));
   const unique = dedupe(games);
+  for (const game of unique) {
+    if (!game.battleId) continue;
+    const fromTurns = rolled.get(game.battleId);
+    if (!fromTurns) continue;
+    // A finished game row is the full total. A log tail can hold only the latest turns.
+    if (!game.calibration || fromTurns.compared > game.calibration.compared) game.calibration = fromTurns;
+  }
+  const calibration = calibrationOf(unique, rolled);
   const variants = variantsOf(unique);
   const orderedAll = [...unique].sort((a, b) => b.ts - a.ts);
   const record = {
@@ -389,8 +438,10 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
     variants,
     byRun: groupByRunId(unique),
     report: reportGames(unique),
+    configs: configPanels(unique),
   };
 
+  const reliability = reliabilityView(paths, now);
   return {
     apiVersion: 1,
     generatedAt: now,
@@ -399,6 +450,7 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
     gaps,
     games: gameView,
     ops: { available: fs.existsSync(heartbeatsPath) || fs.existsSync(liveGamesPath) || graphReady, statusText, reportText, facilities },
+    reliability,
     runs: { logs },
     metrics: {
       variants,
@@ -414,5 +466,78 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
       path: path.join(paths.cwd, 'state', 'cloud-agents.json'),
       note: 'Cloud agents and GitHub PRs are not loaded in this slice. Expected later: state/cloud-agents.json version 1 plus the GitHub pulls API.',
     },
+    calibration,
   };
+}
+
+function rollScores(samples: CalibrationSample[]): Map<string, CalibrationSummary> {
+  const groups = new Map<string, CalibrationSample[]>();
+  for (const sample of samples) {
+    if (!sample.battleId) continue;
+    const rows = groups.get(sample.battleId) ?? [];
+    rows.push(sample);
+    groups.set(sample.battleId, rows);
+  }
+  const out = new Map<string, CalibrationSummary>();
+  for (const [battleId, rows] of groups) {
+    const summary = summarizeSamples(rows);
+    if (summary) out.set(battleId, summary);
+  }
+  return out;
+}
+
+/** One total per battle. Turn rows fill games that never wrote `calibration`. Orphan turn rows still count. */
+function calibrationOf(games: GameRecord[], byBattle: Map<string, CalibrationSummary>): CalibrationSummary | null {
+  const seen = new Set<string>();
+  const parts: CalibrationSummary[] = [];
+  for (const game of games) {
+    if (game.battleId) seen.add(game.battleId);
+    if (game.calibration) parts.push(game.calibration);
+  }
+  for (const [battleId, summary] of byBattle) {
+    if (seen.has(battleId)) continue;
+    parts.push(summary);
+  }
+  return combineCalibrations(parts);
+}
+
+function reliabilityView(paths: DashboardPaths, now: number): Snapshot['reliability'] {
+  try {
+    const ctx = loadContext({
+      cwd: paths.cwd,
+      opsDir: paths.opsDir,
+      ladderLogDir: paths.ladderLogDir,
+      liveRunsDir: paths.searchLogDir,
+      dataDir: path.join(paths.cwd, 'data'),
+      graphDb: paths.graphDb,
+    }, {
+      now,
+      scanProcesses: false,
+      git: { behind: null, ref: 'origin/main', detail: 'not scanned by the dashboard' },
+    });
+    const store = incidentStore(paths.opsDir);
+    const incidents = loadIncidents(store)
+      .filter(incident => incident.status !== 'verified')
+      .sort(compareIncidents)
+      .map(incident => ({
+        id: incident.id,
+        checkId: incident.checkId,
+        severity: incident.severity,
+        status: incident.status,
+        count: incident.count,
+        title: incident.title,
+        detail: incident.detail,
+        firstSeen: incident.firstSeen,
+        lastSeen: incident.lastSeen,
+        pr: incident.pr,
+        rootCause: incident.rootCause,
+      }));
+    const events = fs.existsSync(store.eventsPath) ? readEvents(store.eventsPath) : [];
+    return { scorecard: formatScorecard(buildScorecard(ctx, loadIncidents(store), events, 24 * 60 * 60 * 1000)), incidents };
+  } catch (err) {
+    return {
+      scorecard: err instanceof Error ? err.message : 'scorecard failed',
+      incidents: [],
+    };
+  }
 }

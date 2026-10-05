@@ -23,6 +23,9 @@ export interface InitRequest {
 export interface OpenBattleRequest {
   type: 'open-battle';
   battleId: string;
+  /** Set when this battle was routed to a config. Absent keeps the worker default. */
+  configPath?: string | null;
+  engine?: EngineName;
 }
 
 export interface CloseBattleRequest {

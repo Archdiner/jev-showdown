@@ -48,6 +48,7 @@ export class DecisionClient {
   private seq = 0;
   private inFlight = 0;
   private readonly battleSlot = new Map<string, WorkerSlot>();
+  private readonly routes = new Map<string, { configPath: string | null; engine: EngineName }>();
 
   constructor(private readonly options: DecisionClientOptions) {}
 
@@ -60,9 +61,14 @@ export class DecisionClient {
     return this.started;
   }
 
-  openBattle(battleId: string): void {
-    const slot = this.claim(battleId);
-    slot.worker?.postMessage({ type: 'open-battle', battleId });
+  openBattle(battleId: string, route?: { configPath: string | null; engine: EngineName }): void {
+    if (route) this.routes.set(battleId, route);
+    const existing = this.battleSlot.get(battleId);
+    if (existing) {
+      this.postOpen(existing, battleId);
+      return;
+    }
+    this.claim(battleId);
   }
 
   closeBattle(battleId: string): void {
@@ -70,6 +76,7 @@ export class DecisionClient {
     if (!slot) return;
     slot.battles.delete(battleId);
     this.battleSlot.delete(battleId);
+    this.routes.delete(battleId);
     slot.worker?.postMessage({ type: 'close-battle', battleId });
   }
 
@@ -117,8 +124,15 @@ export class DecisionClient {
     if (!slot) throw new Error('engine workers are not started');
     slot.battles.add(battleId);
     this.battleSlot.set(battleId, slot);
-    slot.worker?.postMessage({ type: 'open-battle', battleId });
+    this.postOpen(slot, battleId);
     return slot;
+  }
+
+  private postOpen(slot: WorkerSlot, battleId: string): void {
+    const route = this.routes.get(battleId);
+    slot.worker?.postMessage(route
+      ? { type: 'open-battle', battleId, configPath: route.configPath, engine: route.engine }
+      : { type: 'open-battle', battleId });
   }
 
   private send(
@@ -238,7 +252,7 @@ export class DecisionClient {
       await slot.ready;
       for (const battleId of battles) {
         slot.battles.add(battleId);
-        slot.worker?.postMessage({ type: 'open-battle', battleId });
+        this.postOpen(slot, battleId);
       }
     } catch (err) {
       console.error(`[engine] restart failed: ${safeError(err)}`);

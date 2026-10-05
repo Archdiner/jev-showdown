@@ -12,6 +12,8 @@ import { statusReport } from './status.js';
 import { supervise } from './supervisor.js';
 import { startLocalServer } from './local-server.js';
 import { OPS_USAGE, opsFlag, opsNumber, opsValue } from './args.js';
+import { acknowledge, incidentStore, markFixing, recordRootCause } from './sentinel/incidents.js';
+import { layoutFromEnv, renderScorecard, runSentinel } from './sentinel/run.js';
 
 function flag(name: string): boolean {
   return opsFlag(process.argv, name);
@@ -60,6 +62,35 @@ async function main(): Promise<void> {
   if (command === 'analyst') {
     const extra = [opt('ladder-dir'), opt('live-runs')].filter((dir): dir is string => Boolean(dir));
     await runAnalyst(paths, { once: flag('once'), replay: opt('replay'), ladderDirs: extra.length ? extra : undefined });
+    return;
+  }
+  if (command === 'sentinel') {
+    const layout = layoutFromEnv();
+    const store = incidentStore(layout.opsDir);
+    const ack = opt('ack');
+    const fixing = opt('fixing');
+    const cause = opt('root-cause');
+    if (ack || fixing || cause) {
+      const error = ack
+        ? acknowledge(store, ack)
+        : fixing
+          ? markFixing(store, fixing, opt('pr') ?? '')
+          : recordRootCause(store, cause ?? '', opt('text') ?? '');
+      if (error) throw new Error(error);
+      console.log(ack ? `acknowledged ${ack}` : fixing ? `fixing ${fixing}` : `root cause recorded for ${cause}`);
+      return;
+    }
+    const code = await runSentinel(layout, {
+      once: flag('once'),
+      json: flag('json'),
+      soakMs: num('soak-ms'),
+      intervalMs: num('interval-ms'),
+    });
+    if (flag('once')) process.exitCode = code;
+    return;
+  }
+  if (command === 'scorecard') {
+    console.log(renderScorecard(layoutFromEnv(), { since: opt('since'), markdown: flag('md') }));
     return;
   }
   if (command === 'status') {

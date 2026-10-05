@@ -17,6 +17,8 @@ const port = parentPort;
 let engineName: EngineName = 'search';
 let champion: BuiltBot | null = null;
 const battles = new Set<string>();
+const bindings = new Map<string, { configPath: string | null; engine: EngineName }>();
+const bots = new Map<string, BuiltBot>();
 let chain = Promise.resolve();
 
 function send(message: WorkerResponse): void {
@@ -26,23 +28,44 @@ function send(message: WorkerResponse): void {
 async function init(_config: BotConfig, engine: EngineName, championConfigPath?: string | null): Promise<void> {
   engineName = engine;
   champion = championConfigPath ? buildBot(championConfigPath, 'ladder') : null;
+  if (champion && championConfigPath) bots.set(championConfigPath, champion);
   await dataLoader.load(gen9RandomBattle);
   send({ type: 'ready' });
 }
 
-function openBattle(battleId: string): void {
+function openBattle(battleId: string, route?: { configPath?: string | null; engine?: EngineName }): void {
   battles.add(battleId);
+  if (route && (route.configPath !== undefined || route.engine !== undefined)) {
+    bindings.set(battleId, {
+      configPath: route.configPath ?? null,
+      engine: route.engine ?? engineName,
+    });
+  }
 }
 
 function closeBattle(battleId: string): void {
   battles.delete(battleId);
+  bindings.delete(battleId);
+}
+
+function playerFor(battleId: string): { engine: EngineName; player: BuiltBot | null } {
+  const binding = bindings.get(battleId);
+  if (!binding) return { engine: engineName, player: champion };
+  if (!binding.configPath) return { engine: binding.engine, player: null };
+  let bot = bots.get(binding.configPath);
+  if (!bot) {
+    bot = buildBot(binding.configPath, 'ladder');
+    bots.set(binding.configPath, bot);
+  }
+  return { engine: binding.engine, player: bot };
 }
 
 async function decide(message: DecideRequest): Promise<void> {
   if (!battles.has(message.battleId)) openBattle(message.battleId);
   const started = Date.now();
+  const routed = playerFor(message.battleId);
   try {
-    const picked = await chooseLive(engineName, message.position, message.legal, champion);
+    const picked = await chooseLive(routed.engine, message.position, message.legal, routed.player);
     const known = message.legal.some(candidate => sameAction(candidate, picked.action));
     if (!known) {
       send({
@@ -91,7 +114,7 @@ async function handle(message: WorkerRequest): Promise<void> {
     return;
   }
   if (message.type === 'open-battle') {
-    openBattle(message.battleId);
+    openBattle(message.battleId, message);
     return;
   }
   if (message.type === 'close-battle') {
