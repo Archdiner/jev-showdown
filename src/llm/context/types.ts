@@ -128,6 +128,8 @@ export interface RollLine {
   attacker: string;
   defender: string;
   text: string;
+  /** Damage as a percent of the defender's max HP. */
+  minPct: number;
   maxPct: number;
 }
 
@@ -142,6 +144,8 @@ export interface FactCache {
   foeAttacks: RollLine[];
   teraAttacks: RollLine[];
   speed: string;
+  /** Speed order, our best hit into the active foe, and whether that foe can KO us from the current HP. */
+  threat: string;
   sets: SetFact[];
   threatened: boolean;
 }

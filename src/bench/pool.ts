@@ -1,6 +1,7 @@
 import { Worker } from 'worker_threads';
 import os from 'os';
 import { GameJob, GameResult } from './game.js';
+import { benchWorkerUrl } from './worker-url.js';
 
 interface WorkerMessage {
   ok: boolean;
@@ -18,7 +19,7 @@ export async function runGamesParallel(
 ): Promise<GameResult[]> {
   if (jobs.length === 0) return [];
   const workerCount = Math.max(1, Math.min(concurrency, jobs.length));
-  const workers = Array.from({ length: workerCount }, () => new Worker(new URL('./worker.js', import.meta.url)));
+  const workers = Array.from({ length: workerCount }, () => new Worker(benchWorkerUrl(import.meta.url)));
   const results: GameResult[] = new Array(jobs.length);
   let cursor = 0;
   let finished = 0;

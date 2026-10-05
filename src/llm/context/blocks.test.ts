@@ -52,6 +52,7 @@ function board(): BoardInput {
       teraAttacks: [],
       speed: 'speed unknown',
       sets: [],
+      threat: 'speed unknown\nactive KO threat: yes',
       threatened: true,
     },
   };

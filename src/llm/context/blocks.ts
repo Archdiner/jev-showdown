@@ -60,7 +60,8 @@ export const contextBlocks: ContextBlock[] = [
     render(board) {
       const ours = rollLines(board.facts?.ourAttacks ?? [], 24);
       const tera = rollLines(board.facts?.teraAttacks ?? [], 8);
-      return `our moves\n${ours}\nif we tera\n${tera}`;
+      const threat = board.facts?.threat ?? 'threat unknown';
+      return `${threat}\nour moves\n${ours}\nif we tera\n${tera}`;
     },
   },
   {

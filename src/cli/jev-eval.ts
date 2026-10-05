@@ -2,10 +2,10 @@
 /**
  * Screen jev against max-damage and the exact 1-ply champion.
  *
- *   VERCEL_AI_GATEWAY_KEY=... npm run jev:screen
+ *   VERCEL_AI_GATEWAY_KEY=... npm run jev:eval
+ *   VERCEL_AI_GATEWAY_KEY=... npm run jev:eval -- screen --games 100 --concurrency 4
  */
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import type { PolicySpec } from '../engine/exact/policies.js';
 import { EXACT_1PLY } from '../engine/exact/search.js';
@@ -13,6 +13,7 @@ import { teamsForSeed } from '../engine/exact/battle-utils.js';
 import { runGamesParallel } from '../bench/pool.js';
 import type { GameJob } from '../bench/game.js';
 import { loadJevSoloConfig } from '../llm/jev-solo/config.js';
+import { loadPools } from '../llm/jev-solo/engine.js';
 import { mergeTotals, percentile, rate, wilson, type JevTotals } from '../llm/jev-solo/stats.js';
 
 interface Summary {
@@ -39,6 +40,14 @@ function arg(name: string, fallback: string): string {
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
 }
 
+function workers(): number {
+  const value = Number(arg('--concurrency', '4'));
+  if (!Number.isFinite(value) || value < 1) {
+    throw new Error('--concurrency must be a positive number');
+  }
+  return Math.floor(value);
+}
+
 function opponentOf(id: string): PolicySpec {
   if (id === 'maxdamage' || id === 'max-damage') return { kind: 'maxdamage' };
   if (id === 'random') return { kind: 'random' };
@@ -59,8 +68,8 @@ async function play(opponentId: string, games: number): Promise<Summary> {
       jobs.push({ index: jobs.length, seed, p1Team: teams.p1, p2Team: teams.p2, p1: opponent, p2: jev });
     }
   }
-  console.log(`jev vs ${opponentId}: ${jobs.length} games, seeds 50000..${50000 + pairs - 1}`);
-  const played = await runGamesParallel(jobs, Math.min(4, os.cpus().length));
+  console.log(`jev vs ${opponentId}: ${jobs.length} games, seeds 50000..${50000 + pairs - 1}, concurrency ${workers()}`);
+  const played = await runGamesParallel(jobs, workers());
   let wins = 0;
   let losses = 0;
   let ties = 0;
@@ -120,7 +129,11 @@ async function main(): Promise<void> {
   const command = process.argv[2] === 'games' ? 'games' : 'screen';
   const games = Number(arg('--games', '100'));
   const config = loadJevSoloConfig();
-  console.log(`config ${config.id} question=${config.question} criteria=${config.criteria}`);
+  const species = Object.keys(loadPools()).length;
+  console.log(`config ${config.id} question=${config.question} criteria=${config.criteria} randbats=${species}`);
+  if (species < 100) {
+    console.warn(`gen9-stats.json has ${species} species. Incoming KO lines stay unknown until npm run data:refresh.`);
+  }
   const opponents = command === 'games' ? [arg('--opponent', 'maxdamage')] : ['maxdamage', 'exact'];
   const summaries: Summary[] = [];
   for (const opponent of opponents) summaries.push(await play(opponent, games));

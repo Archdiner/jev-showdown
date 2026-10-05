@@ -39,31 +39,62 @@ export function buildFacts(board: BoardInput): FactCache {
     }
   }
 
-  const intoActive = foeActive
-    ? foeAttacks.filter(line => line.defender === foeActive.species && line.attacker === (myActive ? foeActive.species : line.attacker))
-    : [];
-  const threatened = intoActive.some(line => line.maxPct >= 50);
+  const speed = speedText(myActive, foeActive, board);
+  const ourBest = bestRoll(ourAttacks, myActive?.species, foeActive?.species);
+  const foeBest = bestRoll(foeAttacks, foeActive?.species, myActive?.species);
+  const threatened = koNow(foeBest, myActive) || foeAttacks.some(line => line.defender === myActive?.species && line.maxPct >= 50);
 
   return {
     ourAttacks,
     foeAttacks,
     teraAttacks,
-    speed: speedText(myActive, foeActive, board),
+    speed,
+    threat: threatText(speed, ourBest, foeBest, myActive),
     sets: [...board.myTeam, ...board.opponentTeam].map(mon => setFact(mon, board.pools)),
     threatened,
   };
 }
 
+function bestRoll(rows: RollLine[], attacker: string | undefined, defender: string | undefined): RollLine | undefined {
+  if (!attacker || !defender) return undefined;
+  const hits = rows.filter(row => row.attacker === attacker && row.defender === defender && row.maxPct > 0);
+  hits.sort((a, b) => b.maxPct - a.maxPct || a.move.localeCompare(b.move));
+  return hits[0];
+}
+
+function koNow(row: RollLine | undefined, defender: BoardMon | undefined): boolean {
+  if (!row || defender?.hpPercent == null) return false;
+  return row.maxPct >= defender.hpPercent;
+}
+
+function threatText(speed: string, ourBest: RollLine | undefined, foeBest: RollLine | undefined, mine: BoardMon | undefined): string {
+  const foeKo = koNow(foeBest, mine);
+  return [
+    `speed ${speed}`,
+    ourBest ? `our-best ${ourBest.text}` : 'our-best none',
+    foeBest ? `foe-best ${foeBest.text}` : 'foe-best none',
+    `active KO threat: ${foeBest ? (foeKo ? 'yes' : 'no') : 'unknown'}`,
+  ].join('\n');
+}
+
 export function likelyMoveNames(mon: BoardMon, stats: SpeciesStats | undefined): string[] {
   const role = topRole(mon, stats);
   const table = role?.data.moves ?? {};
-  const known = new Set(mon.knownMoves.map(move => Dex.moves.get(move).id));
-  return Object.entries(table)
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const add = (name: string) => {
+    const id = Dex.moves.get(name).id;
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    names.push(Dex.moves.get(name).exists ? Dex.moves.get(name).name : name);
+  };
+  for (const move of mon.knownMoves) add(move);
+  const ranked = Object.entries(table)
     .filter(([, weight]) => weight > 0)
     .sort((a, b) => b[1] - a[1])
-    .map(([name]) => Dex.moves.get(name).name)
-    .filter(name => known.size === 0 || known.has(Dex.moves.get(name).id) || true)
-    .slice(0, 6);
+    .map(([name]) => name);
+  for (const move of ranked) add(move);
+  return names.slice(0, 6);
 }
 
 function roll(
@@ -78,7 +109,7 @@ function roll(
   const label = move.exists ? move.name : moveName;
   const base = `${label} -> ${defenderMon.species}`;
   if (!move.exists) {
-    return { move: label, attacker: attackerMon.species, defender: defenderMon.species, text: `${base} unknown`, maxPct: 0 };
+    return { move: label, attacker: attackerMon.species, defender: defenderMon.species, text: `${base} unknown`, minPct: 0, maxPct: 0 };
   }
   const accuracy = move.accuracy === true ? 100 : Number(move.accuracy);
   const info = `t=${move.type} ${move.category} bp=${move.basePower || 0} acc=${accuracy} pri=${move.priority}`;
@@ -87,7 +118,8 @@ function roll(
       move: label,
       attacker: attackerMon.species,
       defender: defenderMon.species,
-      text: `${base} ${info} status`,
+      text: `${base} ${info} status koNow=no`,
+      minPct: 0,
       maxPct: 0,
     };
   }
@@ -102,6 +134,11 @@ function roll(
     const [min, max] = result.range();
     const maxHp = result.defender.maxHP();
     const pct = (value: number) => (maxHp > 0 ? Math.round((value / maxHp) * 1000) / 10 : 0);
+    const minPct = pct(min);
+    const maxPct = pct(max);
+    const hp = defenderMon.hpPercent;
+    const koNow = hp != null && maxPct >= hp;
+    const koSure = hp != null && minPct >= hp;
     let ko = 'ko=?';
     try {
       ko = result.kochance().text;
@@ -113,15 +150,17 @@ function roll(
       move: label,
       attacker: attackerMon.species,
       defender: defenderMon.species,
-      text: `${base}${tera} ${info} dmg=${pct(min)}-${pct(max)}% ${ko}`,
-      maxPct: pct(max),
+      text: `${base}${tera} ${info} dmg=${minPct}-${maxPct}% hp=${hp ?? '?'}% koNow=${koNow ? 'yes' : 'no'} sure=${koSure ? 'yes' : 'no'} ${ko}`,
+      minPct,
+      maxPct,
     };
   } catch {
     return {
       move: label,
       attacker: attackerMon.species,
       defender: defenderMon.species,
-      text: `${base} ${info} no-roll`,
+      text: `${base} ${info} no-roll koNow=no`,
+      minPct: 0,
       maxPct: 0,
     };
   }

@@ -44,6 +44,7 @@ function board(overrides: Partial<BoardInput> = {}): BoardInput {
       teraAttacks: [],
       speed: 'speed unknown',
       sets: [],
+      threat: 'speed unknown',
       threatened: true,
     },
     ...overrides,
