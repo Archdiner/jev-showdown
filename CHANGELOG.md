@@ -1,5 +1,11 @@
 # Changelog
 
+## Self-play uses the ladder's hidden information
+
+Local self-play, the factory, and the gatekeeper used to search the real battle, so each bot saw the opponent's full team, sets, and unrevealed moves. They now build the decision the way the live ladder does: a `@pkmn/client` replay of the lines that side would receive, then `livePositionFromClient` and `buildDecisionBattle`. Unrevealed teammates, moves, items, and abilities stay hidden. The foe model is that same function, so a later change to the ladder's opponent sets applies here too.
+
+`information: full` on a game, `--information=full` on `npx tsx src/bench/cli.ts`, or `JEV_INFORMATION=full` keeps the old omniscient sim for comparison. The default is hidden.
+
 ## The analyst reads ladder games and the foe's real seat
 
 `npm run ops -- analyst` tails `state/ops/live-games.jsonl` and the JSONL under `logs/ladder` and `live-runs` (per-battle files, `games.jsonl`, and copies dropped in a live-runs directory). A ladder loss becomes the same hypothesis and factory job as an ops-live loss. The protocol text comes from the row's `log` or from `localReplayPath`. `metrics.jsonl` is not a game log.

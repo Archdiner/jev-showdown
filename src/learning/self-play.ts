@@ -1,5 +1,6 @@
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
 import { runGame } from '../bench/game.js';
+import type { InformationMode } from '../client/hidden-info.js';
 import { specForAlias } from '../config/aliases.js';
 import { BattleLogger } from './battle-logger.js';
 
@@ -9,6 +10,8 @@ export interface SelfPlayConfig {
   bot2Type: string;
   seed?: number;
   verbose?: boolean;
+  /** `hidden` matches the ladder. `full` is the old omniscient sim. */
+  information?: InformationMode;
 }
 
 export interface SelfPlayResult {
@@ -51,6 +54,7 @@ export class SelfPlayHarness {
         p1,
         p2,
         logProtocol: i === config.numGames - 1,
+        information: config.information,
       });
       lastLog = result.log || lastLog;
       if (result.winner === 'p1') bot1Wins++;
