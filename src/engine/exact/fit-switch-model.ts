@@ -2,8 +2,9 @@
  * Fit the switch model on high-Elo replay logs.
  *
  * Dev and held-out are split by replay id before any weight is updated.
- * Held-out rows are not printed. The feature list, L2, step size, and
- * epoch count are fixed here and are not changed after seeing held-out.
+ * Held-out rows are not printed. The feature list, L2, and epoch cap
+ * are fixed here and are not changed after seeing held-out.
+ * The penalty is lambda per example, not lambda on the averaged gradient.
  *
  *   node dist/engine/exact/fit-switch-model.js
  */
@@ -13,8 +14,7 @@ import { Dex } from '@pkmn/sim';
 import { SWITCH_FEATURES, featureVector, meanBenchHazard, publicMatchup, speciesLevel } from './matchup.js';
 
 const LAMBDA = 1;
-const LEARNING_RATE = 0.05;
-const EPOCHS = 200;
+const EPOCHS = 4000;
 const MIN_RATING = 1800;
 const PAGES = 8;
 const BASELINE_SWITCH_PROB = 1e-6;
@@ -71,7 +71,7 @@ function sideOf(token: string): 'p1' | 'p2' | null {
   return null;
 }
 
-function examplesFromLog(log: string): Example[] {
+export function examplesFromLog(log: string): Example[] {
   const team: Record<'p1' | 'p2', Map<string, Mon>> = { p1: new Map(), p2: new Map() };
   const lines = log.split('\n');
   for (const line of lines) {
@@ -249,20 +249,57 @@ function exampleFor(
   };
 }
 
+/**
+ * Mean log loss plus (lambda / (2n)) ||w||^2, bias unpenalized.
+ * Lambda is applied per example. Adding it to the averaged gradient
+ * instead wipes the matchup weights on a few thousand replays: the
+ * dev fit then matches an intercept-only model. Step length is chosen
+ * by backtracking so a fixed learning rate cannot stop short.
+ */
 function fit(examples: Example[]): number[] {
   const weights = new Array(SWITCH_FEATURES.length).fill(0);
   const n = examples.length || 1;
+  const objective = (candidate: number[]): number => {
+    let loss = 0;
+    for (const example of examples) {
+      const p = Math.min(1 - 1e-12, Math.max(1e-12, sigmoid(dot(candidate, example.features))));
+      const y = example.switched;
+      loss += -(y * Math.log(p) + (1 - y) * Math.log(1 - p));
+    }
+    loss /= n;
+    for (let i = 1; i < candidate.length; i++) loss += (LAMBDA / (2 * n)) * candidate[i] * candidate[i];
+    return loss;
+  };
+  let previous = Infinity;
+  let used = 0;
   for (let epoch = 0; epoch < EPOCHS; epoch++) {
+    used = epoch + 1;
+    const current = objective(weights);
+    if (previous - current < 1e-8) break;
+    previous = current;
     const grad = new Array(weights.length).fill(0);
     for (const example of examples) {
       const error = sigmoid(dot(weights, example.features)) - example.switched;
       for (let i = 0; i < weights.length; i++) grad[i] += error * example.features[i];
     }
-    for (let i = 0; i < weights.length; i++) {
-      const penalty = i === 0 ? 0 : LAMBDA * weights[i];
-      weights[i] -= LEARNING_RATE * (grad[i] / n + penalty);
+    const direction = grad.map((value, i) => value / n + (i === 0 ? 0 : (LAMBDA / n) * weights[i]));
+    const start = weights.slice();
+    let step = 1;
+    let accepted = false;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      for (let i = 0; i < weights.length; i++) weights[i] = start[i] - step * direction[i];
+      if (objective(weights) <= current) {
+        accepted = true;
+        break;
+      }
+      step *= 0.5;
+    }
+    if (!accepted) {
+      for (let i = 0; i < weights.length; i++) weights[i] = start[i];
+      break;
     }
   }
+  console.log(`fit epochs ${used}/${EPOCHS} objective ${previous.toFixed(6)}`);
   return weights;
 }
 
@@ -271,6 +308,7 @@ function score(examples: Example[], weights: number[]): {
   switchRate: number;
   logLoss: number;
   baselineLogLoss: number;
+  constantLogLoss: number;
   accuracy: number;
   baselineAccuracy: number;
 } {
@@ -288,11 +326,15 @@ function score(examples: Example[], weights: number[]): {
     switches += y;
   }
   const n = examples.length || 1;
+  const rate = switches / n;
+  const constantP = Math.min(1 - 1e-12, Math.max(1e-12, rate));
+  const constantLogLoss = -(rate * Math.log(constantP) + (1 - rate) * Math.log(1 - constantP));
   return {
     n: examples.length,
-    switchRate: switches / n,
+    switchRate: rate,
     logLoss: loss / n,
     baselineLogLoss: baseline / n,
+    constantLogLoss,
     accuracy: correct / n,
     baselineAccuracy: (examples.length - switches) / n,
   };
@@ -367,7 +409,7 @@ function featureMeans(examples: Example[]): number[] {
 function format(name: string, value: ReturnType<typeof score>): string {
   return [
     `${name} n=${value.n} switch-rate ${(value.switchRate * 100).toFixed(1)}%`,
-    `logloss ${value.logLoss.toFixed(4)} baseline ${value.baselineLogLoss.toFixed(4)}`,
+    `logloss ${value.logLoss.toFixed(4)} always-attack ${value.baselineLogLoss.toFixed(4)} constant ${value.constantLogLoss.toFixed(4)}`,
     `accuracy ${(value.accuracy * 100).toFixed(1)}% baseline ${(value.baselineAccuracy * 100).toFixed(1)}%`,
   ].join('\n');
 }
@@ -406,7 +448,8 @@ async function main(): Promise<void> {
     weights,
     lambda: LAMBDA,
     epochs: EPOCHS,
-    learningRate: LEARNING_RATE,
+    penalty: 'lambda per example, bias unpenalized',
+    optimizer: 'backtracking',
     dev,
     heldout: held,
     replays: replays.length,
@@ -417,7 +460,8 @@ async function main(): Promise<void> {
     weights: payload.weights,
     lambda: payload.lambda,
     epochs: payload.epochs,
-    learningRate: payload.learningRate,
+    penalty: payload.penalty,
+    optimizer: payload.optimizer,
   }, null, 2));
   const reportDir = path.join(process.cwd(), 'state', 'models');
   fs.mkdirSync(reportDir, { recursive: true });
@@ -425,7 +469,9 @@ async function main(): Promise<void> {
   console.log(`wrote ${modelPath}`);
 }
 
-main().catch(error => {
-  console.error(error);
-  process.exit(1);
-});
+if (process.argv[1]?.includes('fit-switch-model')) {
+  main().catch(error => {
+    console.error(error);
+    process.exit(1);
+  });
+}
