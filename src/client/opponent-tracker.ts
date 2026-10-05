@@ -1,5 +1,6 @@
 import { Protocol } from '@pkmn/protocol';
 import { BeliefTracker } from '../engine/belief-tracker.js';
+import { SetInference, type OpponentWorld } from '../engine/set-inference/index.js';
 import { Format, OpponentTracking, SetCandidate } from '../types/format.js';
 import { PokemonBelief } from '../types/index.js';
 
@@ -11,19 +12,29 @@ interface SeenPokemon {
 
 /**
  * Narrows opponent randbats roles from protocol reveals.
- * Uses the existing BeliefTracker and Format.getPossibleSets.
+ * SetInference owns the posterior and writes it onto the shared BeliefTracker.
+ * This class keeps the seen/active maps the ladder client already reads.
  */
 export class OpponentTracker {
-  private beliefs = new BeliefTracker();
+  private beliefs: BeliefTracker;
+  private sets: SetInference;
   private seen = new Map<string, SeenPokemon>();
   private activeBySide = new Map<'p1' | 'p2', string>();
   readonly ourSide: () => 'p1' | 'p2' | null;
 
   constructor(private readonly format: Format, ourSide: () => 'p1' | 'p2' | null) {
     this.ourSide = ourSide;
+    this.beliefs = new BeliefTracker();
+    this.sets = new SetInference(this.beliefs.stats, { ourSide, beliefs: this.beliefs });
+  }
+
+  /** Concrete foe teams from the current posterior. Identical draws are merged. */
+  sampleWorlds(n: number): OpponentWorld[] {
+    return this.sets.sampleWorlds(n);
   }
 
   applyLine(line: string): void {
+    if (this.ourSide()) this.sets.observe(line);
     if (!line.startsWith('|')) return;
     let args: readonly unknown[];
     try {
@@ -101,7 +112,8 @@ export class OpponentTracker {
     const who = this.identify(ident, details);
     if (!who || who.side === this.ourSide()) return;
     const id = this.key(who);
-    if (!this.beliefs.getBelief(id)) {
+    // observe() already wrote the posterior. initializeBelief would reset it.
+    if (!this.ourSide() && !this.beliefs.getBelief(id)) {
       this.beliefs.initializeBelief(id, who.species, who.level);
     }
     this.seen.set(id, who);
@@ -112,7 +124,7 @@ export class OpponentTracker {
     if (!ident || !move || move === 'Recharge') return;
     const seen = this.seenByIdent(ident);
     if (!seen || seen.side === this.ourSide()) return;
-    this.beliefs.updateOnMove(this.key(seen), move);
+    if (!this.ourSide()) this.beliefs.updateOnMove(this.key(seen), move);
     this.activeBySide.set(seen.side, seen.species);
   }
 
@@ -120,21 +132,21 @@ export class OpponentTracker {
     if (!ident || !ability) return;
     const seen = this.seenByIdent(ident);
     if (!seen || seen.side === this.ourSide()) return;
-    this.beliefs.updateOnAbility(this.key(seen), ability);
+    if (!this.ourSide()) this.beliefs.updateOnAbility(this.key(seen), ability);
   }
 
   private onItem(ident: string | undefined, item: string | undefined): void {
     if (!ident || !item) return;
     const seen = this.seenByIdent(ident);
     if (!seen || seen.side === this.ourSide()) return;
-    this.beliefs.updateOnItem(this.key(seen), item);
+    if (!this.ourSide()) this.beliefs.updateOnItem(this.key(seen), item);
   }
 
   private onTera(ident: string | undefined, tera: string | undefined): void {
     if (!ident || !tera) return;
     const seen = this.seenByIdent(ident);
     if (!seen || seen.side === this.ourSide()) return;
-    this.beliefs.updateOnTeraType(this.key(seen), tera);
+    if (!this.ourSide()) this.beliefs.updateOnTeraType(this.key(seen), tera);
   }
 
   private beliefForSpecies(species: string): PokemonBelief | undefined {

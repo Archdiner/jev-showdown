@@ -4,6 +4,31 @@
 
 Archinder's public gen9randombattle replays (62 games on 2026-10-05) were 21-41. The account never Terastallized. It also clicked immunities, including a Choice lock, and set up into KOs the revealed board did not show. `EXACT_1PLY` now searches `move N terastallize`, demotes an immune or Choice-locked attack and a status move that dies before it acts, and gives an incomplete foe one randbats set. The decision battle copies Tera only while the live request still allows it. The previous policy is `EXACT_1PLY_PREVIOUS`. An info-honest 200-game screen (hidden ladder view, seed 1, sides swapped) was 115-85, Wilson 95% CI [50.6%, 64.1%], with 0 invalid moves. The taxonomy is in `docs/ladder-loss-taxonomy.md`.
 
+## Fitted team eval and selective depth-2 search
+
+The leaf score is no longer only HP and faints. `fitted-team` averages the 1v1 matchup of every remaining Pokémon (Sarantinos 2022), then adds speed control, hazard chip on each side unless the Pokémon holds Heavy-Duty Boots, status, boosts, whether Tera is still available, and how many healthy checks remain. The weights are a logistic regression fit on self-play (even seeds max-damage and sometimes Terastallize; odd seeds play a random legal choice). Seeds split 60% train, 20% dev, 20% held-out before the fit. Held-out was scored once, after the weights were frozen. The randbats generator covers 508 species. `eval-weights.json` is that fit.
+
+Dev (n=780): team log loss 0.5615, accuracy 70.5%. HP-only log loss 0.5536, accuracy 70.4%. Constant log loss 0.6931. Held-out (n=800): team log loss 0.6092, accuracy 65.3%. HP-only log loss 0.6255, accuracy 65.3%.
+
+`selective-depth2` scores every legal move at depth 1, then spends the remaining deadline on the top-N of those moves against the opponent's top-M replies. Damaging rolls are two buckets, KO and non-KO. A transposition table remembers finished nodes for that decision. Both pieces are config components (`fitted-team`, `selective-depth2`). `exactSearch` honors `evalMode: 'fitted'` and `selective`, so sampled-world search and the hybrid engine pass the same config.
+
+Info-honest bench, 60 pairs, sides swapped, 120 games, each policy sees only its public observation. Opponent is exact 1-ply (8 samples, HP eval). Invalid choices 0, crashes 0, view misses 0. Randbats generator species 508.
+
+| Policy | Result | Wilson 95% CI | p50 | p95 |
+| --- | --- | --- | --- | --- |
+| fitted 1-ply | 70W-50L-0T (58.3%) | 49.4–66.8% | 77ms | 126ms |
+| fitted depth-2 | 58W-62L-0T (48.3%) | 39.6–57.2% | 119ms | 313ms |
+
+A Revival Blessing follow-up now switches to a fainted teammate. The previous switch list offered a healthy Pokémon, which the sim rejects. The hidden-info battle copies the request's `reviving` flag, so the search and the real battle agree.
+
+## Reliability sentinel
+
+`npm run ops -- sentinel` reads the ladder logs, ops heartbeats, circuits, drain files, and the process list every minute. Each broken invariant becomes an incident in `state/ops/incidents.jsonl` (folded into `state/ops/incidents.json`). A P0 is a game being lost or data being corrupted now. The incident stays open until the check is clear, and it is verified only after a 10 minute soak. `npm run ops -- scorecard` is the owner screen: uptime, open P0/P1, incidents opened and verified, MTTR, Elo, batch and variant records, and what the gate promoted or rejected. Phantom rows (`phantom: true`, or a 0-turn tie with end reason disconnect or unknown) are left out of those rates, and the files the numbers came from are named. The dashboard shows the same incidents and scorecard. `npm run ops -- sentinel --once --json` prints the current incidents as one JSON object and exits 1 when a P0 is open. `npm run ops -- scorecard --md --since <iso>` compares Elo, win rate, and record with the previous window of the same length. When a game row carries `invalidChoiceReasons`, those reasons are added to the invalid-choice incident. The bot's move choice is unchanged.
+
+## Opponent set inference
+
+Given the public battle log, the bot keeps a probability distribution over each foe's randbats role, moves, item, ability, and Tera type, and over teammates that have not appeared. Revealed moves, items, and abilities update that distribution. So do damage rolls, speed order (Choice Scarf at randbats level), and negative evidence: a status move rules out Assault Vest, hazard damage rules out Heavy-Duty Boots, a turn with no Leftovers recovery rules out Leftovers, and two different moves without a switch rule out a Choice item. Unrevealed teammates are drawn under the random-battle team rules (no duplicate species, type and role limits). `sampleWorlds(n)` returns concrete teams weighted by that posterior for a search. The champion policy is unchanged; `setInference: calibrated` is opt-in. `npm run eval:sets` scores the distribution against the raw randbats prior on seeded self-play, split into dev and held-out. The players choose a random legal move and terastallize on one in four move choices when the request allows it, so a Tera type is revealed often enough to score. Tests do not write `data/gen9-stats.json`.
+
 ## Live A/B routing on one ladder login
 
 `--ab <config>:<share>` (repeatable) splits new battles across the champion and one or more challenger configs. The config is a yaml path, a config id under `configs/`, or an engine profile. A hash of the battle id picks the arm. Concurrency, the turn timer, and the choice watchdog stay shared. The process takes one login and takes the account lock once for every arm. Each finished game, metrics line, and the dashboard stamp `configId`, `role`, and `share`. The dashboard has a per-config W/L, Elo change, invalid-move panel, and a scorecard per config. A challenger is pulled to champion-only after an invalid move, a timer loss, a crash, or 4 losses in a row. Each pull is an incident in `incidents.jsonl`. `--check` prints a preflight canary for every arm. A ghost room (`phantom`) does not pull a challenger.

@@ -17,6 +17,8 @@ describe('live metrics', () => {
     const filePath = path.join(dir, 'metrics.jsonl');
     const metrics = new LiveMetrics(filePath, {
       runId: 'run-1',
+      batchLabel: 'batch-9',
+      hostname: 'live-mac',
       engine: 'search',
       concurrency: 3,
       configId: 'champion-exact-1ply',
@@ -48,9 +50,12 @@ describe('live metrics', () => {
 
     const lines = fs.readFileSync(filePath, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     expect(lines.map(line => line.type)).toEqual(['decision', 'decision', 'throttle', 'game', 'run']);
+    expect(lines.every(line => line.runId === 'run-1' && line.batchLabel === 'batch-9' && line.hostname === 'live-mac')).toBe(true);
     expect(lines[0]).toMatchObject({
       v: 1,
       runId: 'run-1',
+      batchLabel: 'batch-9',
+      hostname: 'live-mac',
       engine: 'search',
       battleId: 'battle-1',
       turn: 1,

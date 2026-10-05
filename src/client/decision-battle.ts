@@ -279,6 +279,11 @@ export function buildDecisionBattle(position: LivePosition): Battle | null {
     const force = isForceSwitch(request) || !!active.fainted;
     if (force) active.switchFlag = true;
     battle.makeRequest(force ? 'switch' : 'move');
+    const reviving = (request.side?.pokemon || []).some((mon: { reviving?: boolean }) => mon?.reviving);
+    if (reviving) {
+      const slot = battle.p1.slotConditions[active.position] as Record<string, unknown>;
+      if (slot) slot.revivalblessing = { id: 'revivalblessing' };
+    }
     if (legalChoices(battle, 'p1').length === 0) return null;
     return battle;
   } catch {

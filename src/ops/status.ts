@@ -37,7 +37,7 @@ export function statusReport(paths: OpsPaths, now = Date.now()): string {
 
   const lines: string[] = [];
   lines.push('ops status');
-  for (const name of ['factory', 'gatekeeper', 'live', 'analyst'] as const) {
+  for (const name of ['factory', 'gatekeeper', 'live', 'analyst', 'sentinel'] as const) {
     const beat = beats[name];
     const age = beat ? `${Math.round((now - beat.ts) / 1000)}s` : 'never';
     const health = !beat ? 'down' : beat.status === 'error' ? 'error' : now - beat.ts > 60_000 && beat.status === 'ok' ? 'stale' : beat.status;

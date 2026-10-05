@@ -124,4 +124,28 @@ describe('ladder engine factory', () => {
     expect(picked.action.type).toBe('switch');
     expect(legal).toContainEqual(picked.action);
   });
+
+  it('revival blessing offers a fainted teammate the sim will accept', () => {
+    const battle = openedBattle();
+    const bench = battle.p1.pokemon.find(mon => !mon.isActive);
+    const active = battle.p1.active[0];
+    if (!bench || !active) throw new Error('need an active and a bench mon');
+    bench.hp = 0;
+    bench.fainted = true;
+    battle.p1.slotConditions[active.position].revivalblessing = { id: 'revivalblessing' } as never;
+    active.switchFlag = true;
+    battle.makeRequest('switch');
+
+    const choices = legalChoices(battle, 'p1');
+    expect(choices.length).toBeGreaterThan(0);
+    for (const choice of choices) {
+      const slot = Number(choice.slice('switch '.length)) - 1;
+      expect(battle.p1.pokemon[slot]?.fainted).toBe(true);
+    }
+    const position = positionFrom(battle);
+    const built = buildDecisionBattle(position);
+    expect(built).not.toBeNull();
+    expect(legalChoices(built!, 'p1')).toEqual(choices);
+    expect(battle.choose('p1', choices[0])).toBe(true);
+  });
 });

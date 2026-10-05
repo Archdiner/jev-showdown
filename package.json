@@ -14,6 +14,7 @@
     "regressions": "tsx src/graph/regressions-cli.ts",
     "data:refresh": "tsx src/data/refresh-data.ts",
     "selfplay": "tsx src/cli/selfplay.ts",
+    "eval:fit": "tsx src/engine/exact/fit-team-eval.ts",
     "ladder": "tsx src/cli/ladder.ts",
     "replays:download": "tsx src/cli/download-replays.ts",
     "analyze": "tsx src/cli/analyze-losses.ts",
@@ -23,6 +24,7 @@
     "ops": "tsx src/ops/cli.ts",
     "benchmark": "tsx src/cli/benchmark.ts",
     "export-replays": "tsx src/cli/export-replays.ts",
+    "eval:sets": "tsx src/cli/eval-sets.ts",
     "lint": "eslint src/**/*.ts",
     "dashboard": "tsx src/dashboard/cli.ts",
     "calibration": "tsx src/cli/calibration.ts"

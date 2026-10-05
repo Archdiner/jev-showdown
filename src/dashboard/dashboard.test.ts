@@ -36,6 +36,9 @@ function game(partial: Partial<GameRecord> & Pick<GameRecord, 'outcome'>): GameR
     share: null,
     engine: null,
     gitSha: null,
+    runId: null,
+    batchLabel: null,
+    hostname: null,
     concurrency: null,
     runner: null,
     invalid: null,
@@ -112,6 +115,14 @@ describe('game feed parsers', () => {
     expect(rich.configHash).toBe('abc');
     expect(rich.gitSha).toBe('87b268f');
     expect(rich.concurrency).toBe(2);
+    const stamped = parseLog([
+      '{"kind":"ladder-game","battleId":"battle-a","outcome":"win","runId":"run-a","batchLabel":"batch-9","hostname":"live-mac","eloAfter":1100}',
+      '{"kind":"ladder-game","battleId":"battle-b","outcome":"loss","runId":"run-a","eloAfter":1080}',
+      '{"kind":"ladder-game","battleId":"battle-c","outcome":"win","runId":"run-b","hostname":"other"}',
+    ].join('\n'), { source: 'games.jsonl', runner: 'ladder' });
+    expect(stamped.games.map(row => row.runId)).toEqual(['run-a', 'run-a', 'run-b']);
+    expect(stamped.games[0].batchLabel).toBe('batch-9');
+    expect(stamped.games[0].hostname).toBe('live-mac');
     expect(parsed.games[1].configId).toBe('champion-hash');
     expect(parsed.games[1].gxe).toBe(62.5);
     expect(parsed.games[2].endReason).toBeNull();
@@ -207,6 +218,8 @@ describe('game feed parsers', () => {
     expect(merged?.opponent).toBe('ace');
     expect(merged?.latency).toEqual({ p50: 80, p95: 120, p99: 200, max: null });
     expect(merged?.minTimerSeconds).toBe(12);
+    expect(merged?.runId).toBe('run-1');
+    expect(snapshot.games.byRun.some(run => run.runId === 'run-1' && run.games >= 1)).toBe(true);
     expect(snapshot.games.recent.filter(row => row.battleId === 'battle-gen9randombattle-9')).toHaveLength(1);
     expect(snapshot.ops.reportText).toMatch(/graph\.db/);
     const rich = snapshot.games.recent.find(row => row.battleId === 'battle-rich-1');
@@ -284,11 +297,15 @@ describe('game feed parsers', () => {
       const page = await get(`${server.url}/`);
       expect(page.status).toBe(200);
       expect(page.body).toContain('End reason');
+      expect(page.body).toContain('>Run</th>');
       expect(page.body).toContain('Sim calibration');
       expect(page.body).toContain('Per config');
+      expect(page.body).toContain('Incidents');
+      expect(page.body).toContain('Scorecard');
       const games = await get(`${server.url}/api/games?endReason=timer-ours&band=1400-1599`);
       expect(games.status).toBe(200);
       const payload = JSON.parse(games.body);
+      expect(payload.games.byRun.some((run: { runId: string }) => run.runId === 'run-1')).toBe(true);
       expect(payload.games.filtered).toHaveLength(1);
       expect(payload.games.filtered[0].battleId).toBe('battle-rich-1');
       expect(payload.games.filteredReport.timerDisconnectLosses).toBe(1);
@@ -300,6 +317,10 @@ describe('game feed parsers', () => {
       expect((await get(`${server.url}/api/runs`)).status).toBe(200);
       expect((await get(`${server.url}/api/agents`)).status).toBe(200);
       expect((await get(`${server.url}/api/snapshot`)).status).toBe(200);
+      expect((await get(`${server.url}/api/incidents`)).status).toBe(200);
+      const scorecard = await get(`${server.url}/api/scorecard`);
+      expect(scorecard.status).toBe(200);
+      expect(JSON.parse(scorecard.body).scorecard).toContain('jev scorecard');
     } finally {
       await server.close();
     }
