@@ -37,6 +37,12 @@ const STATUS_COST: Record<string, number> = {
 };
 
 const marginMemo = new Map<string, number>();
+/**
+ * Pure memo, keyed on exact HP. Unbounded it grew ~1.5 GB per bench worker
+ * (and without limit in a long-lived live decision worker); clearing at the
+ * cap changes no score.
+ */
+const MARGIN_MEMO_CAP = 200_000;
 
 export function randbatsSpeciesCount(): number {
   ensureGenerators();
@@ -157,6 +163,7 @@ function cachedMargin(our: any, foe: any, ownMoves: boolean, weather?: string): 
     // Unknown forme: no matchup evidence rather than a crashed search.
     value = 0;
   }
+  if (marginMemo.size >= MARGIN_MEMO_CAP) marginMemo.clear();
   marginMemo.set(key, value);
   return value;
 }

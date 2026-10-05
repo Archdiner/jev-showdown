@@ -111,6 +111,21 @@ interface PendingAttack {
 
 const CHOICE = ['Choice Band', 'Choice Specs', 'Choice Scarf'];
 const SPEED_MISS = 0.05;
+const EXTENSION_ROCK: Record<'Sun' | 'Rain' | 'Sand' | 'Snow', string> = {
+  Sun: 'Heat Rock',
+  Rain: 'Damp Rock',
+  Sand: 'Smooth Rock',
+  Snow: 'Icy Rock',
+};
+const WEATHER_MOVES: Record<string, 'Sun' | 'Rain' | 'Sand' | 'Snow'> = {
+  sunnyday: 'Sun',
+  raindance: 'Rain',
+  sandstorm: 'Sand',
+  snowscape: 'Snow',
+  chillyreception: 'Snow',
+};
+/** Weather from a move or ability lasts 5 turns; an extension rock makes it 8. */
+const WEATHER_TURNS = 5;
 
 /**
  * Posterior over a random-battle opponent: roles, moves, items, abilities,
@@ -139,6 +154,9 @@ export class SetInference {
   private leftoversApplied = new Set<string>();
   private damageUpdates = new Map<string, number>();
   private speedChecked = false;
+  /** Opt-in (beliefUpdaterEnabled): who set the current weather and how many upkeeps it has lasted. */
+  private weatherSetter: { species: string; kind: 'Sun' | 'Rain' | 'Sand' | 'Snow' } | null = null;
+  private weatherUpkeeps = 0;
   private readonly rng: () => number;
 
   constructor(
@@ -148,9 +166,46 @@ export class SetInference {
       priorOnly?: boolean;
       seed?: number;
       beliefs?: BeliefTracker;
+      /**
+       * Opt-in belief tightening beyond the default evidence (port of #82):
+       * weather that outlasts 5 turns marks the foe setter's extension rock,
+       * and Trick / Switcheroo item swaps are read the right way round.
+       * Unset keeps every existing posterior byte-identical.
+       */
+      beliefUpdaterEnabled?: boolean;
     } = {},
   ) {
     this.rng = mulberry32(options.seed ?? 1);
+  }
+
+  /** True when the opt-in belief updater runs (never for the prior-only model). */
+  get beliefUpdaterEnabled(): boolean {
+    return this.options.beliefUpdaterEnabled === true && !this.priorOnly;
+  }
+
+  /** Read-only view of one foe's evidence (tests and the decision-battle fill). */
+  getMonEvidence(species: string): Readonly<MonEvidence> | undefined {
+    return this.mon(species);
+  }
+
+  /** Foe species seen so far, in reveal order (SetInference keys). */
+  foeSpecies(): string[] {
+    return [...this.order];
+  }
+
+  /**
+   * Weather set by a foe lasted past the 5-turn default, so the setter holds
+   * the matching extension rock. Soft (x0.05 on every other item) so a
+   * misattributed setter cannot empty the posterior.
+   */
+  noteWeatherExtended(species: string, kind: 'Sun' | 'Rain' | 'Sand' | 'Snow'): void {
+    const mon = this.mon(species);
+    if (!mon || !this.beliefUpdaterEnabled || mon.revealedItem) return;
+    const rock = EXTENSION_ROCK[kind];
+    this.scaleItems(mon, this.itemNames(mon).map(name => ({
+      name,
+      factor: toId(name) === toId(rock) ? 1 : SPEED_MISS,
+    })));
   }
 
   get priorOnly(): boolean {
@@ -370,7 +425,9 @@ export class SetInference {
       return;
     }
     if (cmd === '-weather') {
-      this.weather = weatherName(parts[1]);
+      const kind = weatherName(parts[1]);
+      if (this.beliefUpdaterEnabled) this.trackWeather(parts, kind);
+      this.weather = kind;
       return;
     }
     if (cmd === '-fieldstart' || cmd === '-fieldend') {
@@ -693,6 +750,38 @@ export class SetInference {
     });
   }
 
+  /**
+   * `|-weather|X|[upkeep]` counts a turn of the current weather. A fresh
+   * `|-weather|X|[from] ability: Y|[of] p2a: Z` or one right after a foe's
+   * weather move records the setter. Anything else (ours, none) clears it.
+   */
+  private trackWeather(parts: string[], kind: 'Sun' | 'Rain' | 'Sand' | 'Snow' | undefined): void {
+    if (!kind) {
+      this.weatherSetter = null;
+      this.weatherUpkeeps = 0;
+      return;
+    }
+    if (parts.includes('[upkeep]')) {
+      if (!this.weatherSetter || this.weatherSetter.kind !== kind) return;
+      this.weatherUpkeeps++;
+      if (this.weatherUpkeeps === WEATHER_TURNS) this.noteWeatherExtended(this.weatherSetter.species, kind);
+      return;
+    }
+    this.weatherUpkeeps = 0;
+    this.weatherSetter = null;
+    const of = parts.find(part => part.startsWith('[of] '));
+    const fromAbility = parts.some(part => part.startsWith('[from] ability:'));
+    let setter: { side: Side; species: string } | null = null;
+    if (fromAbility && of) {
+      const parsed = this.ident(of.slice('[of] '.length).trim());
+      const species = parsed ? this.positions.get(parsed.position) : undefined;
+      if (parsed && species) setter = { side: parsed.side, species };
+    } else if (!fromAbility && this.pending && WEATHER_MOVES[toId(this.pending.move)] === kind) {
+      setter = { side: this.pending.attackerSide, species: this.pending.attackerSpecies };
+    }
+    if (setter && this.isFoe(setter.side)) this.weatherSetter = { species: setter.species, kind };
+  }
+
   private ourMaxHp(ours: OurSet): number {
     return spreadFor(ours.species, ours.level, undefined, undefined).stats.hp;
   }
@@ -725,7 +814,16 @@ export class SetInference {
 
   private onItem(ident: string | undefined, item: string | undefined, from: string | undefined): void {
     const parsed = this.ident(ident);
-    if (!parsed || !item || !this.isFoe(parsed.side)) return;
+    if (!parsed || !item) return;
+    if (this.beliefUpdaterEnabled && from && /move: (trick|switcheroo)/i.test(from)) {
+      // `-item` names what the mon received. Ours came from the foe active,
+      // which is its original item; the foe's came from us and says nothing.
+      if (this.isFoe(parsed.side)) return;
+      const foe = this.active.get(this.foeSide());
+      if (foe && this.mons.has(foe)) this.seeItem(foe, item);
+      return;
+    }
+    if (!this.isFoe(parsed.side)) return;
     if (from && /knocked off|stole|tricked/i.test(from)) return;
     const species = this.positions.get(parsed.position);
     if (species) this.seeItem(species, item);

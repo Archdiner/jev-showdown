@@ -1,0 +1,18 @@
+name: stacked-plus
+extends: stacked-qw-fitted.yaml
+# stacked-qw-fitted + the two positive f-series arms combined:
+# - foeBelief (#82 belief updater port): decision-battle foes filled from the
+#   SetInference posterior (f-belief, 53.4% pooled over 800 games);
+# - replyModel: switch, top 3 replies (fitted switch-model foe replies,
+#   f-switchreply, 53.4% pooled over 800 games).
+# f-uniform is NOT included: behavior: uniform is overridden by
+# replyModel: switch (the two reply models are mutually exclusive), and its
+# p99 was 1.4-1.8s.
+search:
+  id: exact-1ply-qw
+  params:
+    depth: 1
+    samples: 8
+    foeBelief: true
+    replyModel: switch
+    replySwitchMax: 3

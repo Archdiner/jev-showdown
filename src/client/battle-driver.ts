@@ -558,8 +558,25 @@ export class BattleDriver extends EventEmitter {
       return;
     }
 
-    const safe = sanitizeAction(decision.action, request, legal) ?? pickBestLegal(state, legal);
-    const adjusted = !sameAction(safe, decision.action);
+    const rawDecision = decision.action;
+    const sanitized = sanitizeAction(rawDecision, request, legal);
+    const safe = sanitized ?? pickBestLegal(state, legal);
+    const adjusted = !sameAction(safe, rawDecision);
+    let sanitizeReason: 'tera-strip' | 'full-swap' | null = null;
+    if (adjusted && !decision.fallback) {
+      if (
+        rawDecision.type === 'move'
+        && rawDecision.terastallize
+        && sanitized
+        && sanitized.type === 'move'
+        && !sanitized.terastallize
+        && sanitized.moveIndex === rawDecision.moveIndex
+      ) {
+        sanitizeReason = 'tera-strip';
+      } else {
+        sanitizeReason = 'full-swap';
+      }
+    }
     if (decision.fallback || adjusted) {
       room.fallbacks += 1;
       if (decision.fallback && isDecisionTimeout(decision.reason)) room.decisionTimeouts += 1;
@@ -576,19 +593,29 @@ export class BattleDriver extends EventEmitter {
     });
     // Send before any prediction or log write. A logging failure must not skip the choice.
     this.sendChoice(room, choice, rqid, safe, false);
+    const fallbackReason = decision.reason
+      || (sanitizeReason === 'tera-strip'
+        ? 'tera-strip'
+        : sanitizeReason === 'full-swap'
+          ? 'full-swap'
+          : adjusted
+            ? 'removed an illegal modifier from the engine choice'
+            : 'fallback');
     this.recordTurn(room, {
       request,
       position,
       stateTurn: state.turn,
       rqid,
       safe,
+      rawDecision: adjusted || decision.fallback ? rawDecision : undefined,
+      sanitizeReason,
       choice,
       simChoice: formatChoice(safe),
       score: decision.score,
       searchMs: decision.timeMs,
       latencyMs,
       fallback: Boolean(decision.fallback || adjusted),
-      fallbackReason: decision.reason || (adjusted ? 'removed an illegal modifier from the engine choice' : 'fallback'),
+      fallbackReason,
       adjusted: Boolean(decision.fallback || adjusted),
       mismatches: mismatchData(mismatches),
       roles,
@@ -624,6 +651,8 @@ export class BattleDriver extends EventEmitter {
     stateTurn: number;
     rqid: number | null;
     safe: Action;
+    rawDecision?: Action;
+    sanitizeReason?: 'tera-strip' | 'full-swap' | null;
     choice: string;
     simChoice: string;
     score: number | null;
@@ -645,6 +674,8 @@ export class BattleDriver extends EventEmitter {
           rqid: input.rqid,
           reason: input.fallbackReason,
           action: input.safe,
+          ...(input.rawDecision ? { rawDecision: input.rawDecision } : {}),
+          ...(input.sanitizeReason ? { sanitizeReason: input.sanitizeReason } : {}),
         });
       }
       const prediction = this.forecastSafe(room, input.position, input.simChoice);
@@ -665,6 +696,8 @@ export class BattleDriver extends EventEmitter {
         decision: input.safe,
         choice: input.choice,
         ...(request ? { request } : {}),
+        ...(input.rawDecision ? { rawDecision: input.rawDecision } : {}),
+        ...(input.sanitizeReason ? { sanitizeReason: input.sanitizeReason } : {}),
         score: input.score,
         searchMs: input.searchMs,
         latencyMs: input.latencyMs,

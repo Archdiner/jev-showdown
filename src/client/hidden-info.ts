@@ -4,6 +4,7 @@ import { Dex } from '@pkmn/dex';
 import { Battle as SimBattle } from '@pkmn/sim';
 import type { SideId } from '../engine/exact/battle-utils.js';
 import { buildDecisionBattle } from './decision-battle.js';
+import { applyFoeBelief, FoeBeliefSession } from './foe-belief.js';
 import { livePositionFromClient, type ViewerSide } from './live-position.js';
 
 const gens = new Generations(Dex);
@@ -80,11 +81,38 @@ function replayClient(log: readonly string[], side: ViewerSide, request: unknown
 export function ladderDecisionBattle(
   battle: SimBattle,
   side: SideId,
-  options?: { quickWins?: boolean },
+  options?: LadderDecisionOptions,
 ): SimBattle | null {
   const request = battle.getSide(side).activeRequest;
   if (!request || request.wait || request.teamPreview) return null;
-  return decisionBattleFromViewerLog(battle.log.join('\n'), side, request, options);
+  const session = options?.foeBelief ? beliefSession(battle, side) : undefined;
+  return decisionBattleFromViewerLog(battle.log.join('\n'), side, request, options, session);
+}
+
+export interface LadderDecisionOptions {
+  quickWins?: boolean;
+  foePlaceholders?: boolean;
+  /** Opt-in (search param foeBelief): fill foes from the SetInference posterior. */
+  foeBelief?: boolean;
+}
+
+/** Belief sessions per sim battle and viewer, so each decision replays only new lines. */
+const sessions = new WeakMap<SimBattle, Map<SideId, FoeBeliefSession | null>>();
+let beliefErrors = 0;
+
+/** Belief updates that threw (that battle then decides without the fill). */
+export function foeBeliefErrors(): number {
+  return beliefErrors;
+}
+
+function beliefSession(battle: SimBattle, side: SideId): FoeBeliefSession | null {
+  let bySide = sessions.get(battle);
+  if (!bySide) {
+    bySide = new Map();
+    sessions.set(battle, bySide);
+  }
+  if (!bySide.has(side)) bySide.set(side, new FoeBeliefSession(side));
+  return bySide.get(side) ?? null;
 }
 
 /** Replay a spectator log and the side's `|request|` into the ladder's decision battle. */
@@ -92,12 +120,27 @@ export function decisionBattleFromViewerLog(
   log: string,
   side: ViewerSide,
   request: unknown,
-  options?: { quickWins?: boolean },
+  options?: LadderDecisionOptions,
+  session?: FoeBeliefSession | null,
 ): SimBattle | null {
   if (!request || typeof request !== 'object') return null;
-  const client = replayClient(log.split('\n'), side, request);
+  const lines = log.split('\n');
+  const client = replayClient(lines, side, request);
   try {
-    return buildDecisionBattle(livePositionFromClient(client, request, side), options);
+    let position = livePositionFromClient(client, request, side);
+    if (options?.foeBelief) {
+      const belief = session === undefined ? new FoeBeliefSession(side) : session;
+      if (belief) {
+        try {
+          belief.update(viewerLines(lines, side), request);
+          position = applyFoeBelief(position, belief.fills());
+        } catch (err) {
+          beliefErrors += 1;
+          console.error(`[foe-belief] update failed (${beliefErrors}): ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+    return buildDecisionBattle(position, options);
   } catch {
     return null;
   } finally {

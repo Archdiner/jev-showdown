@@ -1,0 +1,11 @@
+name: stacked-qw-fitted-switchreply
+extends: stacked-qw-fitted.yaml
+# stacked-qw-fitted with the fitted switch model as the foe reply model
+# (top 3 replies weighted by P(switch) and damage) instead of max-damage.
+search:
+  id: exact-1ply-qw
+  params:
+    depth: 1
+    samples: 8
+    replyModel: switch
+    replySwitchMax: 3

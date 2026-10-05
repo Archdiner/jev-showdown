@@ -5,6 +5,7 @@ import { legalChoices } from '../engine/exact/battle-utils.js';
 import { EngineName } from './engines.js';
 import { sameAction } from './choice.js';
 import { ladderPolicy } from './ladder-engine.js';
+import { FOE_TEAM_SIZE, markFoeHidden, placeholderSets } from '../engine/exact/stats-prior.js';
 
 export interface StatBoosts {
   atk?: number;
@@ -26,6 +27,10 @@ export interface FoeMon {
   moves: string[];
   boosts?: StatBoosts;
   fainted?: boolean;
+  /** The protocol has not revealed this mon's item (never shown, not removed). */
+  itemUnknown?: boolean;
+  /** The protocol has not revealed this mon's ability. */
+  abilityUnknown?: boolean;
 }
 
 /**
@@ -83,6 +88,22 @@ function named(kind: 'abilities' | 'items' | 'moves' | 'species', raw: string | 
   return entry?.exists ? entry.name : '';
 }
 
+/**
+ * Switch-in abilities that rewrite the active (Imposter) must not fire in the
+ * decision battle. The live `|request|` already carries the post-Imposter
+ * moves (or Transform alone when Imposter failed, e.g. into a Substitute).
+ * Re-firing Imposter against an incomplete foe model invents move slots the
+ * server never offered — the bench then hard-aborts on `move 2`.
+ */
+function decisionAbility(ability: string | undefined, speciesName: string): string {
+  const namedAbility = named('abilities', ability);
+  if (namedAbility && namedAbility !== 'Imposter') return namedAbility;
+  const dexSpecies = Dex.species.get(speciesName);
+  const fallback = dexSpecies.abilities?.['0'];
+  if (fallback && fallback !== 'Imposter') return fallback;
+  return 'Pressure';
+}
+
 function toSet(
   species: string,
   moves: string[],
@@ -99,7 +120,7 @@ function toSet(
   const set: PokemonSet = {
     species: speciesName,
     moves: moveNames,
-    ability: named('abilities', ability) || dexSpecies.abilities?.['0'] || 'Pressure',
+    ability: decisionAbility(ability, speciesName),
     item: named('items', item) || '',
     nature: 'Hardy',
     evs: { hp: 85, atk: 85, def: 85, spa: 85, spd: 85, spe: 85 },
@@ -144,7 +165,7 @@ function applyBoosts(mon: any, boosts: StatBoosts | undefined): void {
   }
 }
 
-function ourSets(request: any, quickWins: boolean): PokemonSet[] | null {
+function ourSets(request: any): PokemonSet[] | null {
   const slots: any[] = request?.side?.pokemon || [];
   if (slots.length === 0) return null;
   const activeMoves: any[] = request?.active?.[0]?.moves || [];
@@ -155,9 +176,10 @@ function ourSets(request: any, quickWins: boolean): PokemonSet[] | null {
       ? activeMoves.map((move: any) => move.id || move.move)
       : [];
     const moves = fromActive.length ? fromActive : (slot.moves || []);
-    const rawTera = quickWins
-      ? slot.teraType || (i === 0 ? request?.active?.[0]?.canTerastallize : undefined)
-      : undefined;
+    // Always mirror the request's tera type. A fresh gen9customgame invents
+    // canTerastallize from the set; without this the decision battle offers
+    // Tera after the live side has already used it (QW invalid choices).
+    const rawTera = slot.teraType || (i === 0 ? request?.active?.[0]?.canTerastallize : undefined);
     const set = toSet(
       speciesOf(slot.details, slot.ident),
       moves,
@@ -175,6 +197,29 @@ function ourSets(request: any, quickWins: boolean): PokemonSet[] | null {
 
 function knownFoes(position: LivePosition): FoeMon[] {
   return [position.foeActive, ...position.foeBench].filter((mon): mon is FoeMon => !!mon?.species);
+}
+
+/**
+ * Opt-in (search param foeUnseen: placeholder): append stand-ins for foe
+ * teammates that have not appeared, up to a full team. See placeholderSets.
+ */
+function withPlaceholders(foes: FoeMon[], teamSize = FOE_TEAM_SIZE): FoeMon[] {
+  if (foes.length === 0 || foes.length >= teamSize) return foes;
+  const extra = placeholderSets(foes.map(mon => mon.species), teamSize - foes.length);
+  return [
+    ...foes,
+    ...extra.map(set => ({
+      species: set.species,
+      level: set.level,
+      hp: 100,
+      maxhp: 100,
+      moves: set.moves,
+      item: set.item,
+      ability: set.ability,
+      itemUnknown: true,
+      abilityUnknown: true,
+    })),
+  ];
 }
 
 function foeSets(foes: FoeMon[]): { sets: PokemonSet[]; kept: FoeMon[] } {
@@ -201,12 +246,22 @@ function foeSets(foes: FoeMon[]): { sets: PokemonSet[]; kept: FoeMon[] } {
  * A @pkmn/sim battle whose `move N` / `switch N` indexes match the live request.
  * Slot 0 is the active pokemon. That is the same indexing the server uses.
  */
-export function buildDecisionBattle(position: LivePosition, options?: { quickWins?: boolean }): Battle | null {
+export interface DecisionBattleOptions {
+  quickWins?: boolean;
+  /** Fill unseen foe teammates with placeholders (opt-in config param). */
+  foePlaceholders?: boolean;
+}
+
+export function buildDecisionBattle(position: LivePosition, options?: DecisionBattleOptions): Battle | null {
   const request = position.request;
   if (!request || request.wait || request.teamPreview) return null;
-  const quickWins = options?.quickWins === true;
-  const ours = ourSets(request, quickWins);
-  const foe = foeSets(knownFoes(position));
+  // options.quickWins is retained for call-site compatibility; tera mirroring
+  // always runs. A fresh sim invents canTerastallize from the set, so the live
+  // request is the only source of truth after Tera has been spent.
+  void options?.quickWins;
+  const ours = ourSets(request);
+  const known = knownFoes(position);
+  const foe = foeSets(options?.foePlaceholders ? withPlaceholders(known) : known);
   if (!ours || foe.sets.length === 0) return null;
 
   try {
@@ -229,12 +284,10 @@ export function buildDecisionBattle(position: LivePosition, options?: { quickWin
       if (hp) applyFraction(mon, Number(hp[1]), Number(hp[2]), fainted);
       else if (fainted) applyFraction(mon, 0, 1, true);
       applyStatus(mon, condition, undefined);
-      if (quickWins) {
-        const already = slots[i]?.terastallized;
-        if (typeof already === 'string' && already) mon.terastallized = already;
-      }
+      const already = slots[i]?.terastallized;
+      if (typeof already === 'string' && already) mon.terastallized = already;
     });
-    if (quickWins && slots.some(slot => typeof slot?.terastallized === 'string' && slot.terastallized)) {
+    if (slots.some(slot => typeof slot?.terastallized === 'string' && slot.terastallized)) {
       for (const mon of battle.p1.pokemon) mon.canTerastallize = null;
     }
 
@@ -270,15 +323,13 @@ export function buildDecisionBattle(position: LivePosition, options?: { quickWin
       }
     }
 
-    if (quickWins) {
-      // The fresh sim offers Tera whenever the set has a type. The live request
-      // is the rule: once this side has terastallized, canTerastallize is gone.
-      const liveCanTera = request.active?.[0]?.canTerastallize;
-      if (typeof liveCanTera === 'string' && liveCanTera) {
-        if (!active.terastallized) active.canTerastallize = liveCanTera;
-      } else {
-        for (const mon of battle.p1.pokemon) mon.canTerastallize = null;
-      }
+    // The fresh sim offers Tera whenever the set has a type. The live request
+    // is the rule: once this side has terastallized, canTerastallize is gone.
+    const liveCanTera = request.active?.[0]?.canTerastallize;
+    if (typeof liveCanTera === 'string' && liveCanTera) {
+      if (!active.terastallized) active.canTerastallize = liveCanTera;
+    } else {
+      for (const mon of battle.p1.pokemon) mon.canTerastallize = null;
     }
 
     const force = isForceSwitch(request) || !!active.fainted;
@@ -290,6 +341,11 @@ export function buildDecisionBattle(position: LivePosition, options?: { quickWin
       if (slot) slot.revivalblessing = { id: 'revivalblessing' };
     }
     if (legalChoices(battle, 'p1').length === 0) return null;
+    // Read only by opt-in search priors (stats-prior.ts); no effect otherwise.
+    markFoeHidden(battle, foe.kept.map(mon => ({
+      itemUnknown: mon.itemUnknown === true,
+      abilityUnknown: mon.abilityUnknown === true,
+    })));
     return battle;
   } catch {
     return null;
@@ -304,6 +360,8 @@ export interface LiveConfigPlayer {
   }): Promise<{ choice: string; scores?: Array<{ choice: string; score: number }> }>;
   /** Exact 1-ply quick wins. The champion player leaves this unset. */
   quickWins?: boolean;
+  /** Config opted into foe placeholders (search param foeUnseen: placeholder). */
+  foePlaceholders?: boolean;
 }
 
 /**
@@ -318,7 +376,10 @@ export async function chooseLive(
   player?: LiveConfigPlayer | null,
 ): Promise<{ action: Action; score: number | null }> {
   if (!position) throw new Error('missing live position');
-  const battle = buildDecisionBattle(position, { quickWins: player?.quickWins === true });
+  const battle = buildDecisionBattle(position, {
+    quickWins: player?.quickWins === true,
+    foePlaceholders: player?.foePlaceholders === true,
+  });
   if (!battle) throw new Error('could not build a sim battle');
   const decision = player
     ? await player.decide({ battle, side: 'p1' })

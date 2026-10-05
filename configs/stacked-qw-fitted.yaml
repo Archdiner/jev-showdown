@@ -1,0 +1,10 @@
+name: stacked-qw-fitted
+extends: champion.yaml
+# QW search (tera + progress + foePrior) with the fitted-team leaf from #73.
+search:
+  id: exact-1ply-qw
+  params:
+    depth: 1
+    samples: 8
+evaluator:
+  id: fitted-team

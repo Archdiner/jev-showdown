@@ -1,0 +1,11 @@
+name: stacked-qw-fitted-unseen
+extends: stacked-qw-fitted.yaml
+# stacked-qw-fitted + unseen-foe placeholders: the decision battle gets a full
+# six-mon foe team (usage-prior stand-ins for unrevealed teammates), so a KO
+# of the last revealed foe is not scored as a won game.
+search:
+  id: exact-1ply-qw
+  params:
+    depth: 1
+    samples: 8
+    foeUnseen: placeholder

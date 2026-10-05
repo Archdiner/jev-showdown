@@ -61,6 +61,50 @@ export const SearchParamsSchema = z.object({
   variancePenalty: z.number().nonnegative().default(0),
   opponentModel: z.enum(['max-damage', 'uniform']).default('max-damage'),
   evalMode: z.enum(['hp', 'full']).default('hp'),
+  /**
+   * Opt-in foe set prior for exact-1ply-qw (see engine/exact/stats-prior.ts).
+   * Unset keeps QW's first-matching-set move fill and existing config ids.
+   * moves: role-posterior move fill. items: + posterior-mode hidden item.
+   * full: + posterior-mode hidden ability.
+   */
+  foeStats: z.enum(['off', 'moves', 'items', 'full']).optional(),
+  /**
+   * Opt-in: placeholder fills unseen foe teammates up to six in the decision
+   * battle, so KOing the last revealed foe is not scored as a won game.
+   * Unset keeps the revealed-only foe team and existing config ids.
+   */
+  foeUnseen: z.enum(['revealed', 'placeholder']).optional(),
+  /**
+   * Opt-in endgame deepening for exact-1ply-qw: search endgameDepth plies
+   * once at most endgameMons mons remain on both sides combined (unrevealed
+   * foes count as alive). Unset keeps the configured depth and config ids.
+   */
+  endgameMons: z.number().int().min(2).max(12).optional(),
+  endgameDepth: z.number().int().min(2).max(3).optional(),
+  /**
+   * Opt-in simultaneous-move solve for exact-1ply-qw: a matrix of own
+   * choices x up to replySolveReplies foe replies, solved as a zero-sum
+   * game. replySolveNashWeight blends the foe's equilibrium mix (1) with the
+   * modelled reply (0). Unset keeps the single modelled reply and config ids.
+   */
+  replySolveReplies: z.number().int().min(2).max(10).optional(),
+  replySolveSamples: z.number().int().min(1).max(16).optional(),
+  replySolveNashWeight: z.number().min(0).max(1).optional(),
+  /**
+   * Opt-in foe reply model for exact-1ply-qw: 'switch' uses the fitted
+   * switch model (switch-model.ts: P(switch) x ranked switches + damage-
+   * weighted moves, top replySwitchMax kept). Unset keeps the behavior
+   * layer's model (max-damage) and every existing config id.
+   */
+  replyModel: z.enum(['switch']).optional(),
+  replySwitchMax: z.number().int().min(1).max(6).optional(),
+  /**
+   * Opt-in belief tightening for exact-1ply-qw (client/foe-belief.ts): the
+   * decision battle's revealed foes get moves, hidden item and hidden ability
+   * from the SetInference posterior (speed order, damage rolls, hard filters,
+   * weather duration). Unset keeps the revealed-only foe and every config id.
+   */
+  foeBelief: z.boolean().optional(),
 }).strict();
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
 

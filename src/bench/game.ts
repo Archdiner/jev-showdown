@@ -59,6 +59,8 @@ export interface GameResult {
   information: InformationMode;
   crashed: boolean;
   error?: string;
+  /** Stack trace of a thrown crash (first frames), so bench crashes are debuggable. */
+  errorStack?: string;
   p1TurnTimes: number[];
   p2TurnTimes: number[];
   p1ConfigId: string;
@@ -177,13 +179,23 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         break;
       }
       if (p1Legal.length) {
-        const decision = await chooseSeen(p1, battle, 'p1', rng, gameId, job.seed, result.information, p1Legal);
+        const decision = await chooseSeen(p1, battle, 'p1', rng, gameId, job.seed, result.information, p1Legal, job.p1);
         if (decision.viewMiss) result.p1ViewMiss++;
         result.p1TurnTimes.push(decision.ms);
         notePlay(result, 'p1', p1Legal, decision);
-        if (!p1Legal.includes(decision.choice) && decision.choice !== 'default') result.p1Invalid++;
+        const invalid = noteInvalid(result, 'p1', p1Legal, decision.choice);
+        if (invalid) {
+          result.crashed = true;
+          result.error = invalid;
+          break;
+        }
         const ok = safeChoose(battle, 'p1', decision.choice);
-        if (!ok) result.p1Invalid++;
+        if (!ok) {
+          result.p1Invalid++;
+          result.crashed = true;
+          result.error = `p1 choice rejected by sim: ${decision.choice}`;
+          break;
+        }
         result.decisions?.push({
           side: 'p1',
           turn: battle.turn,
@@ -193,13 +205,23 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         });
       }
       if (!battle.ended && p2Legal.length) {
-        const decision = await chooseSeen(p2, battle, 'p2', rng, gameId, job.seed, result.information, p2Legal);
+        const decision = await chooseSeen(p2, battle, 'p2', rng, gameId, job.seed, result.information, p2Legal, job.p2);
         if (decision.viewMiss) result.p2ViewMiss++;
         result.p2TurnTimes.push(decision.ms);
         notePlay(result, 'p2', p2Legal, decision);
-        if (!p2Legal.includes(decision.choice) && decision.choice !== 'default') result.p2Invalid++;
+        const invalid = noteInvalid(result, 'p2', p2Legal, decision.choice);
+        if (invalid) {
+          result.crashed = true;
+          result.error = invalid;
+          break;
+        }
         const ok = safeChoose(battle, 'p2', decision.choice);
-        if (!ok) result.p2Invalid++;
+        if (!ok) {
+          result.p2Invalid++;
+          result.crashed = true;
+          result.error = `p2 choice rejected by sim: ${decision.choice}`;
+          break;
+        }
         result.decisions?.push({
           side: 'p2',
           turn: battle.turn,
@@ -221,6 +243,7 @@ export async function runGame(job: GameJob): Promise<GameResult> {
   } catch (error) {
     result.crashed = true;
     result.error = error instanceof Error ? error.message : String(error);
+    if (error instanceof Error && error.stack) result.errorStack = error.stack.split('\n').slice(0, 12).join('\n');
   }
 
   p1.bot?.endGame({ winner: result.winner, turns: result.turns, invalid: result.p1Invalid, situations: { ...result.p1Situations } });
@@ -242,12 +265,20 @@ async function chooseSeen(
   seed: number,
   information: InformationMode,
   legal: string[],
+  playerSpec: BenchPlayer,
 ): Promise<Awaited<ReturnType<typeof choose>> & { viewMiss?: boolean }> {
   if (information === 'full') return choose(player, battle, side, rng, gameId, seed);
   if (legal.length === 1 && legal[0] === 'default') {
     return { choice: 'default', ms: 0, configId: player.id };
   }
-  const viewed = ladderDecisionBattle(battle, side);
+  // Mirror live: QW (and any tera-enabled search) needs the request's tera
+  // state on the decision battle. buildDecisionBattle always syncs now, but
+  // pass quickWins so call sites stay aligned with the ladder path.
+  const viewed = ladderDecisionBattle(battle, side, {
+    quickWins: allowsTera(playerSpec),
+    foePlaceholders: wantsPlaceholders(playerSpec),
+    foeBelief: wantsBelief(playerSpec),
+  });
   if (!viewed) return { choice: legal[0] || 'default', ms: 0, configId: player.id, viewMiss: true };
   return choose(player, viewed, 'p1', rng, gameId, seed);
 }
@@ -273,6 +304,29 @@ async function choose(
   }
   const decision = await player.bot!.decide({ battle, side, rng, gameId, seed });
   return decision;
+}
+
+
+function noteInvalid(
+  result: GameResult,
+  side: SideId,
+  legal: string[],
+  choice: string,
+): string | null {
+  if (choice === 'default' || legal.includes(choice)) return null;
+  if (side === 'p1') result.p1Invalid++;
+  else result.p2Invalid++;
+  return `${side} invalid choice ${JSON.stringify(choice)}; legal=${JSON.stringify(legal)}`;
+}
+
+/** Config opted into unseen-foe placeholders (search param foeUnseen). */
+function wantsPlaceholders(player: BenchPlayer): boolean {
+  return isBotSpec(player) && player.config.search.params.foeUnseen === 'placeholder';
+}
+
+/** Config opted into the SetInference foe fill (search param foeBelief). */
+function wantsBelief(player: BenchPlayer): boolean {
+  return isBotSpec(player) && player.config.search.params.foeBelief === true;
 }
 
 function allowsTera(player: BenchPlayer): boolean {

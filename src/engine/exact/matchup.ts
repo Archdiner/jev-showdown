@@ -1,6 +1,6 @@
 import { Battle, Dex, Teams } from '@pkmn/sim';
 import { Pokemon as CalcPokemon } from '@smogon/calc';
-import { expectedDamage } from './max-damage.js';
+import { expectedDamage, speciesForCalc } from './max-damage.js';
 import { SideId, ensureGenerators, legalChoices } from './battle-utils.js';
 
 /**
@@ -53,17 +53,24 @@ export function likelyMoves(species: string, revealed: string[]): string[] {
 
 const maxHpCache = new Map<string, number>();
 
+/**
+ * Neutral-spread max HP. Cosmetic formes the sim picks for randbats
+ * (Alcremie-Matcha-Cream, Sawsbuck-Winter) are not in @smogon/calc's dex and
+ * make its constructor throw, so the name goes through speciesForCalc.
+ */
 export function estimatedMaxHp(species: string, level: number): number {
   const key = `${species}|${level}`;
   const cached = maxHpCache.get(key);
   if (cached) return cached;
-  const mon = new CalcPokemon(9, species, { level, evs: NEUTRAL_EVS, ivs: NEUTRAL_IVS });
+  const mon = new CalcPokemon(9, speciesForCalc(species), { level, evs: NEUTRAL_EVS, ivs: NEUTRAL_IVS });
   const hp = Math.max(1, mon.maxHP());
   maxHpCache.set(key, hp);
   return hp;
 }
 
 const damageCache = new Map<string, number>();
+/** Pure memo keyed on exact HP; bounded so long runs cannot exhaust memory. */
+const DAMAGE_CACHE_CAP = 200_000;
 
 function synth(species: string, level: number, hpFrac: number): any {
   const name = Dex.species.get(species).name || species;
@@ -91,6 +98,7 @@ export function cachedDamage(attacker: any, defender: any, move: string, weather
   const hit = damageCache.get(key);
   if (hit !== undefined) return hit;
   const damage = expectedDamage(attacker, defender, move, weather);
+  if (damageCache.size >= DAMAGE_CACHE_CAP) damageCache.clear();
   damageCache.set(key, damage);
   return damage;
 }

@@ -17,10 +17,12 @@ import switchProfile from '../../../experiments/switch-depth2/config.json' with 
 import { rankedSwitches } from './matchup.js';
 import { koProbability } from './ko-groups.js';
 import { applyFoePrior, progressPenalty } from './public.js';
+import { applyStatsPrior, foeHiddenOf, type StatsPriorOptions } from './stats-prior.js';
 import { pruneReplies, replyDistribution, WeightedChoice } from './switch-model.js';
 import { teamEval } from './team-eval.js';
 import { fittedTeamEval } from './fitted-eval.js';
 import { selectiveDepth2 } from './depth2.js';
+import { solveZeroSum } from './matrix-solve.js';
 import { createHash } from 'crypto';
 
 export interface SelectiveOptions {
@@ -87,6 +89,65 @@ export interface ExactConfig {
    * rollout. A four-move set is left as it is.
    */
   foePrior?: boolean;
+  /**
+   * With foePrior: fill the foe from the randbats usage posterior instead of
+   * the first matching set (opt-in; see stats-prior.ts).
+   */
+  statsPrior?: StatsPriorOptions;
+  /**
+   * Opt-in endgame deepening: search `depth` plies (with rollouts bound by
+   * the deadline) once at most `mons` unfainted mons remain on both sides
+   * combined. Unset keeps the configured depth everywhere.
+   */
+  endgame?: EndgameOptions;
+  /**
+   * Opt-in simultaneous-move solve at the root: score every own choice
+   * against several foe replies, solve the zero-sum matrix game, and rank
+   * own choices by value against a blend of the modelled reply and the
+   * foe's equilibrium mix. Unset keeps the single modelled reply.
+   */
+  replySolve?: ReplySolveOptions;
+}
+
+export interface ReplySolveOptions {
+  /** Foe replies in the matrix: damage-ranked moves first, then ranked switches. */
+  maxReplies: number;
+  /** RNG draws per cell outside the modelled reply's column (that one uses `samples`). */
+  samples: number;
+  /** Weight on the foe's equilibrium mix; the rest stays on the modelled reply. 1 = pure Nash. */
+  nashWeight: number;
+  iterations: number;
+}
+
+export interface EndgameOptions {
+  /** Deepen when our unfainted mons + the foe's not-yet-fainted mons <= this. */
+  mons: number;
+  /** Depth used in the endgame. */
+  depth: number;
+}
+
+/** Gen 9 Random Battle teams always have six mons; unrevealed foes are alive. */
+const RANDBATS_TEAM_SIZE = 6;
+
+/**
+ * Mons still in the game from the searching side's view. Our side counts
+ * unfainted mons. The decision battle may hold only the revealed foes, so
+ * the foe count is the team size minus the foes seen to faint.
+ */
+export function remainingMons(battle: Battle, sideId: SideId): number {
+  const me = battle.getSide(sideId);
+  const ours = me.pokemon.filter(mon => !mon.fainted && mon.hp > 0).length;
+  const foeTeam = Math.max(RANDBATS_TEAM_SIZE, me.foe.pokemon.length);
+  const foeFainted = me.foe.pokemon.filter(mon => mon.fainted || mon.hp <= 0).length;
+  return ours + Math.max(0, foeTeam - foeFainted);
+}
+
+/** The config this decision searches with: deeper when the endgame option fires. */
+export function endgameConfig(battle: Battle, sideId: SideId, config: ExactConfig): ExactConfig {
+  const endgame = config.endgame;
+  if (!endgame || endgame.depth <= config.depth) return config;
+  if (remainingMons(battle, sideId) > endgame.mons) return config;
+  return { ...config, depth: endgame.depth, rolloutDeadline: true };
 }
 
 /** True when the deadline has passed and the search already has a score to return. */
@@ -301,8 +362,9 @@ function ownChoices(battle: Battle, sideId: SideId, config: ExactConfig, atRoot:
  * Every branch is a clone of the real battle stepped with Battle.choose.
  */
 export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig = EXACT_1PLY): SearchTrace {
+  if (config.endgame) config = endgameConfig(battle, sideId, config);
   if (config.selective && config.depth >= 2) return selectiveDepth2(battle, sideId, config);
-  const working = config.foePrior ? withFoePrior(battle, sideId) : battle;
+  const working = config.foePrior ? withFoePrior(battle, sideId, config.statsPrior) : battle;
   const mine = ownChoices(working, sideId, config, true);
   if (mine.length === 0) return { choice: 'default', scores: [] };
   if (mine.length === 1) return { choice: mine[0], scores: [{ choice: mine[0], score: 0 }] };
@@ -315,6 +377,10 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
     return best;
   }, null);
   const predictedSwitch = Boolean(modal?.choice.startsWith('switch'));
+
+  if (config.replySolve) {
+    return solvedSearch(working, snap, sideId, mine, replies, config, config.replySolve, predictedSwitch);
+  }
 
   const scores: ScoredChoice[] = [];
   let best = mine[0];
@@ -345,9 +411,73 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
   };
 }
 
-function withFoePrior(battle: Battle, sideId: SideId): Battle {
+/** Foe replies for the matrix: the modelled replies, then damage-ranked moves, then ranked switches. */
+function matrixReplies(battle: Battle, opp: SideId, modelled: WeightedChoice[], cap: number): string[] {
+  const legal = legalChoices(battle, opp).filter(choice => !choice.includes('terastallize'));
+  const out: string[] = [];
+  const add = (choice: string) => {
+    if (out.length < cap && legal.includes(choice) && !out.includes(choice)) out.push(choice);
+  };
+  for (const row of modelled) add(row.choice);
+  const moves = legal.filter(choice => choice.startsWith('move '));
+  for (const row of replyWeights(battle, opp, moves)) add(row.choice);
+  for (const row of rankedSwitches(battle, opp, false)) add(row.choice);
+  for (const choice of legal) add(choice);
+  return out;
+}
+
+function solvedSearch(
+  working: Battle,
+  snap: string,
+  sideId: SideId,
+  mine: string[],
+  modelled: WeightedChoice[],
+  config: ExactConfig,
+  options: ReplySolveOptions,
+  predictedSwitch: boolean,
+): SearchTrace {
+  const opp = otherSide(sideId);
+  const columns = matrixReplies(working, opp, modelled, Math.max(1, options.maxReplies));
+  const modelProb = columns.map(choice => modelled.find(row => row.choice === choice)?.prob ?? 0);
+  const modelTotal = modelProb.reduce((sum, p) => sum + p, 0);
+  const rows: string[] = [];
+  const payoffs: number[][] = [];
+  for (const choice of mine) {
+    if (searchBudgetExpired(config.deadlineMs, rows.length)) break;
+    const penalty = config.progress ? progressPenalty(working, sideId, choice) : 0;
+    const cells = columns.map((reply, j) => {
+      const draws = modelProb[j] > 0 ? config.samples ?? 1 : options.samples;
+      return scoreChoice(snap, sideId, choice, config.depth, config, draws, [{ choice: reply, prob: 1 }], null).mean - penalty;
+    });
+    rows.push(choice);
+    payoffs.push(cells);
+  }
+  if (rows.length === 0) return { choice: mine[0], scores: [] };
+  const solution = solveZeroSum(payoffs, options.iterations);
+  const w = Math.min(1, Math.max(0, options.nashWeight));
+  const target = columns.map((_, j) => (1 - w) * (modelTotal > 0 ? modelProb[j] / modelTotal : 0) + w * solution.cols[j]);
+  const scores: ScoredChoice[] = rows.map((choice, i) => ({
+    choice,
+    score: payoffs[i].reduce((sum, v, j) => sum + v * target[j], 0),
+  }));
+  let bestIndex = 0;
+  for (let i = 1; i < scores.length; i++) {
+    const better = scores[i].score > scores[bestIndex].score + 1e-9;
+    const tie = Math.abs(scores[i].score - scores[bestIndex].score) <= 1e-9 && solution.rows[i] > solution.rows[bestIndex];
+    if (better || tie) bestIndex = i;
+  }
+  return { choice: rows[bestIndex], scores, predictedSwitch, answersPredictedSwitch: false };
+}
+
+function withFoePrior(battle: Battle, sideId: SideId, statsPrior?: StatsPriorOptions): Battle {
   const clone = cloneFromSnapshot(snapshot(battle));
-  applyFoePrior(clone, sideId);
+  if (statsPrior) {
+    // Hidden marks index p2 of the decision battle (our side is p1 there).
+    const hidden = otherSide(sideId) === 'p2' ? foeHiddenOf(battle) : undefined;
+    applyStatsPrior(clone, sideId, hidden, statsPrior);
+  } else {
+    applyFoePrior(clone, sideId);
+  }
   return clone;
 }
 

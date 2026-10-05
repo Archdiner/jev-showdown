@@ -1,0 +1,12 @@
+name: stacked-qw-fitted-nashmix
+extends: stacked-qw-fitted.yaml
+# stacked-qw-fitted + simultaneous-move solve, ranked against a 50/50 blend
+# of the modelled max-damage reply and the foe's equilibrium mix.
+search:
+  id: exact-1ply-qw
+  params:
+    depth: 1
+    samples: 8
+    replySolveReplies: 4
+    replySolveSamples: 3
+    replySolveNashWeight: 0.5

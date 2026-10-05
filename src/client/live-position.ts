@@ -27,6 +27,8 @@ function snap(mon: ClientPokemon): FoeMon | null {
     moves: [...(mon.moves || [])],
     boosts: boostsOf(mon),
     fainted: mon.fainted || mon.hp <= 0,
+    itemUnknown: !mon.item && !mon.lastItem && !mon.itemEffect,
+    abilityUnknown: !mon.ability,
   };
 }
 

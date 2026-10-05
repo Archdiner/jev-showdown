@@ -125,7 +125,9 @@ async function runSearch(
     return { choice, scores: [{ choice, score: 1 }] };
   }
   if (id === QUICK_WIN_SEARCH_ID) {
-    const model = ctx.behavior.exactModel || (params.opponentModel === 'uniform' ? 'uniform' : 'max-damage');
+    const model = params.replyModel === 'switch'
+      ? 'switch'
+      : ctx.behavior.exactModel || (params.opponentModel === 'uniform' ? 'uniform' : 'max-damage');
     const trace = exactSearch(battle, side, {
       ...EXACT_1PLY_QW,
       depth: params.depth,
@@ -133,6 +135,21 @@ async function runSearch(
       opponentModel: model,
       evalMode: evalModeOf(ctx),
       deadlineMs: ctx.deadlineMs,
+      statsPrior: statsPriorOf(params.foeStats),
+      ...(params.replyModel === 'switch' ? { maxReplies: params.replySwitchMax ?? 2 } : {}),
+      ...(params.endgameMons != null
+        ? { endgame: { mons: params.endgameMons, depth: params.endgameDepth ?? 2 } }
+        : {}),
+      ...(params.replySolveReplies != null
+        ? {
+            replySolve: {
+              maxReplies: params.replySolveReplies,
+              samples: params.replySolveSamples ?? 4,
+              nashWeight: params.replySolveNashWeight ?? 1,
+              iterations: 400,
+            },
+          }
+        : {}),
     });
     return trace;
   }
@@ -153,6 +170,11 @@ async function runSearch(
   const trace = outlined(battle, side, params, ctx, params.depth);
   if (params.samples > 1) trace.note = `samples=${params.samples} recorded; this battle is one world`;
   return trace;
+}
+
+function statsPriorOf(mode: SearchParams['foeStats']): ExactConfig['statsPrior'] {
+  if (!mode || mode === 'off') return undefined;
+  return { items: mode === 'items' || mode === 'full', abilities: mode === 'full' };
 }
 
 function useExact(id: string, params: SearchParams, ctx: SearchCtx): boolean {

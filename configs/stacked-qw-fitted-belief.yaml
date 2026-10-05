@@ -1,0 +1,12 @@
+name: stacked-qw-fitted-belief
+extends: stacked-qw-fitted.yaml
+# stacked-qw-fitted + belief tightening (#82 port): the decision battle's
+# revealed foes get moves / hidden item / hidden ability from the SetInference
+# posterior with the belief updater on (speed order, damage rolls, hard
+# filters, weather duration). Nothing else changes.
+search:
+  id: exact-1ply-qw
+  params:
+    depth: 1
+    samples: 8
+    foeBelief: true

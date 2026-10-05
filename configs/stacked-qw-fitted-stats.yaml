@@ -1,0 +1,10 @@
+name: stacked-qw-fitted-stats
+extends: stacked-qw-fitted.yaml
+# stacked-qw-fitted + randbats usage-posterior foe prior: role posterior from
+# revealed moves/item/ability fills hidden moves, item and ability.
+search:
+  id: exact-1ply-qw
+  params:
+    depth: 1
+    samples: 8
+    foeStats: full

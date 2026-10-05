@@ -1,0 +1,13 @@
+name: stacked-qw-fitted-nash
+extends: stacked-qw-fitted.yaml
+# stacked-qw-fitted + simultaneous-move solve: own choices x up to 4 foe
+# replies (modelled reply, damage-ranked moves, ranked switches), solved as
+# a zero-sum game; we best-respond to the foe's equilibrium mix.
+search:
+  id: exact-1ply-qw
+  params:
+    depth: 1
+    samples: 8
+    replySolveReplies: 4
+    replySolveSamples: 3
+    replySolveNashWeight: 1
