@@ -11,19 +11,18 @@ import { dailyReport } from './report.js';
 import { statusReport } from './status.js';
 import { supervise } from './supervisor.js';
 import { startLocalServer } from './local-server.js';
+import { OPS_USAGE, opsFlag, opsNumber, opsValue } from './args.js';
 
 function flag(name: string): boolean {
-  return process.argv.includes(`--${name}`);
+  return opsFlag(process.argv, name);
 }
 
 function opt(name: string): string | undefined {
-  const hit = process.argv.find(arg => arg.startsWith(`--${name}=`));
-  return hit ? hit.slice(name.length + 3) : undefined;
+  return opsValue(process.argv, name);
 }
 
 function num(name: string): number | undefined {
-  const value = opt(name);
-  return value === undefined ? undefined : Number(value);
+  return opsNumber(process.argv, name);
 }
 
 async function main(): Promise<void> {
@@ -43,6 +42,8 @@ async function main(): Promise<void> {
       once: flag('once'),
       local: flag('local'),
       server: opt('server'),
+      port: num('port'),
+      username: opt('username'),
       games: num('games'),
       runners: num('runners'),
       concurrency: num('concurrency'),
@@ -76,15 +77,7 @@ async function main(): Promise<void> {
     await dryRun();
     return;
   }
-  console.log(`usage: npm run ops -- factory|gatekeeper|live|analyst|status|report|supervise|dry-run
-  factory, gatekeeper, live, analyst, supervise accept --once
-  live --local uses the local server instead of the ladder
-  live --runners=N --concurrency=K
-  gatekeeper --bootstrap checks configs/champion.yaml and does not label it without paired games
-  analyst also tails logs/ladder and live-runs JSONL. --ladder-dir and --live-runs replace those defaults.
-  Opponent priors use the foe's seat from ourSide or the |player| line. A scraped replay counts both players.
-  report --daily is the plain-English day summary
-Facilities share the graph and the JSONL logs. They do not import each other.`);
+  console.log(OPS_USAGE);
 }
 
 async function dryRun(): Promise<void> {

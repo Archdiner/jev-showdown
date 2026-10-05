@@ -9,6 +9,7 @@ import { AccountBlock, AccountBlockedError, parseFormatRating, ShowdownClient } 
 import { BattleDriver, GameSummary } from '../client/battle-driver.js';
 import { DecisionClient } from '../client/decision-client.js';
 import { startLocalServer } from '../client/local-server.js';
+import { writeLadderRun } from '../client/ladder-run.js';
 import { safeError, toID } from '../client/ids.js';
 import { EngineName, MAX_LADDER_CONCURRENCY, parseEngine } from '../client/engines.js';
 import {
@@ -23,7 +24,6 @@ import {
   installDrainSignals,
   LiveDrain,
   runDrainFile,
-  runMetaFile,
   shouldFinishSeries,
   watchDrainFiles,
 } from '../client/drain.js';
@@ -483,6 +483,13 @@ async function runLocalSeries(
   }
 }
 
+function ladderIdentity(opts: LadderOptions): { username: string; local: boolean } {
+  return {
+    local: opts.local,
+    username: opts.username || (opts.local ? 'BotAlpha' : process.env.SHOWDOWN_USERNAME || ''),
+  };
+}
+
 async function runRemote(
   opts: LadderOptions,
   drain: LiveDrain,
@@ -490,8 +497,7 @@ async function runRemote(
   admission: SearchAdmission,
   identity: LadderIdentity,
 ): Promise<GameSummary[]> {
-  const local = opts.local;
-  const username = opts.username || (local ? 'BotAlpha' : process.env.SHOWDOWN_USERNAME || '');
+  const { username, local } = ladderIdentity(opts);
   const password = local ? '' : (process.env.SHOWDOWN_PASSWORD || '');
   if (!username || (!local && !password)) {
     throw new Error('Set SHOWDOWN_USERNAME and SHOWDOWN_PASSWORD. They are not read from source files.');
@@ -586,8 +592,7 @@ function report(summaries: GameSummary[], opts: LadderOptions, identity: LadderI
 }
 
 async function runCheck(opts: LadderOptions): Promise<void> {
-  const local = opts.local;
-  const username = opts.username || (local ? 'BotAlpha' : process.env.SHOWDOWN_USERNAME || '');
+  const { username, local } = ladderIdentity(opts);
   const password = local ? '' : (process.env.SHOWDOWN_PASSWORD || '');
   if (!username || (!local && !password)) {
     throw new Error('Set SHOWDOWN_USERNAME and SHOWDOWN_PASSWORD. They are not read from source files.');
@@ -711,7 +716,7 @@ async function main(): Promise<void> {
     console.log('[ladder] loading randbats data');
     await dataLoader.load(gen9RandomBattle);
 
-    const session = openDrain(opts.engine, identity);
+    const session = openDrain(opts.engine, identity, ladderIdentity(opts));
     const metrics = openLiveMetrics(opts, identity);
     const admission = openAdmission(opts);
     try {
@@ -730,12 +735,14 @@ async function main(): Promise<void> {
   }
 }
 
-function openDrain(engine: string, identity: LadderIdentity): { drain: LiveDrain; close(): void } {
+function openDrain(
+  engine: string,
+  identity: LadderIdentity,
+  account: { username: string; local: boolean },
+): { drain: LiveDrain; close(): void } {
   const runId = `${Date.now()}`;
   const drain = new LiveDrain();
-  const meta = runMetaFile(runId);
-  fs.mkdirSync(path.dirname(meta), { recursive: true });
-  fs.writeFileSync(meta, JSON.stringify({
+  writeLadderRun('live-runs', {
     runId,
     pid: process.pid,
     engine,
@@ -744,9 +751,11 @@ function openDrain(engine: string, identity: LadderIdentity): { drain: LiveDrain
     gitSha: identity.gitSha,
     configSource: identity.source,
     configPath: identity.configPath,
+    username: account.username,
+    local: account.local,
     drainFile: runDrainFile(runId),
     globalDrainFile: 'state/DRAIN',
-  }, null, 2));
+  });
   console.log(`[ladder] pid=${process.pid} run=${runId}`);
   console.log(`[ladder] drain: kill -USR1 ${process.pid}`);
   console.log(`[ladder] drain: kill -TERM ${process.pid}`);
