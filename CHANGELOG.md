@@ -8,6 +8,14 @@ Three blocks are separate config flags. The game plan is asynchronous (turn 1, f
 
 Honest bench, hidden information, 52 pairs (104 games), sides swapped, 509 randbats species. `hybrid-core` (search only) vs exact-1ply: 55W-49L-0T, Wilson 95% 43.4–62.2%, invalid 0, crashes 0, timeouts 0, p50 144ms, p95 196ms. Vs max-damage: 67W-37L-0T, Wilson 95% 54.9–73.0%, invalid 0, crashes 0, timeouts 0, p50 149ms, p95 215ms. Commit `a7d4dfe`. The plan and judgment screens did not finish: the Vercel AI Gateway answered `http_402` (credit balance required) after the first successful calls. An every-turn arm calls the model on every turn with the compact full-section brief and the search ranking. The margin still rejects a pick that is too far behind the best score. Qwen stays on Cerebras at medium effort, Opus is low, and Grok 4.7 is effort `none`. A wide-margin Qwen profile sets the margin to 3.
 
+## A ladder batch no longer dies on a wall-clock deadline
+
+`./run-live.sh --games 30 --engine search --concurrency 3` used to set a timer of 3 minutes per wave of games (30 minutes for that batch). When the timer fired it rejected the batch, printed `Timed out after N/M games`, and exited. Games still on the ladder were left without a client. Showdown's disconnect timer then forfeited them about a minute later. Real games plus queue time are longer than 3 minutes each, so a 30-game batch at concurrency 3 hit this on essentially every run.
+
+The runner now has no deadline while battles are moving. A turn, a request, a search update, or a finished game resets an idle window (`--idle-ms`, default 20 minutes). If nothing moves for that long, the runner stops queueing new games and lets the ones already open finish, then exits. The summary and the log say `endReason=completed`, `endReason=drained`, or `endReason=stalled`. A stall is still a failure (exit code 1). A drain you requested is not.
+
+The sentinel flags both the old `Timed out after` line and a batch that ends `stalled` or `timeout` as P1 (`runner-exit-undrained`). On a Mac, where `/proc` does not exist, the process list comes from `ps`.
+
 ## Fitted team eval and selective depth-2 search
 
 The leaf score is no longer only HP and faints. `fitted-team` averages the 1v1 matchup of every remaining Pokémon (Sarantinos 2022), then adds speed control, hazard chip on each side unless the Pokémon holds Heavy-Duty Boots, status, boosts, whether Tera is still available, and how many healthy checks remain. The weights are a logistic regression fit on self-play (even seeds max-damage and sometimes Terastallize; odd seeds play a random legal choice). Seeds split 60% train, 20% dev, 20% held-out before the fit. Held-out was scored once, after the weights were frozen. The randbats generator covers 508 species. `eval-weights.json` is that fit.

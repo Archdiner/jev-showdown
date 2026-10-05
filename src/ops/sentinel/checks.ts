@@ -73,6 +73,13 @@ export const CHECKS: InvariantCheck[] = [
     detect: runnerDown,
   },
   {
+    id: 'runner-exit-undrained',
+    severity: 'P1',
+    title: 'The ladder runner exited without a drain request, or a batch ended on a timeout or stall',
+    suggestedFix: 'A healthy batch has no wall-clock deadline. On a stall, stop searching and let in-flight games finish, then restart the ladder. A drain you requested (SIGTERM, SIGUSR1, or a drain file) is not this incident.',
+    detect: runnerExitUndrained,
+  },
+  {
     id: 'ops-worker-missing',
     severity: 'P1',
     title: 'An ops worker is missing while the loop is up',
@@ -395,6 +402,35 @@ function drainPending(ctx: SentinelContext): CheckHit[] {
     detail: old.map(drain => `${drain.path} is ${Math.round((ctx.now - drain.mtimeMs) / 60000)} min old`).join('; '),
     evidence: old.map(drain => ({ file: drain.path, detail: `mtime age ${Math.round((ctx.now - drain.mtimeMs) / 1000)}s` })),
   }];
+}
+
+function runnerExitUndrained(ctx: SentinelContext): CheckHit[] {
+  const undrained = ctx.batchEnds.filter(item => item.endReason === 'undrained-timeout');
+  const stalled = ctx.batchEnds.filter(item => item.endReason === 'stalled' || item.endReason === 'timeout');
+  const hits: CheckHit[] = [];
+  if (undrained.length > 0) {
+    hits.push({
+      key: 'undrained-exit',
+      detail: undrained.map(item => item.detail).join('; '),
+      evidence: undrained.slice(0, 8).map(item => ({
+        file: item.file,
+        line: item.line,
+        detail: item.detail,
+      })),
+    });
+  }
+  if (stalled.length > 0) {
+    hits.push({
+      key: 'batch-stall',
+      detail: stalled.map(item => item.detail).join('; '),
+      evidence: stalled.slice(0, 8).map(item => ({
+        file: item.file,
+        line: item.line,
+        detail: item.detail,
+      })),
+    });
+  }
+  return hits;
 }
 
 function runnerDown(ctx: SentinelContext): CheckHit[] {
