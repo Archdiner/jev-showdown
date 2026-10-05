@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { Battle, PRNG } from '@pkmn/sim';
 import { Action } from '../../types/index.js';
 import { SideId, legalChoices } from './battle-utils.js';
@@ -18,38 +19,41 @@ export interface Decision {
   answersPredictedSwitch?: boolean;
 }
 
-function elapsedMs(start: NodeJS.CpuUsage): number {
-  // The host forks this VM and the wall clock jumps by minutes. That is
-  // not a slow search. CPU time still counts a garbage-collection pause.
-  const used = process.cpuUsage(start);
-  return (used.user + used.system) / 1000;
+function threadCpuMs(): number {
+  // /proc/thread-self is this worker only. process.cpuUsage() sums every
+  // worker in the process, and Date.now() jumps when the host forks the VM.
+  // A garbage-collection pause on this thread still counts. Clock ticks are 10ms.
+  const stat = readFileSync('/proc/thread-self/stat', 'utf8');
+  const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+  const ticks = Number(fields[11]) + Number(fields[12]);
+  return ticks * 10;
 }
 
 export async function decide(spec: PolicySpec, battle: Battle, side: SideId, rng: PRNG): Promise<Decision> {
-  const started = process.cpuUsage();
+  const started = threadCpuMs();
   const legal = legalChoices(battle, side);
   if (legal.length === 0) {
-    return { choice: 'default', ms: elapsedMs(started) };
+    return { choice: 'default', ms: threadCpuMs() - started };
   }
 
   if (spec.kind === 'random') {
     const choice = legal[rng.random(legal.length)];
-    return { choice, ms: elapsedMs(started) };
+    return { choice, ms: threadCpuMs() - started };
   }
 
   if (spec.kind === 'maxdamage') {
-    return { choice: maxDamageChoice(battle, side, legal), ms: elapsedMs(started) };
+    return { choice: maxDamageChoice(battle, side, legal), ms: threadCpuMs() - started };
   }
 
   if (spec.kind === 'legacy') {
     const choice = await legacyChoice(battle, side, legal);
-    return { choice, ms: elapsedMs(started) };
+    return { choice, ms: threadCpuMs() - started };
   }
 
   const trace = exactSearch(battle, side, spec.config);
   return {
     choice: trace.choice,
-    ms: elapsedMs(started),
+    ms: threadCpuMs() - started,
     scores: trace.scores,
     predictedSwitch: trace.predictedSwitch,
     answersPredictedSwitch: trace.answersPredictedSwitch,
