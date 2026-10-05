@@ -55,6 +55,11 @@ export interface BuiltBot {
 
 export type ConfigSource = string | BotSpec | LoadedConfig | RawConfig;
 
+/** Search must stop at the tighter of the config budget and the env profile cap. */
+export function searchDeadline(now: number, timeBudgetMs: number, timeLimitMs: number): number {
+  return now + Math.min(timeBudgetMs, timeLimitMs);
+}
+
 export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overrides: BuildOverrides = {}): BuiltBot {
   ensureLayers();
   const loaded = materializeSource(source);
@@ -119,6 +124,7 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
       const activeLayerIds = layerIdsOf(activeConfig);
       const plan = await planFor(active, activeConfig, input, client, spend, runtime);
       const legal = legalChoices(input.battle, input.side);
+      const budget = Math.min(activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs);
       const trace = legal.length === 0
         ? { choice: 'default', scores: [] as Array<{ choice: string; score: number }>, predictedSwitch: undefined, answersPredictedSwitch: undefined }
         : await active.search.search(input.battle, input.side, {
@@ -128,6 +134,7 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
           rng,
           rating: input.rating,
           variantId: input.variantId,
+          deadlineMs: searchDeadline(Date.now(), activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs),
         });
       let scores = trace.scores.length ? trace.scores : [{ choice: trace.choice, score: 0 }];
       let choice = applyPolicies(active, input.battle, input.side, legal, plan, scores);
@@ -143,7 +150,6 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
         }
       }
       const ms = Date.now() - started;
-      const budget = Math.min(activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs);
       active.context.remember(input.battle, input.side, choice);
       const decision: AttributedDecision = {
         choice,

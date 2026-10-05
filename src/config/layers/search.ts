@@ -8,7 +8,7 @@ import {
 } from '../../engine/exact/battle-utils.js';
 import { maxDamageChoice } from '../../engine/exact/max-damage.js';
 import { decide as legacyDecide } from '../../engine/exact/policies.js';
-import { exactSearch, type ExactConfig } from '../../engine/exact/search.js';
+import { exactSearch, searchBudgetExpired, type ExactConfig } from '../../engine/exact/search.js';
 import { register } from '../registry.js';
 import { SearchParamsSchema, type SearchParams } from '../schema.js';
 import type { GamePlan } from '../interfaces.js';
@@ -32,6 +32,8 @@ export interface SearchCtx {
   rating?: number;
   /** Live Thompson arm for this game, when the facility drew one. */
   variantId?: string;
+  /** Wall-clock deadline. Search returns the ranking it has when this passes. */
+  deadlineMs?: number;
 }
 
 export interface SearchImpl {
@@ -80,13 +82,13 @@ async function runSearch(
     return { choice: decision.choice, scores: decision.scores ?? [] };
   }
   if (id === 'mcts-stub') {
-    const trace = exactSearch(battle, side, exactConfig(params, 'max-damage', 'hp', 1));
+    const trace = exactSearch(battle, side, exactConfig(params, 'max-damage', 'hp', 1, ctx.deadlineMs));
     return { ...trace, note: 'mcts-stub delegates the rollout to exact 1-ply' };
   }
   if (useExact(id, params, ctx)) {
     const model = ctx.behavior.exactModel || params.opponentModel;
     const depth = id === 'greedy-1ply' ? params.depth : params.depth;
-    return exactSearch(battle, side, exactConfig(params, model, ctx.evaluate.kind === 'full' ? 'full' : 'hp', depth));
+    return exactSearch(battle, side, exactConfig(params, model, ctx.evaluate.kind === 'full' ? 'full' : 'hp', depth, ctx.deadlineMs));
   }
   const trace = outlined(battle, side, params, ctx, params.depth);
   if (params.samples > 1) trace.note = `samples=${params.samples} recorded; this battle is one world`;
@@ -101,13 +103,14 @@ function useExact(id: string, params: SearchParams, ctx: SearchCtx): boolean {
   return ctx.behavior.exactModel != null;
 }
 
-function exactConfig(
+export function exactConfig(
   params: SearchParams,
-  opponentModel: 'max-damage' | 'uniform',
+  opponentModel: ExactConfig['opponentModel'],
   evalMode: 'hp' | 'full',
-  depth: number
+  depth: number,
+  deadlineMs?: number,
 ): ExactConfig {
-  return { depth, opponentModel, evalMode, errorAsLoss: false };
+  return { depth, opponentModel, evalMode, errorAsLoss: false, samples: params.samples, deadlineMs };
 }
 
 function outlined(battle: Battle, side: SideId, params: SearchParams, ctx: SearchCtx, depth: number): SearchTrace {
@@ -115,10 +118,14 @@ function outlined(battle: Battle, side: SideId, params: SearchParams, ctx: Searc
   if (legal.length === 0) return { choice: 'default', scores: [] };
   if (legal.length === 1) return { choice: legal[0], scores: [{ choice: legal[0], score: 0 }] };
   const snap = snapshot(battle);
-  const scores = legal.map(choice => ({
-    choice,
-    score: scoreChoice(snap, side, choice, params, ctx, depth),
-  }));
+  const scores: Array<{ choice: string; score: number }> = [];
+  for (const choice of legal) {
+    if (searchBudgetExpired(ctx.deadlineMs, scores.length)) break;
+    scores.push({
+      choice,
+      score: scoreChoice(snap, side, choice, params, ctx, depth),
+    });
+  }
   scores.sort((a, b) => b.score - a.score || a.choice.localeCompare(b.choice));
   return { choice: scores[0].choice, scores };
 }
@@ -138,6 +145,7 @@ function scoreChoice(
   const values: number[] = [];
   const weights: number[] = [];
   for (const line of lines) {
+    if (searchBudgetExpired(ctx.deadlineMs, values.length)) break;
     values.push(leaf(cloneFromSnapshot(snap), side, choice, line.choice, params, ctx, depth));
     weights.push(line.weight);
   }

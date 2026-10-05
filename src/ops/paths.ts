@@ -41,9 +41,59 @@ export function opsPaths(root = process.env.OPS_DIR || DEFAULT_ROOT): OpsPaths {
   };
 }
 
+/** POSIX appends are atomic up to PIPE_BUF. Keep each JSONL record inside that. */
+export const JSONL_LINE_MAX = 4096;
+
+export function jsonlLine(record: unknown): string {
+  const encode = (value: unknown) => `${JSON.stringify(value)}\n`;
+  const fits = (line: string) => Buffer.byteLength(line) <= JSONL_LINE_MAX;
+  if (fits(encode(record))) return encode(record);
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return encode({ truncated: true });
+  const copy: Record<string, unknown> = { ...(record as Record<string, unknown>), truncated: true };
+  const keys = Object.keys(copy)
+    .filter(key => typeof copy[key] === 'string')
+    .sort((a, b) => String(copy[b]).length - String(copy[a]).length);
+  for (const key of keys) {
+    let text = String(copy[key]);
+    while (text.length > 0) {
+      text = text.slice(0, Math.floor(text.length / 2));
+      copy[key] = text;
+      const line = encode(copy);
+      if (fits(line)) return line;
+      if (text.length < 8) break;
+    }
+    copy[key] = '';
+    const emptied = encode(copy);
+    if (fits(emptied)) return emptied;
+  }
+  return encode({ truncated: true });
+}
+
 export function appendJsonl(file: string, record: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, `${JSON.stringify(record)}\n`);
+  fs.appendFileSync(file, jsonlLine(record));
+}
+
+/** Parse complete lines. A trailing partial line is left unconsumed. A bad line is skipped. */
+export function consumeJsonl(buf: Buffer): { records: unknown[]; bytes: number; corrupt: number } {
+  let consumed = 0;
+  let corrupt = 0;
+  const records: unknown[] = [];
+  let start = 0;
+  for (let index = 0; index < buf.length; index++) {
+    if (buf[index] !== 0x0a) continue;
+    const line = buf.subarray(start, index).toString('utf8').trim();
+    if (line) {
+      try {
+        records.push(JSON.parse(line));
+      } catch {
+        corrupt += 1;
+      }
+    }
+    start = index + 1;
+    consumed = start;
+  }
+  return { records, bytes: consumed, corrupt };
 }
 
 export function readJsonl<T>(file: string): T[] {

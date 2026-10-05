@@ -7,7 +7,7 @@ import { GatewayClient } from '../llm/gateway-client.js';
 import { LossReviewer, writeFindingAsHypothesis, type LossFinding } from '../llm/loss-reviewer.js';
 import { openDb } from './db.js';
 import { beat } from './heartbeat.js';
-import { appendJsonl, type OpsPaths } from './paths.js';
+import { appendJsonl, consumeJsonl, type OpsPaths } from './paths.js';
 import { observeLog, readCounts, scrapeReplay, writePriors } from './priors.js';
 import { enqueue } from './queue.js';
 
@@ -30,14 +30,15 @@ export async function runAnalyst(paths: OpsPaths, opts: { once?: boolean; replay
   }
   let reviewed = 0;
   do {
-    const games = unreadGames(paths);
-    for (const game of games) {
-      if (seen(paths, game.id)) continue;
+    const batch = unreadGames(paths);
+    if (batch.corrupt > 0) beat(paths, 'analyst', 'error', `log-corrupt ${batch.corrupt}`);
+    for (const game of batch.games) {
+      if (!game?.id || seen(paths, game.id)) continue;
       await reviewGame(paths, game);
       markSeen(paths, game.id);
       reviewed += 1;
     }
-    writeOffset(paths);
+    writeOffset(paths, batch.next);
     beat(paths, 'analyst', 'ok', `reviewed ${reviewed}`);
     if (opts.once) break;
     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -113,15 +114,20 @@ async function reviewLoss(paths: OpsPaths, game: LiveGame, calcText: string): Pr
   };
 }
 
-function unreadGames(paths: OpsPaths): LiveGame[] {
-  if (!fs.existsSync(paths.liveGames)) return [];
+function unreadGames(paths: OpsPaths): { games: LiveGame[]; next: number; corrupt: number } {
+  if (!fs.existsSync(paths.liveGames)) return { games: [], next: 0, corrupt: 0 };
   const size = fs.statSync(paths.liveGames).size;
   const offset = Math.min(readOffset(paths), size);
   const fd = fs.openSync(paths.liveGames, 'r');
   try {
     const buf = Buffer.alloc(size - offset);
     fs.readSync(fd, buf, 0, buf.length, offset);
-    return buf.toString('utf8').split('\n').map(line => line.trim()).filter(Boolean).map(line => JSON.parse(line) as LiveGame);
+    const parsed = consumeJsonl(buf);
+    return {
+      games: parsed.records.filter((row): row is LiveGame => Boolean(row && typeof row === 'object' && 'id' in row)),
+      next: offset + parsed.bytes,
+      corrupt: parsed.corrupt,
+    };
   } finally {
     fs.closeSync(fd);
   }
@@ -132,9 +138,8 @@ function readOffset(paths: OpsPaths): number {
   return Number(fs.readFileSync(paths.analystOffset, 'utf8')) || 0;
 }
 
-function writeOffset(paths: OpsPaths): void {
-  const size = fs.existsSync(paths.liveGames) ? fs.statSync(paths.liveGames).size : 0;
-  fs.writeFileSync(paths.analystOffset, String(size));
+function writeOffset(paths: OpsPaths, offset: number): void {
+  fs.writeFileSync(paths.analystOffset, String(offset));
 }
 
 function seen(paths: OpsPaths, id: string): boolean {

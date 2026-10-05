@@ -68,6 +68,7 @@ async function main(): Promise<void> {
   }
   if (command === 'supervise' || command === 'supervisor') {
     await supervise({ once: flag('once'), local: flag('local'), server: opt('server') });
+    if (process.exitCode) process.exit(process.exitCode);
     return;
   }
   if (command === 'dry-run') {
