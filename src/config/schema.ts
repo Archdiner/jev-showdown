@@ -64,6 +64,46 @@ export const SearchParamsSchema = z.object({
 }).strict();
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
 
+/**
+ * Strategist-only knobs. Registered on the `strategist` search id so other
+ * search configs keep the smaller schema and the same config hash.
+ */
+export const StrategistParamsSchema = z.object({
+  depth: z.number().int().min(1).max(3).default(1),
+  samples: z.number().int().min(1).max(16).default(1),
+  /** Hard cap for one decision, before the live clock shrinks it. */
+  timeBudgetMs: z.number().int().positive().default(14000),
+  risk: z.enum(['expected-value', 'minimax', 'risk-averse']).default('expected-value'),
+  variancePenalty: z.number().nonnegative().default(0),
+  opponentModel: z.enum(['max-damage', 'uniform']).default('max-damage'),
+  evalMode: z.enum(['hp', 'full']).default('hp'),
+  /** `critical` calls Grok on plan-changing turns. `always` calls it every turn. */
+  planMode: z.enum(['critical', 'always']).default('critical'),
+  /**
+   * Grok 4.7 has no catalog `none`, but the gateway accepts it and it reasons less than the default.
+   * Measured on a compact plan: default ~17s and ~1200 reasoning tokens; `none` about 5–9s.
+   */
+  reasoningEffort: z.enum(['none', 'low', 'medium', 'high', 'xhigh']).default('none'),
+  /** Abort the plan call. Streaming does not help: content starts after reasoning. */
+  grokTimeoutMs: z.number().int().positive().default(11000),
+  /** Token budget for the plan brief. The same section renderer used by the full brief. */
+  planTokens: z.number().int().positive().default(320),
+  /** HP fraction change that counts as a big swing since the previous decision. */
+  hpSwing: z.number().min(0).max(1).default(0.4),
+  /** Alive count that marks the endgame transition. */
+  endgameMons: z.number().int().min(1).max(6).default(2),
+  /**
+   * HP-eval points subtracted per consecutive switch that did not change the foe,
+   * faint them, or take a chunk of their HP. The veto margin is 1.
+   */
+  switchCost: z.number().nonnegative().default(1.1),
+  /** Time left for Jev after the plan wait. */
+  jevReserveMs: z.number().int().nonnegative().default(2500),
+  /** Sim lead required to replace the proposal. */
+  vetoMargin: z.number().nonnegative().default(1),
+}).strict();
+export type StrategistParams = z.infer<typeof StrategistParamsSchema>;
+
 export const EvaluatorParamsSchema = z.object({
   weights: WeightsSchema.default({}),
 }).strict();

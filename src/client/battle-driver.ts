@@ -355,7 +355,12 @@ export class BattleDriver extends EventEmitter {
       side,
     });
     if (!battle) return null;
-    const decision = await bot.decide({ battle, side, gameId: room.roomId });
+    const decision = await bot.decide({
+      battle,
+      side,
+      gameId: room.roomId,
+      secondsLeft: room.secondsLeft,
+    });
     return {
       action: choiceStringToAction(decision.choice),
       score: decision.scores[0]?.score ?? null,

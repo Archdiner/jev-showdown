@@ -5,6 +5,7 @@ import { renderContextBrief } from './context-brief.js';
 import { GatewayClient } from './gateway-client.js';
 import type { EvaluateQuestion } from './gateway-client.js';
 import { JEV_MODEL_ID } from './models.js';
+import { switchValueCost } from './switch-streak.js';
 
 export const JEV_TIMEOUT_MS = 2_500;
 
@@ -35,6 +36,12 @@ export async function scoreWithJev(args: {
   side: SideId;
   client?: GatewayClient;
   timeoutMs?: number;
+  /** Cached game plan. Jev scores this turn against it. */
+  planText?: string;
+  /** Consecutive switches that have not changed the board. */
+  switchNote?: string;
+  switchStreak?: number;
+  switchProgress?: boolean;
 }): Promise<JevTurnScore> {
   const started = Date.now();
   const legal = jevChoices(args.battle, args.side).slice(0, 8);
@@ -59,24 +66,34 @@ export async function scoreWithJev(args: {
       criteria: { true: 'they switch', false: 'they stay' },
     },
   };
+  const streak = args.switchStreak ?? 0;
+  const progress = args.switchProgress !== false;
   legal.forEach((choice, index) => {
     const id = `c${index}`;
+    const loop = !progress && streak > 0 && choice.startsWith('switch ')
+      ? ` Consecutive switches without progress: ${streak}. Another switch gives up the turn again.`
+      : '';
     questions[`value_${id}`] = {
       type: 'score',
-      instructions: `Value of ${choice}. Switches, status, setup, and protect can be valuable even with no damage.`,
+      instructions: `Value of ${choice}. Switches, status, setup, and protect can be valuable even with no damage.${loop}`,
       criteria: LEVELS,
     };
     questions[`risk_${id}`] = {
       type: 'score',
-      instructions: `Risk of ${choice}. Higher means we are more likely to lose a Pokemon or the win condition.`,
+      instructions: `Risk of ${choice}. Higher means we are more likely to lose a Pokemon or the win condition.${loop}`,
       criteria: RISKS,
     };
   });
 
+  const state = [
+    renderContextBrief(args.battle, args.side).text,
+    args.planText || '',
+    args.switchNote || '',
+  ].filter(Boolean).join('\n');
   client.startTurn();
   const result = await client.evaluate({
     model: JEV_MODEL_ID,
-    state: renderContextBrief(args.battle, args.side).text,
+    state,
     questions,
   });
   client.endTurn();
@@ -96,8 +113,10 @@ export async function scoreWithJev(args: {
   const matchup = answers.matchup?.score;
   const switchP = answers.opponentWillSwitch?.probability;
   if (Object.keys(values).length === 0) return empty('unusable_answers', latencyMs, result.metrics.costUsd);
+  const penalties: Record<string, number> = {};
+  for (const choice of Object.keys(values)) penalties[choice] = switchValueCost(choice, streak, progress);
   return {
-    choice: bestChoice(values, risks),
+    choice: bestChoice(values, risks, penalties),
     source: 'jev',
     matchup: typeof matchup === 'number' ? clamp01(matchup / (LEVELS.length - 1)) : null,
     switchProbability: typeof switchP === 'number' ? clamp01(switchP) : null,
@@ -136,11 +155,15 @@ export function jevChoices(battle: Battle, side: SideId): string[] {
   return [...base, ...base.filter(choice => choice.startsWith('move ')).map(choice => `${choice} terastallize`)];
 }
 
-function bestChoice(values: Record<string, number>, risks: Record<string, number>): string | null {
+function bestChoice(
+  values: Record<string, number>,
+  risks: Record<string, number>,
+  penalties: Record<string, number> = {},
+): string | null {
   let best: string | null = null;
   let bestNet = -Infinity;
   for (const [choice, value] of Object.entries(values)) {
-    const net = value - 0.25 * (risks[choice] ?? 0);
+    const net = value - 0.25 * (risks[choice] ?? 0) - (penalties[choice] ?? 0);
     if (net > bestNet) {
       bestNet = net;
       best = choice;

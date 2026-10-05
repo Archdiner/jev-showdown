@@ -28,7 +28,7 @@ import type { MetaAdjustment, MetaImpl } from './layers/meta.js';
 import type { ModelsImpl } from './layers/models.js';
 import type { BehaviorImpl, SetInferenceImpl } from './layers/opponent.js';
 import type { PolicyImpl } from './layers/policies.js';
-import type { SearchImpl } from './layers/search.js';
+import type { SearchImpl, SearchTrace } from './layers/search.js';
 import { createLogger, type DecisionLogger, type GameLogRecord } from './log.js';
 import { isBotSpec, layerIdsOf, loadConfig, resolveRaw, type LoadedConfig } from './load.js';
 import { createComponent } from './registry.js';
@@ -125,8 +125,8 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
       const drafted = await planFor(active, activeConfig, input, client, spend, runtime);
       const legal = legalChoices(input.battle, input.side);
       const budget = Math.min(activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs);
-      const trace = legal.length === 0
-        ? { choice: 'default', scores: [] as Array<{ choice: string; score: number }>, predictedSwitch: undefined, answersPredictedSwitch: undefined, gamePlan: undefined }
+      const trace: SearchTrace = legal.length === 0
+        ? { choice: 'default', scores: [] }
         : await active.search.search(input.battle, input.side, {
           evaluate: active.evaluate,
           behavior: active.behavior,
@@ -135,6 +135,7 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
           rating: input.rating,
           variantId: input.variantId,
           deadlineMs: searchDeadline(Date.now(), activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs),
+          budgetMs: turnBudget(activeConfig.search.params.timeBudgetMs, input.secondsLeft),
         });
       const plan = trace.gamePlan !== undefined ? trace.gamePlan : drafted;
       let scores = trace.scores.length ? trace.scores : [{ choice: trace.choice, score: 0 }];
@@ -184,6 +185,8 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
         advisorCalled,
         overBudget: decision.overBudget,
         variantId: input.variantId,
+        budgetMs: trace.budgetMs,
+        grok: trace.grok,
       });
       return decision;
     },
@@ -269,6 +272,11 @@ function applyPolicies(
     }
   }
   return best;
+}
+
+function turnBudget(configuredMs: number, secondsLeft?: number | null): number {
+  if (secondsLeft == null) return configuredMs;
+  return Math.min(configuredMs, Math.max(250, (secondsLeft - 3) * 1000));
 }
 
 function shouldAdvise(

@@ -20,6 +20,10 @@ export interface DecisionLogRecord {
   advisorCalled: boolean;
   overBudget: boolean;
   variantId?: string;
+  /** Cap the strategist used for this decision, after the live clock. */
+  budgetMs?: number;
+  /** called, cached, timeout, skipped, or error. */
+  grok?: string;
 }
 
 export interface GameLogRecord {

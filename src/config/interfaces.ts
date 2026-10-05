@@ -64,6 +64,8 @@ export interface DecisionInput {
   rating?: number;
   /** Arm drawn for this live game. Search and advisors may read it; they do not have to. */
   variantId?: string;
+  /** Showdown seconds left on our clock, when the battle sent one. */
+  secondsLeft?: number | null;
 }
 
 export interface AttributedDecision {

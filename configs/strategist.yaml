@@ -8,7 +8,16 @@ agent:
 search:
   id: strategist
   params:
-    timeBudgetMs: 25000
+    timeBudgetMs: 14000
+    planMode: critical
+    reasoningEffort: none
+    grokTimeoutMs: 11000
+    planTokens: 320
+    hpSwing: 0.4
+    endgameMons: 2
+    switchCost: 1.1
+    jevReserveMs: 2500
+    vetoMargin: 1
 advisor:
   id: jev
   params:

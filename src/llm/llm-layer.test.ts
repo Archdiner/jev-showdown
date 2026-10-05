@@ -140,6 +140,24 @@ describe('gateway client', () => {
     resetRestrictionLatch();
   });
 
+  it('sends reasoning effort and reads reasoning tokens', async () => {
+    const script = scriptedFetch([jsonResponse({
+      choices: [{ message: { content: '{}' } }],
+      usage: { prompt_tokens: 11, completion_tokens: 4, completion_tokens_details: { reasoning_tokens: 3 } },
+    })]);
+    const client = new GatewayClient({ apiKey: KEY, fetchImpl: script.fetch, log: () => {}, maxRetries: 0 });
+    const result = await client.chat({
+      model: 'spacexai/grok-4.7',
+      messages: [{ role: 'user', content: 'hi' }],
+      reasoningEffort: 'none',
+    });
+    expect(result.ok).toBe(true);
+    expect(result.metrics.reasoningTokens).toBe(3);
+    expect(result.metrics.tokensInput).toBe(11);
+    const body = JSON.parse(String(script.calls[0].init?.body));
+    expect(body.reasoning_effort).toBe('none');
+  });
+
   it('aborts when the request exceeds the timeout budget', async () => {
     const fetchImpl: typeof fetch = (_url, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => {

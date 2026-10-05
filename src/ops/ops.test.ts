@@ -320,31 +320,40 @@ describe('factory proposals', () => {
 
 describe('analyst', () => {
   test('a loss becomes a general hypothesis and category priors', async () => {
-    const paths = tempPaths();
-    appendJsonl(paths.liveGames, {
-      kind: 'live-game',
-      id: 'loss-1',
-      ts: Date.now(),
-      configId: 'cfg',
-      configPath: 'configs/champion.yaml',
-      winner: 'loss',
-      rating: 990,
-      gxe: 48,
-      inputLog: '',
-      log: '|move|p2a: Tackle|p1a: Foe\n|switch|p2a: Bench|Bench, L80|100/100',
-    });
-    const reviewed = await runAnalyst(paths, { once: true });
-    expect(reviewed).toBe(1);
-    expect(await runAnalyst(paths, { once: true })).toBe(0);
+    const saved = process.env.VERCEL_AI_GATEWAY_KEY;
+    const savedAlt = process.env.AI_GATEWAY_API_KEY;
+    delete process.env.VERCEL_AI_GATEWAY_KEY;
+    delete process.env.AI_GATEWAY_API_KEY;
+    try {
+      const paths = tempPaths();
+      appendJsonl(paths.liveGames, {
+        kind: 'live-game',
+        id: 'loss-1',
+        ts: Date.now(),
+        configId: 'cfg',
+        configPath: 'configs/champion.yaml',
+        winner: 'loss',
+        rating: 990,
+        gxe: 48,
+        inputLog: '',
+        log: '|move|p2a: Tackle|p1a: Foe\n|switch|p2a: Bench|Bench, L80|100/100',
+      });
+      const reviewed = await runAnalyst(paths, { once: true });
+      expect(reviewed).toBe(1);
+      expect(await runAnalyst(paths, { once: true })).toBe(0);
 
-    const db = openDb(paths);
-    const titles = db.getNodesByType('Hypothesis').map(node => node.title);
-    db.close();
-    expect(titles.length).toBeGreaterThan(0);
-    expect(titles.join(' ')).not.toMatch(/Garchomp|Tackle/);
-    const priors = JSON.parse(fs.readFileSync(paths.priors, 'utf8'));
-    expect(priors.physical).toBeGreaterThan(0);
-    expect(priors).not.toHaveProperty('tackle');
+      const db = openDb(paths);
+      const titles = db.getNodesByType('Hypothesis').map(node => node.title);
+      db.close();
+      expect(titles.length).toBeGreaterThan(0);
+      expect(titles.join(' ')).not.toMatch(/Garchomp|Tackle/);
+      const priors = JSON.parse(fs.readFileSync(paths.priors, 'utf8'));
+      expect(priors.physical).toBeGreaterThan(0);
+      expect(priors).not.toHaveProperty('tackle');
+    } finally {
+      if (saved !== undefined) process.env.VERCEL_AI_GATEWAY_KEY = saved;
+      if (savedAlt !== undefined) process.env.AI_GATEWAY_API_KEY = savedAlt;
+    }
   });
 });
 

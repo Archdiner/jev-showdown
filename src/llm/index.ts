@@ -13,7 +13,7 @@ export {
   resolveReviewerModel,
 } from './models.js';
 export { renderContextBrief, BRIEF_SECTIONS } from './context-brief.js';
-export { strategistDecide, strategistChoices, parseStrategist, STRATEGIST_TIMEOUT_MS } from './strategist.js';
+export { strategistDecide, strategistChoices, parsePlan, parseStrategist, planText, STRATEGIST_TIMEOUT_MS } from './strategist.js';
 export type { GamePlan, StrategistDecision } from './strategist.js';
 export { scoreWithJev, jevDecide, jevChoices, JEV_TIMEOUT_MS } from './jev-turn.js';
 export type { JevTurnScore } from './jev-turn.js';

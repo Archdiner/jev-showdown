@@ -22,15 +22,25 @@ The ladder rating parser now reads GXE from the HTML popup `(GXE: …)` and from
 
 ## Strategist ladder engine
 
-`configs/strategist.yaml` is a `buildBot` config. Each turn Grok 4.7 writes the plan and proposes one legal action, Jev scores the actions, and the simulator replaces the proposal when its line leads by more than 1 point. A missing key or a timeout uses exact 1-ply, then the same veto. `npm run ladder -- --engine strategist` selects it and keeps concurrency at 1.
+`configs/strategist.yaml` is a `buildBot` config. Grok 4.7 writes the plan on critical turns only (game start, a new foe, a KO, a big HP swing, Terastallize becoming legal, the endgame transition). Jev scores every turn against that plan. The simulator replaces the proposal when its penalized line leads by more than 1 point. Repeated switches that do not change the foe are charged a growing cost, in Jev's brief and in the veto. A missing key or a timeout uses exact 1-ply, then the same veto.
+
+Grok 4.7 reasons by default. A full brief was about 2,100 prompt tokens and 1,200 reasoning tokens and took about 17s, which is why the 20s cap timed out. The plan call now sends `reasoning_effort: none`, a compact JSON plan (no move), `max_tokens: 120`, and a token-budgeted brief. Streaming does not shorten the wait: the JSON arrives after reasoning. The call is skipped when the turn is quiet. If it is still running when the turn budget (14s, or the Showdown clock minus 3s) needs Jev, the turn continues on the cached plan and the late plan is kept for the next quiet turn. Each decision logs `budget_ms`, `decision_ms`, Grok status, and token counts.
+
+`npm run ladder -- --engine strategist` selects it and keeps concurrency at 1.
 
 Local smoke, no key required: `npx tsx src/llm/strategist-engine-smoke.ts`
 
-Twenty-game screen against exact 1-ply, with the gateway key: `npx tsx src/llm/strategist-engine-screen.ts 20`
+Screens, with the gateway key:
+
+```bash
+npx tsx src/llm/strategist-engine-screen.ts 20 --opponent exact
+npx tsx src/llm/strategist-engine-screen.ts 20 --opponent max-damage
+npx tsx src/llm/strategist-engine-screen.ts 20 --opponent random
+```
 
 ## Strategist
 
-Grok 4.7 (`spacexai/grok-4.7`) reads the situation brief and returns one legal action plus a game plan, as JSON. The action may be a move, a switch, or Terastallize when the request allows it. A missing key, a timeout (20s), unusable JSON, or an action that is not legal falls back to exact 1-ply search. The plan is kept on the battle and sent again next turn.
+Grok 4.7 (`spacexai/grok-4.7`) updates the game plan. It does not pick the move. Jev does, on every turn, using the cached plan. A missing key, a timeout, unusable JSON, or an empty Jev answer uses exact 1-ply search, then the veto.
 
 Screen on a machine with `VERCEL_AI_GATEWAY_KEY`: `npx tsx src/llm/strategist-screen.ts 20`
 

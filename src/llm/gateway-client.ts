@@ -19,6 +19,8 @@ export interface CallMetrics {
   latencyMs: number;
   tokensInput: number;
   tokensOutput: number;
+  /** Reasoning tokens inside the completion, when the gateway reports them. */
+  reasoningTokens: number;
   costUsd: number;
   status: 'ok' | 'error';
   attempts: number;
@@ -49,6 +51,11 @@ export interface ChatRequest {
   temperature?: number;
   maxTokens?: number;
   jsonSchema?: Record<string, unknown>;
+  /**
+   * Gateway `reasoning_effort`. Grok 4.7 defaults to a long reasoning pass.
+   * `none` and `low` are the strategist settings; omit this to leave the model default.
+   */
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh';
 }
 
 export type EvaluateQuestion =
@@ -153,6 +160,7 @@ export class GatewayClient {
       temperature: request.temperature ?? 0,
     };
     if (request.maxTokens) body.max_tokens = request.maxTokens;
+    if (request.reasoningEffort) body.reasoning_effort = request.reasoningEffort;
     if (request.jsonSchema) {
       body.response_format = {
         type: 'json_schema',
@@ -284,7 +292,16 @@ export class GatewayClient {
         const parsed = text ? JSON.parse(text) : {};
         const usage = readUsage(parsed);
         const cost = readCost(parsed, model, usage.input, usage.output);
-        const metrics = this.metrics(model, Date.now() - started, usage.input, usage.output, cost, 'ok', attempts);
+        const metrics = this.metrics(
+          model,
+          Date.now() - started,
+          usage.input,
+          usage.output,
+          cost,
+          'ok',
+          attempts,
+          usage.reasoning,
+        );
         this.emit(metrics);
         return { ok: true, data: parsed as T, metrics };
       } catch (error) {
@@ -325,7 +342,7 @@ export class GatewayClient {
   private emit(metrics: CallMetrics): void {
     this.#log(
       `[llm] model=${metrics.model} latency_ms=${metrics.latencyMs} ` +
-        `tokens_in=${metrics.tokensInput} tokens_out=${metrics.tokensOutput} ` +
+        `tokens_in=${metrics.tokensInput} tokens_out=${metrics.tokensOutput} reasoning_tokens=${metrics.reasoningTokens} ` +
         `cost_usd=${metrics.costUsd.toFixed(8)} status=${metrics.status} attempts=${metrics.attempts}`
     );
   }
@@ -337,17 +354,20 @@ export class GatewayClient {
     tokensOutput: number,
     costUsd: number,
     status: 'ok' | 'error',
-    attempts: number
+    attempts: number,
+    reasoningTokens = 0
   ): CallMetrics {
-    return { model, latencyMs, tokensInput, tokensOutput, costUsd, status, attempts };
+    return { model, latencyMs, tokensInput, tokensOutput, reasoningTokens, costUsd, status, attempts };
   }
 }
 
-function readUsage(payload: any): { input: number; output: number } {
+function readUsage(payload: any): { input: number; output: number; reasoning: number } {
   const usage = payload?.usage ?? {};
+  const details = usage.completion_tokens_details ?? usage.output_tokens_details ?? {};
   return {
     input: numberOrZero(usage.prompt_tokens ?? usage.input_tokens ?? usage.inputTokens),
     output: numberOrZero(usage.completion_tokens ?? usage.output_tokens ?? usage.outputTokens),
+    reasoning: numberOrZero(details.reasoning_tokens ?? usage.reasoning_tokens),
   };
 }
 

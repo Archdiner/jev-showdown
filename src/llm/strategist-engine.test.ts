@@ -8,6 +8,10 @@ describe('strategist engine', () => {
     const loaded = loadConfig('configs/strategist.yaml');
     expect(loaded.config.search.id).toBe('strategist');
     expect(loaded.config.name).toBe('strategist');
+    const params = loaded.config.search.params as { planMode?: string; reasoningEffort?: string; timeBudgetMs?: number };
+    expect(params.planMode).toBe('critical');
+    expect(params.reasoningEffort).toBe('none');
+    expect(params.timeBudgetMs).toBe(14000);
   });
 
   it('no-key harness plays a legal action through buildBot', async () => {
