@@ -63,6 +63,11 @@ function view(row: object): RowView {
   return row as RowView;
 }
 
+function hasResult(row: RowView): boolean {
+  return row.outcome === 'win' || row.outcome === 'loss' || row.outcome === 'tie'
+    || row.winner === 'win' || row.winner === 'loss' || row.winner === 'tie';
+}
+
 export function isLadderGameRow(row: object): boolean {
   const record = view(row);
   if (record.kind === 'contamination') return false;
@@ -70,6 +75,8 @@ export function isLadderGameRow(row: object): boolean {
   if (record.schema === 'jev.ladder-game.v1') return true;
   if (record.type === 'result' && (record.outcome || record.winner)) return true;
   if (record.type === 'game' && (record.outcome || record.winner)) return true;
+  // gameFromRow drops kind and schema. The projection still has sourcePath and a result.
+  if (typeof (row as { sourcePath?: unknown }).sourcePath === 'string' && hasResult(record)) return true;
   return false;
 }
 
