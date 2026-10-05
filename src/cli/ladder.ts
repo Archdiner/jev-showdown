@@ -31,9 +31,14 @@ import {
   installDrainSignals,
   LiveDrain,
   runDrainFile,
-  shouldFinishSeries,
   watchDrainFiles,
 } from '../client/drain.js';
+import {
+  BatchEndReason,
+  createLadderSeries,
+  DEFAULT_SERIES_IDLE_MS,
+  isBattleActivity,
+} from '../client/series-run.js';
 import { LiveMetrics } from '../client/live-metrics.js';
 import { SearchAdmission, admissionSettings, ConcurrencyGovernor } from '../client/concurrency-governor.js';
 import { currentGitSha, groupByRunId } from '../client/game-record.js';
@@ -80,6 +85,8 @@ interface LadderOptions {
   rampTarget: number | null;
   labeledChampion: boolean;
   rollback: boolean;
+  /** No battle or search progress for this long aborts the batch by draining. */
+  idleMs: number;
   /** Repeatable `--ab <config>:<share>`. Share is a fraction of battles. */
   ab: string[];
   check: boolean;
@@ -113,6 +120,7 @@ function parseArgs(argv: string[]): LadderOptions {
     rampTarget: null,
     labeledChampion: false,
     rollback: false,
+    idleMs: DEFAULT_SERIES_IDLE_MS,
     ab: [],
     check: false,
     help: false,
@@ -154,6 +162,7 @@ function parseArgs(argv: string[]): LadderOptions {
     else if (arg === '--ramp-target') opts.rampTarget = Number(next());
     else if (arg === '--labeled-champion') opts.labeledChampion = true;
     else if (arg === '--rollback') opts.rollback = true;
+    else if (arg === '--idle-ms') opts.idleMs = Number(next());
     else if (arg === '--ab') opts.ab.push(next());
     else if (arg === '--check') opts.check = true;
     else throw new Error(`Unknown argument: ${arg}`);
@@ -161,6 +170,9 @@ function parseArgs(argv: string[]): LadderOptions {
 
   if (!Number.isFinite(opts.games) || opts.games < 1) {
     throw new Error('--games must be a positive number');
+  }
+  if (!Number.isFinite(opts.idleMs) || opts.idleMs < 1000) {
+    throw new Error('--idle-ms must be at least 1000');
   }
   if (opts.runners !== null && (!Number.isFinite(opts.runners) || opts.runners < 1)) {
     throw new Error('--runners must be a positive number');
@@ -227,6 +239,7 @@ Graceful drain (finish in-progress games, then exit):
   touch live-runs/<runId>.drain
 The runner prints <pid> and <runId> at startup. The first SIGTERM or SIGUSR1 stops new searches and, once nothing is in progress, exits. A second one exits immediately. A room whose newest |t:| is more than 70 minutes old is forfeited on sight and does not count toward drain or concurrency. Live games are not forfeited.
 SIGINT still disconnects right away and does not send /forfeit.
+There is no wall-clock deadline for a healthy batch. --idle-ms (default 20 minutes) is the stall window: no turn, request, or search update for that long stops new searches and lets in-flight games finish. The summary endReason is completed, drained, or stalled.
 
 Local server, two clients, N games:
   npm run ladder -- --local --games 10 --format gen9randombattle --concurrency 4
@@ -359,102 +372,59 @@ function watchChallenges(client: ShowdownClient, queue: LadderQueue, onlyFrom: s
 async function playSeries(
   players: Array<{ client: ShowdownClient; driver: BattleDriver; queue: LadderQueue; name: string }>,
   games: number,
-  concurrency: number,
+  idleMs: number,
   drain: LiveDrain,
   metrics: LiveMetrics | null,
   onContinue?: () => void,
-): Promise<GameSummary[]> {
-  const finished = new Map<string, GameSummary>();
-  return new Promise((resolve, reject) => {
-    const waves = Math.ceil(games / Math.max(1, concurrency));
-    let settled = false;
-    let timer = setTimeout(onTimeout, Math.max(300000, waves * 180000));
-
-    function activeGames(): number {
-      return players.reduce((sum, player) => sum + player.queue.activeBattles, 0);
-    }
-
-    function succeed(): void {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      for (const player of players) player.queue.stop();
-      resolve([...finished.values()]);
-    }
-
-    function onTimeout(): void {
-      if (drain.isDraining) {
-        console.warn(`[ladder] stopped waiting with ${activeGames()} game(s) still in progress`);
-        succeed();
-        return;
-      }
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(new Error(`Timed out after ${finished.size}/${games} games`));
-    }
-
-    const tryClose = () => {
-      if (!shouldFinishSeries({
-        finished: finished.size,
-        requested: games,
-        draining: drain.isDraining,
-        active: activeGames(),
-      })) return;
-      succeed();
-    };
-
-    const stopSearching = () => {
+): Promise<{ games: GameSummary[]; endReason: BatchEndReason }> {
+  const series = createLadderSeries<GameSummary>({
+    games,
+    idleMs,
+    drain,
+    activeGames: () => players.reduce((sum, player) => sum + player.queue.activeBattles, 0),
+    stopSearching: () => {
       for (const player of players) player.queue.drain();
-    };
-
-    drain.onDrain(reason => {
-      console.log(`[ladder] draining (${reason}); in-progress games will finish`);
-      stopSearching();
-      clearTimeout(timer);
-      timer = setTimeout(onTimeout, 30 * 60 * 1000);
-      tryClose();
-    });
-
-    const consider = (summary: GameSummary) => {
-      if (summary.phantom || summary.contaminated) return;
-      if (finished.has(summary.battleId)) return;
-      finished.set(summary.battleId, summary);
+    },
+    fill: () => {
+      for (const player of players) player.queue.fill();
+      onContinue?.();
+    },
+    onSettle: () => {
+      for (const player of players) player.queue.stop();
+    },
+    onRecorded: (summary, done, requested) => {
       metrics?.noteGame(summary);
       console.log(
-        `[ladder] ${finished.size}/${games} ${summary.outcome} vs ${summary.opponent ?? '?'} ` +
+        `[ladder] ${done}/${requested} ${summary.outcome} vs ${summary.opponent ?? '?'} ` +
         `turns=${summary.turns} invalid=${summary.invalidChoices} crashes=${summary.crashes} ` +
         `fallbacks=${summary.fallbacks} elo=${summary.eloAfter ?? 'n/a'} ` +
         `config=${summary.configId ?? 'n/a'} role=${summary.role ?? 'n/a'}`,
       );
-      if (finished.size >= games || drain.isDraining) {
-        stopSearching();
-        tryClose();
+    },
+  });
+
+  for (const player of players) {
+    player.driver.on('battleStart', () => series.noteActivity());
+    player.driver.on('decision', () => series.noteActivity());
+    player.client.on('line', (_room: string, line: string) => {
+      if (isBattleActivity(line)) series.noteActivity();
+    });
+    player.client.on('lobby', (line: string) => {
+      if (isBattleActivity(line)) series.noteActivity();
+    });
+    player.client.on('popup', () => series.noteActivity());
+    player.driver.on('gameEnd', (summary: GameSummary) => {
+      player.queue.noteEnd(summary.battleId);
+      series.noteActivity();
+      if (summary.phantom || summary.contaminated) {
+        series.checkClose();
         return;
       }
-      for (const player of players) player.queue.fill();
-      onContinue?.();
-    };
-
-    for (const player of players) {
-      player.driver.on('gameEnd', (summary: GameSummary) => {
-        player.queue.noteEnd(summary.battleId);
-        if (finished.has(summary.battleId)) {
-          if (finished.size < games && !drain.isDraining) player.queue.fill();
-          else tryClose();
-          return;
-        }
-        consider(summary);
-      });
-    }
-    if (drain.isDraining) {
-      stopSearching();
-      tryClose();
-      return;
-    }
-    for (const player of players) player.queue.fill();
-    onContinue?.();
-  });
+      series.finish(summary);
+    });
+  }
+  series.start();
+  return series.result;
 }
 
 async function runLocalSeries(
@@ -466,7 +436,7 @@ async function runLocalSeries(
   opponentIdentity: LadderIdentity,
   stamp: { runId: string; batchLabel: string | null; hostname: string },
   route: AbSession,
-): Promise<GameSummary[]> {
+): Promise<{ games: GameSummary[]; endReason: BatchEndReason }> {
   console.log(`[ladder] starting local pokemon-showdown on port ${opts.port}`);
   const server = await startLocalServer(opts.port);
   const shutdown = async () => {
@@ -518,7 +488,7 @@ async function runLocalSeries(
         { client: bravo.client, driver: bravo.driver, queue: bravo.queue, name: 'BotBravo' },
       ],
       opts.games,
-      opts.concurrency,
+      opts.idleMs,
       drain,
       metrics,
     );
@@ -548,7 +518,7 @@ async function runRemote(
   identity: LadderIdentity,
   stamp: { runId: string; batchLabel: string | null; hostname: string },
   route: AbSession,
-): Promise<GameSummary[]> {
+): Promise<{ games: GameSummary[]; endReason: BatchEndReason }> {
   const { username, local } = ladderIdentity(opts);
   const password = local ? '' : (process.env.SHOWDOWN_PASSWORD || '');
   if (!username || (!local && !password)) {
@@ -590,7 +560,7 @@ async function runRemote(
   const summaries = await playSeries(
     [{ client: player.client, driver: player.driver, queue: player.queue, name: username }],
     opts.games,
-    opts.concurrency,
+    opts.idleMs,
     drain,
     metrics,
     opts.challenge
@@ -610,6 +580,7 @@ function report(
   route: AbSession,
   drain: LiveDrain | undefined,
   stamp: { runId: string; batchLabel: string | null; hostname: string },
+  endReason: BatchEndReason,
 ): void {
   const played = summaries.filter(game => !game.phantom && !game.contaminated);
   const invalidChoices = played.reduce((sum, game) => sum + game.invalidChoices, 0);
@@ -640,6 +611,7 @@ function report(
     pulled: route.pulledIds(),
     incidents: route.incidents.length,
     local: opts.local,
+    endReason,
     drained: drain?.isDraining ?? false,
     drainReason: drain?.drainReason ?? null,
     invalidChoices,
@@ -658,7 +630,13 @@ function report(
   fs.writeFileSync(out, JSON.stringify(reportBody, null, 2));
   console.log(`[ladder] games=${played.length} invalid=${invalidChoices} crashes=${crashes} fallbacks=${fallbacks} mismatches=${mismatches}`);
   console.log(`[ladder] run=${stamp.runId} batch=${stamp.batchLabel ?? 'n/a'} host=${stamp.hostname}`);
+  console.log(`[ladder] endReason=${endReason} games=${played.length}/${opts.games}`);
   console.log(`[ladder] summary ${out}`);
+  if (endReason === 'stalled') {
+    console.log(`[ladder] stalled (${drain?.drainReason ?? 'stall'}) after ${played.length}/${opts.games} games`);
+    process.exitCode = 1;
+    return;
+  }
   if (drain?.isDraining) {
     console.log(`[ladder] drained (${drain.drainReason}) after ${played.length}/${opts.games} games`);
     if (invalidChoices > 0 || crashes > 0) process.exitCode = 1;
@@ -806,11 +784,16 @@ async function main(): Promise<void> {
     const metrics = openLiveMetrics(opts, identity, stamp, route);
     const admission = openAdmission(opts);
     try {
-      const summaries = opts.local && !opts.server && !opts.accept && !opts.challenge
+      const outcome = opts.local && !opts.server && !opts.accept && !opts.challenge
         ? await runLocalSeries(opts, session.drain, metrics, admission, identity, opponentIdentity, stamp, route)
         : await runRemote(opts, session.drain, metrics, admission, identity, stamp, route);
-      metrics.finish({ games: summaries.length, requested: opts.games });
-      report(summaries, opts, identity, route, session.drain, stamp);
+      metrics.finish({
+        games: outcome.games.length,
+        requested: opts.games,
+        endReason: outcome.endReason,
+        drainRequested: session.drain.isDraining,
+      });
+      report(outcome.games, opts, identity, route, session.drain, stamp, outcome.endReason);
       drained = session.drain.isDraining;
     } finally {
       admission.stop();
