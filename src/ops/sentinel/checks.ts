@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { shareBeyondBinomialNoise } from '../../client/ab-route.js';
 import { checkGameInvariants, isLadderGameRow } from '../../client/game-integrity.js';
 import { percentile } from '../../client/live-metrics.js';
 import { degenerateAlert, foldCycle, stallAlert } from '../cycle.js';
@@ -177,6 +178,13 @@ export const CHECKS: InvariantCheck[] = [
     title: 'A batch win rate is under the target',
     suggestedFix: 'A full batch (10 games, grouped by git sha) more than 10 points under a 50% target is a trend. It is not a promotion. Promotion stays the gate.',
     detect: winRateBatch,
+  },
+  {
+    id: 'ab-share-deviation',
+    severity: 'P2',
+    title: 'A live A/B arm played a different share than it was configured',
+    suggestedFix: 'A live A/B arm keeps its configured share for the whole batch. A loss streak must not bench it. Bench only on invalid choices, crashes, a timer loss or decision timeout, or a choice-fallback flood. This fires when the realized share is outside binomial noise after 15 games.',
+    detect: abShareDeviation,
   },
   {
     id: 'checkout-behind',
@@ -946,6 +954,49 @@ function eloDrop(ctx: SentinelContext): CheckHit[] {
       { file: window[window.length - 1].file, line: window[window.length - 1].line, detail: `eloAfter ${last}` },
     ],
   }];
+}
+
+function abShareDeviation(ctx: SentinelContext): CheckHit[] {
+  const file = path.join(ctx.layout.ladderLogDir, 'summary.json');
+  let when: number | null = null;
+  try {
+    when = fs.statSync(file).mtimeMs;
+  } catch {
+    return [];
+  }
+  if (ctx.now - when > ctx.lookbackMs || when > ctx.now + 60_000) return [];
+  let parsed: Record<string, unknown>;
+  try {
+    const value = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    parsed = value as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+  const batchGames = finiteNumber(parsed.games);
+  const arms = Array.isArray(parsed.ab) ? parsed.ab : [];
+  if (batchGames === null) return [];
+  const hits: CheckHit[] = [];
+  for (const arm of arms) {
+    if (!arm || typeof arm !== 'object' || Array.isArray(arm)) continue;
+    const row = arm as Record<string, unknown>;
+    const configId = typeof row.configId === 'string' ? row.configId : '';
+    const configured = finiteNumber(row.configuredShare ?? row.share);
+    const armGames = finiteNumber(row.games);
+    if (!configId || configured === null || armGames === null) continue;
+    if (!shareBeyondBinomialNoise(configured, armGames, batchGames)) continue;
+    const realized = armGames / batchGames;
+    hits.push({
+      key: configId,
+      detail: `${configId} realized ${armGames}/${batchGames} (${pct(realized)}) configured ${pct(configured)} after ${batchGames} games`,
+      evidence: [{ file, detail: `${configId} configured=${configured} realized=${realized}` }],
+    });
+  }
+  return hits;
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function winRateBatch(ctx: SentinelContext): CheckHit[] {

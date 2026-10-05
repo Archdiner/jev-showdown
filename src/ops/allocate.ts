@@ -37,6 +37,11 @@ export interface CircuitLimits {
   role?: 'champion' | 'challenger';
   now?: number;
   cooldownMs?: number;
+  /**
+   * When false, a loss streak sets `regression` and does not pull.
+   * Ladder A/B passes false. Local keeps the default, which pulls.
+   */
+  pullOnLossStreak?: boolean;
 }
 
 export const EXPLORE_MIN = 0.1;
@@ -143,14 +148,16 @@ export function selectionPool(
   states: Record<string, CircuitState | undefined>,
   knownGood: Allocatable[],
   now: number,
+  options?: { ignoreLossStreakPulls?: boolean },
 ): Allocatable[] {
   const marked = configs.map(config => {
     const state = effectiveState(states[config.configId], now);
     const champion = config.labels.includes('champion');
+    const streakPull = Boolean(options?.ignoreLossStreakPulls && isLossStreakPull(state));
     return {
       ...config,
-      pulled: champion ? false : Boolean(state?.pulled),
-      regression: champion ? Boolean(state?.regression) : false,
+      pulled: champion ? false : Boolean(state?.pulled) && !streakPull,
+      regression: champion ? Boolean(state?.regression) || streakPull : false,
     };
   });
   const open = marked.filter(config => !config.pulled);
@@ -202,18 +209,54 @@ export function nextCircuit(
     };
   }
   const streakHit = consecutiveLosses >= challengerStreakLimit(limits);
-  if (streakHit || dropHit) {
+  const pullOnLossStreak = limits.pullOnLossStreak !== false;
+  if (dropHit || (streakHit && pullOnLossStreak)) {
     const cooldownMs = limits.cooldownMs ?? CHALLENGER_COOLDOWN_MS;
     return {
       consecutiveLosses,
       ratings,
       pulled: true,
-      reason: hitReason(consecutiveLosses, drop, dropHit && !streakHit),
+      reason: hitReason(consecutiveLosses, drop, dropHit),
       pulledAt: now,
       cooldownUntil: now + cooldownMs,
     };
   }
+  if (streakHit) {
+    return {
+      consecutiveLosses,
+      ratings,
+      pulled: false,
+      regression: true,
+      reason: hitReason(consecutiveLosses, drop, false),
+    };
+  }
   return { consecutiveLosses, ratings, pulled: false };
+}
+
+/** A pull whose reason is a loss streak. A rating-drop pull is not one of these. */
+export function isLossStreakPull(state: CircuitState | undefined): boolean {
+  if (!state?.pulled || typeof state.reason !== 'string') return false;
+  return state.reason.includes('consecutive losses');
+}
+
+/**
+ * Ladder scheduling ignores a sticky loss-streak pull left in circuits.json.
+ * The streak stays on the row as a regression flag. Rating-drop pulls stay pulled.
+ */
+export function releaseLossStreakPulls(states: Record<string, CircuitState>): boolean {
+  let changed = false;
+  for (const [id, state] of Object.entries(states)) {
+    if (!isLossStreakPull(state)) continue;
+    states[id] = {
+      consecutiveLosses: state.consecutiveLosses,
+      ratings: state.ratings,
+      pulled: false,
+      regression: true,
+      reason: state.reason,
+    };
+    changed = true;
+  }
+  return changed;
 }
 
 function hitReason(consecutiveLosses: number, drop: number, dropOnly: boolean): string {

@@ -291,6 +291,20 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     { pid: 13, cmd: 'node tsx src/ops/cli.ts gatekeeper', env: {} },
   ];
 
+  const summaryPath = path.join(ladder, 'summary.json');
+  fs.writeFileSync(summaryPath, JSON.stringify({
+    games: 33,
+    requested: 33,
+    endReason: 'completed',
+    ab: [
+      { configId: 'champion', role: 'champion', configuredShare: 0.5, games: 28, realizedShare: 28 / 33 },
+      { configId: 'exact-1ply-qw', role: 'challenger', configuredShare: 0.5, games: 5, realizedShare: 5 / 33 },
+    ],
+  }));
+  // Older than the run file, so a dead runner still looks down. Still inside the lookback.
+  const summaryAt = (now - 2 * 60 * 60 * 1000) / 1000;
+  fs.utimesSync(summaryPath, summaryAt, summaryAt);
+
   return {
     root,
     now,

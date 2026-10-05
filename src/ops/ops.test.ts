@@ -9,6 +9,7 @@ import {
   noteOutcome,
   parseCircuitBook,
   releaseChampionPulls,
+  releaseLossStreakPulls,
   selectionPool,
   streakLimit,
   type CircuitState,
@@ -188,6 +189,57 @@ describe('traffic and circuit breakers', () => {
     expect(dropped.pulled).toBe(false);
     expect(dropped.regression).toBe(true);
     expect(dropped.reason).toContain('rating drop');
+  });
+
+  test('a ladder loss streak flags a regression and does not change scheduling', () => {
+    const limits = {
+      maxDrop: 40,
+      window: 10,
+      baselineWinRate: 0.5,
+      role: 'challenger' as const,
+      pullOnLossStreak: false,
+      now: 1_000,
+    };
+    let state: CircuitState | undefined;
+    for (let index = 0; index < 6; index++) state = nextCircuit(state, 'loss', 1500, limits);
+    expect(state?.pulled).toBe(false);
+    expect(state?.regression).toBe(true);
+    expect(state?.consecutiveLosses).toBe(6);
+    const challenger = { configId: 'qw', configPath: 'configs/exact-1ply-qw.yaml', labels: ['live-approved'] };
+    const champion = { configId: 'champ', configPath: 'configs/champion.yaml', labels: ['champion', 'live-approved'] };
+    const sticky: Record<string, CircuitState> = {
+      qw: {
+        consecutiveLosses: 6,
+        ratings: [1500],
+        pulled: true,
+        reason: '6 consecutive losses',
+      },
+      champ: {
+        consecutiveLosses: 0,
+        ratings: [1600, 1500],
+        pulled: true,
+        reason: 'rating drop 100 in the window',
+      },
+    };
+    expect(releaseLossStreakPulls(sticky)).toBe(true);
+    expect(sticky.qw.pulled).toBe(false);
+    expect(sticky.qw.regression).toBe(true);
+    expect(sticky.champ.pulled).toBe(true);
+    const pool = selectionPool([champion, challenger], sticky, [], 1_000, { ignoreLossStreakPulls: true });
+    expect(pool.find(config => config.configId === 'qw')?.pulled).toBe(false);
+    expect(pool.find(config => config.configId === 'champ')?.pulled).toBe(false);
+    const scheduled = new Set<string>();
+    for (let index = 0; index < 40; index++) {
+      const pick = allocate(pool, () => index / 40, 0.5);
+      if (pick) scheduled.add(pick.configId);
+    }
+    expect(scheduled.has('qw')).toBe(true);
+
+    let local: CircuitState | undefined;
+    for (let index = 0; index < 5; index++) {
+      local = nextCircuit(local, 'loss', null, { maxLosses: 5, maxDrop: 40, window: 10, role: 'challenger' });
+    }
+    expect(local?.pulled).toBe(true);
   });
 
   test('consecutive losses or a rating drop pull a config', () => {

@@ -88,6 +88,7 @@ interface RoomState {
   invalidChoiceReasons: string[];
   crashes: number;
   fallbacks: number;
+  decisionTimeouts: number;
   mismatchCount: number;
   retries: number;
   ended: boolean;
@@ -185,6 +186,11 @@ const WATCHDOG_RESENDS = 20;
  */
 function choiceAlreadyLocked(reason: string): boolean {
   return /too late|can'?t undo|nothing to choose|not your turn|nothing to cancel/i.test(reason);
+}
+
+/** An engine deadline. A preemptive "timer has Ns left" fallback is a choice fallback, not this. */
+function isDecisionTimeout(reason: string | undefined): boolean {
+  return typeof reason === 'string' && /timeout/i.test(reason);
 }
 
 /**
@@ -399,6 +405,7 @@ export class BattleDriver extends EventEmitter {
       invalidChoiceReasons: [],
       crashes: 0,
       fallbacks: 0,
+      decisionTimeouts: 0,
       mismatchCount: 0,
       retries: 0,
       ended: false,
@@ -553,7 +560,10 @@ export class BattleDriver extends EventEmitter {
 
     const safe = sanitizeAction(decision.action, request, legal) ?? pickBestLegal(state, legal);
     const adjusted = !sameAction(safe, decision.action);
-    if (decision.fallback || adjusted) room.fallbacks += 1;
+    if (decision.fallback || adjusted) {
+      room.fallbacks += 1;
+      if (decision.fallback && isDecisionTimeout(decision.reason)) room.decisionTimeouts += 1;
+    }
 
     const choice = formatChoice(safe, rqid ?? undefined);
     room.mismatchCount += mismatches.length;
@@ -1197,6 +1207,7 @@ export class BattleDriver extends EventEmitter {
       invalidChoiceReasons: room.invalidChoiceReasons,
       crashes: room.crashes,
       fallbacks: room.fallbacks,
+      decisionTimeouts: room.decisionTimeouts,
       mismatches: room.mismatchCount,
       beliefErrors: room.tracker.beliefErrors(),
       eloBefore,

@@ -97,6 +97,11 @@ export interface LadderGameRecord {
   invalidChoiceReasons: string[];
   crashes: number;
   fallbacks: number;
+  /**
+   * Engine or decision timeouts in this game. A low-clock fallback is a
+   * choice fallback, not one of these. Omitted on older rows.
+   */
+  decisionTimeouts?: number;
   mismatches: number;
   /**
    * Posterior updates that threw in this game. The battle then used BeliefTracker.
@@ -420,6 +425,8 @@ export interface LadderGameInput {
   crashes: number;
   fallbacks: number;
   mismatches: number;
+  /** Engine or decision timeouts. Omitted by older callers. */
+  decisionTimeouts?: number;
   /** Posterior throws. Omitted by older callers; the record stores 0. */
   beliefErrors?: number;
   /** `before` on the rating update for this battle. Null when that update has no before. */
@@ -509,6 +516,7 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     invalidChoiceReasons: cappedInvalidChoiceReasons(input.invalidChoiceReasons ?? reasonsFromLines(input.lines)),
     crashes: input.crashes,
     fallbacks: input.fallbacks,
+    ...(typeof input.decisionTimeouts === 'number' ? { decisionTimeouts: input.decisionTimeouts } : {}),
     mismatches: input.mismatches,
     beliefErrors: input.beliefErrors ?? 0,
     eloBefore: rated.eloBefore,
