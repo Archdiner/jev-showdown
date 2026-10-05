@@ -1,0 +1,7 @@
+name: foe-priors
+extends: ../champion.yaml
+search:
+  id: greedy-1ply
+  params:
+    samples: 8
+    foePriors: true

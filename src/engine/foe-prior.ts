@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { Dex } from '@pkmn/sim';
 import { dataLoader } from '../data/data-loader.js';
 import { RandbatsStats, RoleData, SpeciesStats } from '../types/index.js';
@@ -52,6 +54,24 @@ export function loadedSpeciesStats(): RandbatsStats | null {
   } catch {
     return null;
   }
+}
+
+/** A one-species test stub is not a randbats table. */
+const MIN_PRIOR_SPECIES = 100;
+let fileStats: RandbatsStats | null | undefined;
+
+/** Loaded stats, or data/gen9-stats.json when that file is the full table. */
+export function randbatsForPriors(): RandbatsStats | null {
+  const loaded = loadedSpeciesStats();
+  if (loaded && Object.keys(loaded).length >= MIN_PRIOR_SPECIES) return loaded;
+  if (fileStats !== undefined) return fileStats;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'data', 'gen9-stats.json'), 'utf8')) as RandbatsStats;
+    fileStats = parsed && Object.keys(parsed).length >= MIN_PRIOR_SPECIES ? parsed : null;
+  } catch {
+    fileStats = null;
+  }
+  return fileStats;
 }
 
 /**

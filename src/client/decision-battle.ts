@@ -1,7 +1,7 @@
 import { Battle, Dex, PRNG, PokemonSet } from '@pkmn/sim';
 import { Action, RandbatsStats } from '../types/index.js';
 import { decide } from '../engine/exact/policies.js';
-import { legalChoices } from '../engine/exact/battle-utils.js';
+import { legalChoices, type SideId } from '../engine/exact/battle-utils.js';
 import {
   completeFoeTeam,
   FOE_PRIOR_MIN_BUDGET_MS,
@@ -357,4 +357,136 @@ export async function chooseLive(
   const battle = buildDecisionBattle({ ...position, modelHidden: false });
   if (!battle) throw new Error('could not build a sim battle');
   throw new Error('engine returned a choice that is not legal');
+}
+
+/** Live explore arm. Factory and gatekeeper turn the same switch on with search.params.foePriors. */
+export const FOE_PRIORS_VARIANT = 'foe-priors';
+
+export function foePriorsEnabled(flag: boolean | undefined, variantId?: string): boolean {
+  return flag === true || variantId === FOE_PRIORS_VARIANT;
+}
+
+/**
+ * What a full sim battle has revealed in its log, shaped like a ladder position.
+ * The search still sees our real request. Unrevealed foe slots stay empty.
+ */
+export function revealedLivePosition(battle: Battle, side: SideId): LivePosition {
+  const foeId: SideId = side === 'p1' ? 'p2' : 'p1';
+  const seen = new Map<string, { species: string; level: number; moves: string[]; ability?: string; item?: string }>();
+  const speciesOf = new Map<string, string>();
+  for (const line of battle.log) {
+    if (!line.startsWith('|')) continue;
+    const parts = line.split('|');
+    const cmd = parts[1];
+    if (cmd === 'switch' || cmd === 'drag' || cmd === 'replace') {
+      const who = protocolWho(parts[2] || '');
+      if (!who) continue;
+      const details = parts[3] || '';
+      const species = details.split(',')[0]?.trim() || who.nickname;
+      const levelMatch = details.match(/L(\d+)/);
+      speciesOf.set(`${who.side}:${who.nickname}`, species);
+      const mon = seenMon(seen, species, levelMatch ? Number(levelMatch[1]) : 80);
+      mon.species = species;
+      if (levelMatch) mon.level = Number(levelMatch[1]);
+      continue;
+    }
+    if (cmd === 'move') {
+      const who = protocolWho(parts[2] || '');
+      const move = parts[3] || '';
+      if (!who || !move || move === 'Recharge') continue;
+      const species = speciesOf.get(`${who.side}:${who.nickname}`) || who.nickname;
+      const mon = seenMon(seen, species, 80);
+      if (!mon.moves.includes(move)) mon.moves.push(move);
+      continue;
+    }
+    if (cmd === '-ability') {
+      const who = protocolWho(parts[2] || '');
+      if (!who || !parts[3]) continue;
+      const species = speciesOf.get(`${who.side}:${who.nickname}`) || who.nickname;
+      seenMon(seen, species, 80).ability = parts[3];
+      continue;
+    }
+    if (cmd === '-item' || cmd === '-enditem') {
+      const who = protocolWho(parts[2] || '');
+      if (!who || !parts[3]) continue;
+      const species = speciesOf.get(`${who.side}:${who.nickname}`) || who.nickname;
+      seenMon(seen, species, 80).item = parts[3];
+    }
+  }
+
+  const foeSide = battle.getSide(foeId);
+  const ourSide = battle.getSide(side);
+  const active = foeSide.active[0];
+  const snap = (mon: typeof active, reveal: { moves: string[]; ability?: string; item?: string } | undefined) => {
+    if (!mon) return null;
+    return {
+      species: mon.species.name,
+      level: mon.level,
+      hp: mon.hp,
+      maxhp: mon.maxhp,
+      status: mon.status || undefined,
+      ability: reveal?.ability,
+      item: reveal?.item,
+      moves: reveal?.moves ? [...reveal.moves] : [],
+      boosts: {
+        atk: mon.boosts.atk,
+        def: mon.boosts.def,
+        spa: mon.boosts.spa,
+        spd: mon.boosts.spd,
+        spe: mon.boosts.spe,
+      },
+      fainted: mon.fainted || mon.hp <= 0,
+    };
+  };
+  const foeActive = active ? snap(active, seen.get(active.species.name)) : null;
+  const foeBench = foeSide.pokemon
+    .filter(mon => mon && mon !== active)
+    .map(mon => {
+      const reveal = seen.get(mon.species.name);
+      if (!reveal) return null;
+      return snap(mon, reveal);
+    })
+    .filter((mon): mon is NonNullable<typeof mon> => !!mon);
+  const ours = ourSide.active[0];
+  return {
+    request: battle.getSide(side).activeRequest,
+    foeActive,
+    foeBench,
+    ourBoosts: ours ? {
+      atk: ours.boosts.atk,
+      def: ours.boosts.def,
+      spa: ours.boosts.spa,
+      spd: ours.boosts.spd,
+      spe: ours.boosts.spe,
+    } : undefined,
+    weather: battle.field.weather ? String(battle.field.weather) : undefined,
+    speciesStats: undefined,
+  };
+}
+
+/** Hidden-info copy. Our side is p1 so `move N` matches the live request. Null keeps the real battle. */
+export function battleWithFoePriors(battle: Battle, side: SideId, stats: RandbatsStats): Battle | null {
+  const position = revealedLivePosition(battle, side);
+  if (!position.request) return null;
+  position.speciesStats = stats;
+  return buildDecisionBattle(position);
+}
+
+function seenMon(
+  seen: Map<string, { species: string; level: number; moves: string[]; ability?: string; item?: string }>,
+  species: string,
+  level: number,
+): { species: string; level: number; moves: string[]; ability?: string; item?: string } {
+  const existing = seen.get(species);
+  if (existing) return existing;
+  const created = { species, level, moves: [] as string[] };
+  seen.set(species, created);
+  return created;
+}
+
+function protocolWho(ident: string): { side: SideId; nickname: string } | null {
+  const side: SideId | null = ident.startsWith('p2') ? 'p2' : ident.startsWith('p1') ? 'p1' : null;
+  if (!side) return null;
+  const nickname = ident.split(':').slice(1).join(':').trim() || ident;
+  return { side, nickname };
 }

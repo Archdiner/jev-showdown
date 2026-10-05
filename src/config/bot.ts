@@ -1,5 +1,7 @@
 import { PRNG, type Battle } from '@pkmn/sim';
+import { battleWithFoePriors, foePriorsEnabled } from '../client/decision-battle.js';
 import { legalChoices, type SideId } from '../engine/exact/battle-utils.js';
+import { randbatsForPriors } from '../engine/foe-prior.js';
 import { battleToState } from '../engine/exact/search.js';
 import { blendCandidates } from '../llm/blend.js';
 import { toAdvisorCandidates } from '../llm/state-summary.js';
@@ -125,9 +127,13 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
       const plan = await planFor(active, activeConfig, input, client, spend, runtime);
       const legal = legalChoices(input.battle, input.side);
       const budget = Math.min(activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs);
+      const priorStats = legal.length > 0 && foePriorsEnabled(activeConfig.search.params.foePriors, input.variantId)
+        ? randbatsForPriors()
+        : null;
+      const modeled = priorStats ? battleWithFoePriors(input.battle, input.side, priorStats) : null;
       const trace = legal.length === 0
         ? { choice: 'default', scores: [] as Array<{ choice: string; score: number }>, predictedSwitch: undefined, answersPredictedSwitch: undefined }
-        : await active.search.search(input.battle, input.side, {
+        : await active.search.search(modeled || input.battle, modeled ? 'p1' : input.side, {
           evaluate: active.evaluate,
           behavior: active.behavior,
           plan,
@@ -138,6 +144,19 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
         });
       let scores = trace.scores.length ? trace.scores : [{ choice: trace.choice, score: 0 }];
       let choice = applyPolicies(active, input.battle, input.side, legal, plan, scores);
+      if (modeled && choice !== 'default' && !legal.includes(choice)) {
+        const again = await active.search.search(input.battle, input.side, {
+          evaluate: active.evaluate,
+          behavior: active.behavior,
+          plan,
+          rng,
+          rating: input.rating,
+          variantId: input.variantId,
+          deadlineMs: searchDeadline(Date.now(), activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs),
+        });
+        scores = again.scores.length ? again.scores : [{ choice: again.choice, score: 0 }];
+        choice = applyPolicies(active, input.battle, input.side, legal, plan, scores);
+      }
       scores = scores.map(row => ({ ...row, score: row.score }));
       let advisorCalled = false;
       let advisorSource: string | undefined;

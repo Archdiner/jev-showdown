@@ -3,6 +3,8 @@ import { RandbatsStats } from '../types/index.js';
 import { legalChoices, startRandomBattle, teamsForSeed } from './exact/battle-utils.js';
 import { strictLegalActions } from '../client/choice.js';
 import { buildDecisionBattle, chooseLive, LivePosition } from '../client/decision-battle.js';
+import { loadConfig } from '../config/load.js';
+import { battleWithFoePriors, foePriorsEnabled } from '../client/decision-battle.js';
 import { completeFoeTeam, FOE_PRIOR_MIN_BUDGET_MS } from './foe-prior.js';
 import { compareFoePriors } from './foe-prior-compare.js';
 
@@ -111,6 +113,19 @@ describe('foe priors', () => {
   it('returns no invented lead when nothing has been revealed', () => {
     expect(completeFoeTeam([], GARCHOMP)).toEqual([]);
   });
+
+  it('stays off unless a config or the foe-priors variant asks for it', () => {
+    expect(foePriorsEnabled(undefined, 'switch-depth2')).toBe(false);
+    expect(foePriorsEnabled(false)).toBe(false);
+    expect(foePriorsEnabled(true)).toBe(true);
+    expect(foePriorsEnabled(undefined, 'foe-priors')).toBe(true);
+    const champion = loadConfig('configs/champion.yaml');
+    const opted = loadConfig('configs/examples/foe-priors.yaml');
+    expect(champion.config.search.params.foePriors).toBeUndefined();
+    expect(opted.config.search.params.foePriors).toBe(true);
+    expect(opted.config.search.params.samples).toBe(8);
+    expect(opted.configId).not.toBe(champion.configId);
+  });
 });
 
 function openedBattle() {
@@ -144,6 +159,27 @@ function hiddenLead(stats: RandbatsStats): LivePosition {
 }
 
 describe('decision battle priors', () => {
+  it('does not fill the foe unless the position asks for priors', () => {
+    const position = hiddenLead(GARCHOMP);
+    delete position.speciesStats;
+    const built = buildDecisionBattle(position);
+    expect(built).not.toBeNull();
+    if (!built) return;
+    expect(built.p2.pokemon).toHaveLength(1);
+    expect(built.p2.active[0].moveSlots.map(slot => slot.id)).toEqual(['tackle']);
+  });
+
+  it('fills a sim battle when the caller passes the table', () => {
+    const battle = openedBattle();
+    const foe = battle.p2.active[0];
+    const stats = { ...GARCHOMP, [foe.species.name]: GARCHOMP.Garchomp };
+    const modeled = battleWithFoePriors(battle, 'p1', stats);
+    expect(modeled).not.toBeNull();
+    if (!modeled) return;
+    expect(modeled.p2.pokemon).toHaveLength(6);
+    expect(modeled.p1.pokemon.length).toBeGreaterThan(0);
+  });
+
   it('puts the weighted set on the active foe and six pokemon on the team', () => {
     const position = hiddenLead(GARCHOMP);
     const built = buildDecisionBattle(position);

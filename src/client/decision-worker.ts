@@ -65,11 +65,10 @@ async function decide(message: DecideRequest): Promise<void> {
   const started = Date.now();
   const routed = playerFor(message.battleId);
   try {
-    // The parent process does not ship the species table. This worker already
-    // loaded it. A tight search budget keeps the revealed-only foe.
-    const position = message.position
-      ? { ...message.position, useLoadedPriors: message.position.modelHidden !== false }
-      : undefined;
+    // Priors stay off unless the caller sets useLoadedPriors. The ladder
+    // flag does that. A tight budget still skips them. A labeled champion
+    // chooses on the battle chooseLive built.
+    const position = message.position;
     const picked = await chooseLive(routed.engine, position, message.legal, {
       budgetMs: message.searchTimeMs,
       player: routed.player,
