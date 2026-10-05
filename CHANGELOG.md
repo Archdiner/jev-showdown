@@ -1,5 +1,13 @@
 # Changelog
 
+## Invalid choices are not retried into a locked turn
+
+A `/choose` that the server already has is not sent again just because the opponent is still deciding. Showdown treats the second `/choose` as a new decision. When the first choice cannot be undone, or the next turn has started, that resend is `|error|[Invalid choice]`, and the client used to keep sending it. The same choice goes out again only when a clock line for us arrives after the send, which is the case where the server still has the choice open.
+
+Each of those error lines is counted once, with the text after `[Invalid choice]` stored on the game as `invalidChoiceReasons` (at most 8). A chat line that happens to contain the words is not counted. A rejection that means the choice still stands is not replaced. A rejection of the move itself is replaced, and that replacement counts as a fallback.
+
+Move numbers stay request slots. A disabled or no-PP neighbor leaves three legal moves and the choice can still be `move 4`. Damage looks up that slot, including when the revealed-move set dropped the disabled name. It does not score slot 4 as the first remaining name.
+
 ## Reliability sentinel
 
 `npm run ops -- sentinel` reads the ladder logs, ops heartbeats, circuits, drain files, and the process list every minute. Each broken invariant becomes an incident in `state/ops/incidents.jsonl` (folded into `state/ops/incidents.json`). A P0 is a game being lost or data being corrupted now. The incident stays open until the check is clear, and it is verified only after a 10 minute soak. `npm run ops -- scorecard` is the owner screen: uptime, open P0/P1, incidents opened and verified, MTTR, Elo, batch and variant records, and what the gate promoted or rejected. Phantom rows (`phantom: true`, or a 0-turn tie with end reason disconnect or unknown) are left out of those rates, and the files the numbers came from are named. The dashboard shows the same incidents and scorecard. `npm run ops -- sentinel --once --json` prints the current incidents as one JSON object and exits 1 when a P0 is open. `npm run ops -- scorecard --md --since <iso>` compares Elo, win rate, and record with the previous window of the same length. When a game row carries `invalidChoiceReasons`, those reasons are added to the invalid-choice incident. The bot's move choice is unchanged.

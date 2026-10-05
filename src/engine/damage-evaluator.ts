@@ -15,8 +15,12 @@ export class DamageEvaluator {
     const moves = simulator.getMoveNames(myActive);
     if (moves.length === 0) return 50;
 
+    // moveIndex is the request slot (1-4), including disabled and no-PP slots.
+    // A shorter revealed-move list is not that array: slot 4 must not score as slot 1.
     const moveIndex = action.moveIndex - 1;
-    const move = moves[moveIndex] || moves[0] || 'Tackle';
+    if (moveIndex < 0 || moveIndex >= moves.length) return 0;
+    const move = moves[moveIndex];
+    if (!move) return 0;
 
     const damage = simulator.estimateDamage(myActive, oppActive, move);
     const effectiveness = this.getEffectiveness(move, oppActive);

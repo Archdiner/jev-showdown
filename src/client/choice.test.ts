@@ -8,6 +8,7 @@ import {
 } from './choice.js';
 import { parseRatingLine, parseReplayUrl } from './showdown-client.js';
 import { redactSecrets } from './ids.js';
+import { moveSlotIndex } from '../engine/exact/battle-utils.js';
 import { gen9RandomBattle } from '../formats/gen9-randombattle.js';
 import { GameState } from '../types/index.js';
 
@@ -91,6 +92,63 @@ describe('choice validation', () => {
     expect(formatChoice({ type: 'move', moveIndex: 1, terastallize: true }, 3)).toBe('move 1 terastallize|3');
     const state = { myTeam: [], opponentTeam: [], myActive: 0, opponentActive: 0 } as unknown as GameState;
     expect(pickBestLegal(state, [{ type: 'move', moveIndex: 1 }])).toEqual({ type: 'move', moveIndex: 1 });
+  });
+
+  it('keeps protocol slot 4 when a disabled move leaves three legal moves', () => {
+    expect(moveSlotIndex('move 4')).toBe(3);
+    expect(moveSlotIndex('move 4 terastallize')).toBe(3);
+    const garchomp = {
+      rqid: 6,
+      side: {
+        id: 'p1',
+        pokemon: [{
+          ident: 'p1: Garchomp',
+          details: 'Garchomp',
+          condition: '100/100',
+          active: true,
+          moves: ['earthquake', 'swordsdance', 'stoneedge'],
+        }],
+      },
+      active: [{
+        moves: [
+          { move: 'Earthquake', id: 'earthquake', pp: 10, maxpp: 16, target: 'normal', disabled: false },
+          { move: 'Outrage', pp: 0, maxpp: 16, target: 'normal', disabled: true },
+          { move: 'Swords Dance', id: 'swordsdance', pp: 16, maxpp: 16, target: 'self', disabled: false },
+          { move: 'Stone Edge', id: 'stoneedge', pp: 8, maxpp: 8, target: 'normal', disabled: false },
+        ],
+      }],
+    };
+    const legal = legalActionsForRequest(garchomp, gen9RandomBattle).filter(action => action.type === 'move');
+    expect(legal).toEqual([
+      { type: 'move', moveIndex: 1 },
+      { type: 'move', moveIndex: 3 },
+      { type: 'move', moveIndex: 4 },
+    ]);
+    const state = gen9RandomBattle.buildGameState(garchomp, {
+      team: new Map(),
+      activeSpecies: 'Serperior',
+      revealedMoves: new Map(),
+      revealedItems: new Map(),
+      revealedAbilities: new Map(),
+    });
+    state.myTeam[0].revealedMoves = new Set(['earthquake', 'swordsdance', 'stoneedge']);
+    expect(state.myTeam[0].moves).toEqual(['earthquake', 'Outrage', 'swordsdance', 'stoneedge']);
+    expect(pickBestLegal(state, legal)).toEqual({ type: 'move', moveIndex: 4 });
+
+    const noPp = {
+      ...garchomp,
+      active: [{
+        moves: [
+          { move: 'Earthquake', id: 'earthquake', pp: 10, maxpp: 16, target: 'normal', disabled: false },
+          { move: 'Outrage', id: 'outrage', pp: 10, maxpp: 16, target: 'normal', disabled: false },
+          { move: 'Swords Dance', id: 'swordsdance', pp: 16, maxpp: 16, target: 'self', disabled: false },
+          { move: 'Stone Edge', id: 'stoneedge', pp: 0, maxpp: 8, target: 'normal', disabled: true },
+        ],
+      }],
+    };
+    const open = legalActionsForRequest(noPp, gen9RandomBattle).filter(action => action.type === 'move');
+    expect(open.map(action => action.type === 'move' && action.moveIndex)).toEqual([1, 2, 3]);
+    expect(open.some(action => action.type === 'move' && action.moveIndex === 4)).toBe(false);
   });
 });
 

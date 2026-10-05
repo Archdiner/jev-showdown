@@ -26,7 +26,15 @@ import { livePositionFromClient } from './live-position.js';
 import { ourClockUpdate } from './inactive-clock.js';
 import { safeError, toID } from './ids.js';
 import { EngineName, parseEngine } from './engines.js';
-import { appendGameRecord, buildLadderGameRecord, classifyEnd, eloDeltaConsistent, LadderGameRecord } from './game-record.js';
+import {
+  appendGameRecord,
+  buildLadderGameRecord,
+  cappedInvalidChoiceReasons,
+  classifyEnd,
+  eloDeltaConsistent,
+  invalidChoiceReason,
+  LadderGameRecord,
+} from './game-record.js';
 import { attributePopup } from './delivery.js';
 import { EXACT_1PLY, type ExactConfig } from '../engine/exact/search.js';
 import { ladderPolicy } from './ladder-engine.js';
@@ -65,6 +73,7 @@ interface RoomState {
   snapshot: GameState | null;
   answered: Set<number>;
   invalidChoices: number;
+  invalidChoiceReasons: string[];
   crashes: number;
   fallbacks: number;
   mismatchCount: number;
@@ -85,7 +94,11 @@ interface RoomState {
   lastLegal: Action[];
   lastChoice: Action | null;
   lastChoiceText: string | null;
-  /** Choice the server has not confirmed with a new turn or request. */
+  /**
+   * Choice the server has not confirmed with a new turn or request.
+   * Silence is the opponent still choosing. A later clock line for us is
+   * what shows the server still has this choice open.
+   */
   unconfirmed: { choice: string; rqid: number | null; turn: number; resends: number } | null;
   pendingDelivery: number | null;
   choiceDeliveryFailures: number;
@@ -97,8 +110,6 @@ interface RoomState {
   requestTimer?: NodeJS.Timeout;
   finalizeTimer?: NodeJS.Timeout;
   deliveryTimer?: NodeJS.Timeout;
-  /** Fires when a sent choice gets no request and no later turn. */
-  choiceWatchTimer?: NodeJS.Timeout;
 }
 
 export interface BattleDriverOptions {
@@ -122,8 +133,8 @@ export interface BattleDriverOptions {
   /** Delay between choice-delivery retries. Tests use a few milliseconds. */
   deliveryRetryMs?: number;
   /**
-   * After `/choose` returns true, resend if this many milliseconds pass with
-   * no new `|request|` and no later `|turn|`. Tests use a few milliseconds.
+   * Unused. Waiting on the opponent is not a dropped choice, so silence does
+   * not resend `/choose`. Kept so older callers still type-check.
    */
   choiceWatchMs?: number;
   /** How long to wait for a replay popup. Tests use 0. */
@@ -147,10 +158,17 @@ export interface BattleAssignment {
 }
 
 const DELIVERY_ATTEMPTS = 3;
-/** Silence after a sent choice before the same choice is sent again. */
-const CHOICE_WATCH_MS = 8000;
-/** Enough 8s resends to cover a 150s turn that the server never acknowledges. */
+/** Clock ticks that still show our choice is open. A 150s turn can tick several times. */
 const WATCHDOG_RESENDS = 20;
+
+/**
+ * The first `/choose` already stands, or the turn moved on. A second choose
+ * is a new decision: Showdown rejects it, and a replacement would undo a
+ * choice the server kept.
+ */
+function choiceAlreadyLocked(reason: string): boolean {
+  return /too late|can'?t undo|nothing to choose|not your turn|nothing to cancel/i.test(reason);
+}
 
 /**
  * One user's battle loop: protocol state, request reconciliation,
@@ -193,7 +211,6 @@ export class BattleDriver extends EventEmitter {
       if (room.requestTimer) clearTimeout(room.requestTimer);
       if (room.finalizeTimer) clearTimeout(room.finalizeTimer);
       if (room.deliveryTimer) clearTimeout(room.deliveryTimer);
-      this.clearChoiceWatch(room);
       if (!room.finalized) {
         if (!room.ended) room.disconnected = true;
         await this.finalize(room);
@@ -298,16 +315,10 @@ export class BattleDriver extends EventEmitter {
       return;
     }
 
-    if (/invalid choice/i.test(line)) {
-      room.invalidChoices += 1;
+    const rejected = invalidChoiceReason(line);
+    if (rejected) {
       this.options.onBattleFault?.(room.roomId, 'invalid-move');
-      room.log.write({
-        type: 'error',
-        battleId: room.roomId,
-        invalidChoice: true,
-        message: line,
-      });
-      void this.retryChoice(room, line);
+      this.noteInvalidChoice(room, rejected, line);
       return;
     }
 
@@ -337,6 +348,7 @@ export class BattleDriver extends EventEmitter {
       snapshot: null,
       answered: new Set(),
       invalidChoices: 0,
+      invalidChoiceReasons: [],
       crashes: 0,
       fallbacks: 0,
       mismatchCount: 0,
@@ -731,7 +743,6 @@ export class BattleDriver extends EventEmitter {
       turn: room.turns,
       resends: source === 'watchdog' ? watchdogResends : 0,
     };
-    this.armChoiceWatch(room);
     room.log.write({
       type: 'choice-delivery',
       kind: 'choice-delivery',
@@ -793,9 +804,9 @@ export class BattleDriver extends EventEmitter {
   }
 
   /**
-   * `/choose` returned true and nothing from the server has shown the choice
-   * was applied. Send the same string, including the same rqid, to this room
-   * again. Turn 1 is included: a choice sent before `|turn|2` is still pending.
+   * A clock line for us arrived after `/choose`. The server only sends that
+   * while this player is still choosing, so the same choice and rqid go out
+   * again. Silence is not this case: the opponent may simply be deciding.
    */
   private resendUnconfirmed(room: RoomState): void {
     const pending = room.unconfirmed;
@@ -828,23 +839,38 @@ export class BattleDriver extends EventEmitter {
   /** A new `|request|` or a later `|turn|` means this choice is no longer pending. */
   private dropUnconfirmed(room: RoomState): void {
     room.unconfirmed = null;
-    this.clearChoiceWatch(room);
   }
 
-  private armChoiceWatch(room: RoomState): void {
-    this.clearChoiceWatch(room);
-    if (!room.unconfirmed || room.ended || room.finalized || this.stopped) return;
-    const delay = this.options.choiceWatchMs ?? CHOICE_WATCH_MS;
-    room.choiceWatchTimer = setTimeout(() => {
-      room.choiceWatchTimer = undefined;
-      this.resendUnconfirmed(room);
-    }, delay);
-  }
-
-  private clearChoiceWatch(room: RoomState): void {
-    if (!room.choiceWatchTimer) return;
-    clearTimeout(room.choiceWatchTimer);
-    room.choiceWatchTimer = undefined;
+  private noteInvalidChoice(room: RoomState, reason: string, line: string): void {
+    room.invalidChoices += 1;
+    room.invalidChoiceReasons = cappedInvalidChoiceReasons([...room.invalidChoiceReasons, reason]);
+    room.log.write({
+      type: 'error',
+      battleId: room.roomId,
+      invalidChoice: true,
+      message: line,
+      reason,
+    });
+    this.dropUnconfirmed(room);
+    if (choiceAlreadyLocked(reason)) {
+      const rqid = typeof room.lastRequest?.rqid === 'number' ? room.lastRequest.rqid : null;
+      room.log.write({
+        type: 'choice-delivery',
+        kind: 'choice-delivery',
+        battleId: room.roomId,
+        intendedRoomId: room.roomId,
+        sentRoomId: null,
+        rqid,
+        choice: room.lastChoiceText,
+        sent: false,
+        cause: /not your turn/i.test(reason) ? 'not-your-turn' : 'server-rejected',
+        serverLine: line,
+        retry: room.retries,
+        replacement: null,
+      });
+      return;
+    }
+    void this.retryChoice(room, line);
   }
 
   private rqidCurrent(room: RoomState, rqid: number | null): boolean {
@@ -903,6 +929,7 @@ export class BattleDriver extends EventEmitter {
       retry: room.retries,
       replacement: choice,
     });
+    room.fallbacks += 1;
     room.log.write({
       type: 'fallback',
       kind: 'fallback',
@@ -1100,6 +1127,7 @@ export class BattleDriver extends EventEmitter {
       winner: room.winner,
       turns: room.turns || room.battle.turn || 0,
       invalidChoices: room.invalidChoices,
+      invalidChoiceReasons: room.invalidChoiceReasons,
       crashes: room.crashes,
       fallbacks: room.fallbacks,
       mismatches: room.mismatchCount,

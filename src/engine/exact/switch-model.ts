@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Battle } from '@pkmn/sim';
-import { SideId, legalChoices } from './battle-utils.js';
+import { SideId, legalChoices, moveSlotIndex } from './battle-utils.js';
 import {
   SWITCH_FEATURES,
   featureVector,
@@ -83,7 +83,7 @@ function moveDamage(battle: Battle, side: SideId, choice: string): number {
   const attacker = battle.getSide(side).active[0];
   const defender = battle.getSide(side).foe.active[0];
   if (!attacker || !defender) return 0;
-  const index = Number(choice.slice(5)) - 1;
+  const index = moveSlotIndex(choice);
   const moveId = attacker.moveSlots[index]?.id;
   if (!moveId) return 0;
   const weather = (battle.field as any).weather?.id as string | undefined;
