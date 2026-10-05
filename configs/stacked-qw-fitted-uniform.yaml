@@ -1,0 +1,7 @@
+name: stacked-qw-fitted-uniform
+extends: stacked-qw-fitted.yaml
+# stacked-qw-fitted with the uniform foe reply model (every legal foe
+# choice equally likely) via the behavior layer, instead of max-damage.
+opponentModel:
+  behavior:
+    id: uniform

@@ -90,6 +90,14 @@ export const SearchParamsSchema = z.object({
   replySolveReplies: z.number().int().min(2).max(10).optional(),
   replySolveSamples: z.number().int().min(1).max(16).optional(),
   replySolveNashWeight: z.number().min(0).max(1).optional(),
+  /**
+   * Opt-in foe reply model for exact-1ply-qw: 'switch' uses the fitted
+   * switch model (switch-model.ts: P(switch) x ranked switches + damage-
+   * weighted moves, top replySwitchMax kept). Unset keeps the behavior
+   * layer's model (max-damage) and every existing config id.
+   */
+  replyModel: z.enum(['switch']).optional(),
+  replySwitchMax: z.number().int().min(1).max(6).optional(),
 }).strict();
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
 

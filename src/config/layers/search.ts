@@ -125,7 +125,9 @@ async function runSearch(
     return { choice, scores: [{ choice, score: 1 }] };
   }
   if (id === QUICK_WIN_SEARCH_ID) {
-    const model = ctx.behavior.exactModel || (params.opponentModel === 'uniform' ? 'uniform' : 'max-damage');
+    const model = params.replyModel === 'switch'
+      ? 'switch'
+      : ctx.behavior.exactModel || (params.opponentModel === 'uniform' ? 'uniform' : 'max-damage');
     const trace = exactSearch(battle, side, {
       ...EXACT_1PLY_QW,
       depth: params.depth,
@@ -134,6 +136,7 @@ async function runSearch(
       evalMode: evalModeOf(ctx),
       deadlineMs: ctx.deadlineMs,
       statsPrior: statsPriorOf(params.foeStats),
+      ...(params.replyModel === 'switch' ? { maxReplies: params.replySwitchMax ?? 2 } : {}),
       ...(params.endgameMons != null
         ? { endgame: { mons: params.endgameMons, depth: params.endgameDepth ?? 2 } }
         : {}),
