@@ -590,12 +590,22 @@ function liveFallbackFlood(ctx: SentinelContext): CheckHit[] {
   }
 
   const hits: CheckHit[] = [];
+  const gamesByBattle = new Map<string, ObservedGame>();
+  for (const game of ctx.games) {
+    if (game.battleId && isOpsLiveGame(game)) gamesByBattle.set(game.battleId, game);
+  }
+
   for (const [battleId, row] of beats) {
     if (row.count <= LIVE_FALLBACK_HEARTBEAT_MAX) continue;
+    const game = gamesByBattle.get(battleId);
     hits.push({
       key: `flood:${battleId}`,
       detail: `${battleId} has ${row.count} choice-fallback heartbeats (threshold ${LIVE_FALLBACK_HEARTBEAT_MAX})`,
       evidence: row.evidence,
+      at: game?.ts ?? null,
+      gitSha: game?.gitSha ?? null,
+      runId: game?.runId ?? null,
+      battleId,
     });
   }
 
@@ -603,14 +613,11 @@ function liveFallbackFlood(ctx: SentinelContext): CheckHit[] {
     if (!isOpsLiveGame(game) || !inLookback(ctx, game.ts) || !game.battleId) continue;
     const counted = beats.get(game.battleId)?.count ?? 0;
     if (counted === game.fallbacks) continue;
-    hits.push({
-      key: `disagree:${game.battleId}`,
-      detail: `${game.battleId} row fallbacks=${game.fallbacks} but choice-fallback heartbeats=${counted}`,
-      evidence: [
-        { file: game.file, line: game.line, detail: `fallbacks=${game.fallbacks}` },
-        ...(beats.get(game.battleId)?.evidence ?? []),
-      ],
-    });
+    hits.push(fieldHit(game, `disagree:${game.battleId}`, `row fallbacks=${game.fallbacks} but choice-fallback heartbeats=${counted}`));
+    const beatEvidence = beats.get(game.battleId)?.evidence ?? [];
+    for (const ev of beatEvidence) {
+      if (hits[hits.length - 1].evidence.length < 8) hits[hits.length - 1].evidence.push(ev);
+    }
   }
   return hits;
 }
