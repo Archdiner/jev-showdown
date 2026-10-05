@@ -1,3 +1,4 @@
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -8,7 +9,7 @@ import { acknowledge, incidentStore, loadIncidents, markFixing } from './inciden
 import { buildScorecard, formatScorecard, parseSince } from './scorecard.js';
 import { loadContext } from './load.js';
 import { readEvents } from './incidents.js';
-import { layoutFromEnv, scanOnce } from './run.js';
+import { layoutFromEnv, renderScorecard, runSentinel, scanOnce } from './run.js';
 import type { GitStatus, Layout, ProcessSnapshot } from './types.js';
 
 const quietGit: GitStatus = { behind: 0, ref: 'origin/main', detail: 'HEAD contains origin/main' };
@@ -233,11 +234,143 @@ describe('scorecard', () => {
     expect(markdown.startsWith('# jev scorecard')).toBe(true);
   });
 
-  test('parseSince accepts 24h and rejects a bare word', () => {
+  test('parseSince accepts 24h, an ISO start, and rejects a bare word', () => {
     expect(parseSince('24h', 0)).toBe(24 * 60 * 60 * 1000);
     expect(parseSince('30m', 0)).toBe(30 * 60 * 1000);
     expect(parseSince(undefined, 5)).toBe(5);
+    const now = Date.parse('2026-10-05T00:00:00.000Z');
+    expect(parseSince('2026-10-04T00:00:00.000Z', 0, now)).toBe(24 * 60 * 60 * 1000);
     expect(() => parseSince('tomorrow', 0)).toThrow(/--since/);
+    expect(() => parseSince('2026-10-06T00:00:00.000Z', 0, now)).toThrow(/not before now/);
+  });
+
+  test('markdown scorecard compares Elo, win rate, and record with the previous window', () => {
+    const { layout } = emptyRoot();
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    const now = Date.parse('2026-10-05T12:00:00.000Z');
+    const hour = 60 * 60 * 1000;
+    const row = (battleId: string, ts: number, outcome: 'win' | 'loss', eloAfter: number) => JSON.stringify({
+      schema: 'jev.ladder-game.v1',
+      kind: 'ladder-game',
+      source: 'ladder',
+      localServer: false,
+      username: 'asad',
+      format: 'gen9randombattle',
+      battleId,
+      ts,
+      outcome,
+      endReason: 'ko',
+      turns: 12,
+      eloAfter,
+    });
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'games.jsonl'), [
+      row('prior-win', now - 3 * hour, 'win', 1400),
+      row('prior-loss', now - 2.5 * hour, 'loss', 1380),
+      row('boundary', now - 2 * hour, 'loss', 1360),
+      row('now-win', now - hour, 'win', 1500),
+      row('now-win-2', now - 30 * 60 * 1000, 'win', 1520),
+      row('now-loss', now - 10 * 60 * 1000, 'loss', 1510),
+    ].join('\n') + '\n');
+    const markdown = renderScorecard(layout, {
+      now,
+      since: '2026-10-05T10:00:00.000Z',
+      markdown: true,
+      processes: [],
+      git: quietGit,
+      scanProcesses: false,
+    });
+    expect(markdown.startsWith('# jev scorecard')).toBe(true);
+    expect(markdown).toContain('vs prior');
+    expect(markdown).toContain('1400 → 1380 (-20) on 2 games → 1360 → 1510 (+150) on 4 games');
+    expect(markdown).toContain('50.0% → 50.0%');
+    expect(markdown).toContain('1-1-0 on 2 games → 2-2-0 on 4 games');
+    expect(markdown).toContain('end Elo +130 versus the previous window');
+  });
+});
+
+describe('sentinel once --json', () => {
+  test('prints current incidents and exits 1 when a P0 is open', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-sentinel-cli-'));
+    writeTonightFixture(root);
+    const result = spawnSync(path.join(process.cwd(), 'node_modules', '.bin', 'tsx'), ['src/ops/cli.ts', 'sentinel', '--once', '--json'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        OPS_DIR: path.join(root, 'ops'),
+        LADDER_LOG_DIR: path.join(root, 'ladder'),
+        LIVE_RUNS_DIR: path.join(root, 'live-runs'),
+        JEV_DATA_DIR: path.join(root, 'data'),
+        GRAPH_DB: path.join(root, 'graph.db'),
+      },
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(1);
+    const body = JSON.parse(result.stdout) as { openP0: number; incidents: Array<{ checkId: string; status: string }> };
+    expect(body.openP0).toBeGreaterThan(0);
+    expect(body.incidents.some(item => item.checkId === 'species-count' && item.status === 'open')).toBe(true);
+  });
+
+  test('exits 0 and prints an empty incident list when no P0 is open', async () => {
+    const { layout } = emptyRoot();
+    const logs: string[] = [];
+    const original = console.log;
+    console.log = (line?: unknown) => {
+      logs.push(String(line));
+    };
+    try {
+      const code = await runSentinel(layout, { once: true, json: true, processes: [], git: quietGit });
+      expect(code).toBe(0);
+    } finally {
+      console.log = original;
+    }
+    const body = JSON.parse(logs.at(-1) ?? '') as { openP0: number; incidents: unknown[] };
+    expect(body.openP0).toBe(0);
+    expect(body.incidents).toEqual([]);
+  });
+});
+
+describe('invalid choice reasons', () => {
+  test('adds reasons from invalidChoiceReasons when the field exists', () => {
+    const { layout } = emptyRoot();
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    const now = Date.now();
+    const base = {
+      schema: 'jev.ladder-game.v1',
+      kind: 'ladder-game',
+      source: 'ladder',
+      localServer: false,
+      username: 'asad',
+      format: 'gen9randombattle',
+      outcome: 'loss',
+      endReason: 'ko',
+      turns: 8,
+      ts: now - 1000,
+    };
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'games.jsonl'), [
+      JSON.stringify({
+        ...base,
+        battleId: 'battle-reasons',
+        invalidChoices: 0,
+        invalidChoiceReasons: ["Can't switch: trapped", { reason: 'Move is disabled' }],
+      }),
+      JSON.stringify({ ...base, battleId: 'battle-count', invalidChoices: 2 }),
+      JSON.stringify({
+        type: 'error',
+        battleId: 'battle-row',
+        ts: now - 500,
+        invalidChoiceReasons: ["Can't move: Dynamax is not active"],
+      }),
+    ].join('\n') + '\n');
+    const result = scanOnce(layout, { now, processes: [], git: quietGit });
+    const hits = result.hits.filter(hit => hit.id === 'invalid-choices');
+    const reasons = hits.find(hit => hit.key === 'battle-reasons');
+    const counted = hits.find(hit => hit.key === 'battle-count');
+    const rowOnly = hits.find(hit => hit.key === 'battle-row');
+    expect(reasons?.detail).toContain("Can't switch: trapped");
+    expect(reasons?.detail).toContain('Move is disabled');
+    expect(counted?.detail).toContain('invalidChoices=2');
+    expect(counted?.detail).not.toContain('reasons:');
+    expect(rowOnly?.detail).toContain("Can't move: Dynamax is not active");
   });
 });
 

@@ -39,6 +39,7 @@ export interface Scorecard {
     promoted: string[];
     rejected: string[];
     regressions: string[];
+    previous: WindowRecord & { start: number; end: number };
   };
   openIncidents: Array<{ id: string; severity: string; status: string; count: number; title: string; detail: string }>;
   omittedOpen: number;
@@ -47,14 +48,27 @@ export interface Scorecard {
 
 const PHANTOM_RULE = 'phantom is true, or turns = 0 with outcome tie and endReason disconnect or unknown';
 
+export interface WindowRecord {
+  eloFirst: number | null;
+  eloLast: number | null;
+  eloGames: number;
+  wins: number;
+  losses: number;
+  ties: number;
+  counted: number;
+  winRate: number | null;
+}
+
 export function buildScorecard(ctx: SentinelContext, incidents: Incident[], events: IncidentEvent[], sinceMs: number): Scorecard {
   const since = ctx.now - sinceMs;
-  const inWindow = (ts: number | null) => ts !== null && ts >= since && ts <= ctx.now + 60_000;
-  const windowGames = ctx.games.filter(game => inWindow(game.ts));
-  const phantoms = windowGames.filter(game => game.phantom);
-  const local = windowGames.filter(game => !game.phantom && game.local);
-  const counted = windowGames.filter(game => !game.phantom && !game.local && game.outcome);
-  const ladderRated = counted.filter(game => game.ladder && game.eloAfter !== null).sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+  const currentGames = gamesBetween(ctx.games, since, ctx.now + 60_000, true);
+  const previousGames = gamesBetween(ctx.games, since - sinceMs, since, false);
+  const phantoms = currentGames.filter(game => game.phantom);
+  const local = currentGames.filter(game => !game.phantom && game.local);
+  const counted = countable(currentGames);
+  const previousCounted = countable(previousGames);
+  const ladderRated = ratedLadder(counted);
+  const previous = { ...windowRecord(previousCounted), start: since - sinceMs, end: since };
   const sources = sourceList(ctx);
   const uptime = liveUptime(ctx, since);
   const opened = events.filter(event => (event.type === 'opened' || event.type === 'reopened') && event.ts >= since).length;
@@ -114,6 +128,7 @@ export function buildScorecard(ctx: SentinelContext, incidents: Incident[], even
       promoted: graph.promoted,
       rejected: graph.rejected,
       regressions: graph.regressions,
+      previous,
     },
     openIncidents: listed.map(item => ({
       id: item.id,
@@ -163,6 +178,7 @@ export function formatScorecard(card: Scorecard, style: 'text' | 'md' = 'text'):
   lines.push(`             source ${card.progress.eloSource}`);
   const rate = card.progress.winRate === null ? 'n/a' : pct(card.progress.winRate);
   lines.push(`  win rate   ${rate}  ${card.progress.wins}-${card.progress.losses}-${card.progress.ties} on ${card.progress.counted} games  target ${pct(card.progress.winTarget)}`);
+  lines.push(...priorLines(card));
   lines.push('  batches');
   if (card.progress.batches.length === 0) lines.push('    none');
   for (const batch of card.progress.batches) {
@@ -184,18 +200,98 @@ export function formatScorecard(card: Scorecard, style: 'text' | 'md' = 'text'):
   return lines.join('\n');
 }
 
-export function parseSince(value: string | undefined, fallbackMs: number): number {
+export function parseSince(value: string | undefined, fallbackMs: number, now = Date.now()): number {
   if (!value) return fallbackMs;
-  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/.exec(value.trim());
-  if (!match) {
-    const asNumber = Number(value);
-    if (Number.isFinite(asNumber) && asNumber > 0) return asNumber;
-    throw new Error(`--since must look like 24h, 7d, 30m, or a millisecond count (got ${value})`);
+  const trimmed = value.trim();
+  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/.exec(trimmed);
+  if (match) {
+    const amount = Number(match[1]);
+    const unit = match[2];
+    const scale = unit === 'ms' ? 1 : unit === 's' ? 1000 : unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000;
+    return amount * scale;
   }
-  const amount = Number(match[1]);
-  const unit = match[2];
-  const scale = unit === 'ms' ? 1 : unit === 's' ? 1000 : unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000;
-  return amount * scale;
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    const asNumber = Number(trimmed);
+    if (Number.isFinite(asNumber) && asNumber > 0) return asNumber;
+  }
+  const absolute = Date.parse(trimmed);
+  if (Number.isFinite(absolute)) {
+    const span = now - absolute;
+    if (span <= 0) throw new Error(`--since ${trimmed} is not before now`);
+    return span;
+  }
+  throw new Error(`--since must look like 24h, 7d, 30m, a millisecond count, or an ISO timestamp (got ${value})`);
+}
+
+function gamesBetween(games: ObservedGame[], start: number, end: number, endInclusive: boolean): ObservedGame[] {
+  return games.filter(game => {
+    if (game.ts === null) return false;
+    if (game.ts < start) return false;
+    return endInclusive ? game.ts <= end : game.ts < end;
+  });
+}
+
+function countable(games: ObservedGame[]): ObservedGame[] {
+  return games.filter(game => !game.phantom && !game.local && game.outcome);
+}
+
+function ratedLadder(games: ObservedGame[]): ObservedGame[] {
+  return games.filter(game => game.ladder && game.eloAfter !== null).sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+}
+
+function windowRecord(counted: ObservedGame[]): WindowRecord {
+  const rated = ratedLadder(counted);
+  const tally = tallyOf(counted);
+  return {
+    eloFirst: rated[0]?.eloAfter ?? null,
+    eloLast: rated[rated.length - 1]?.eloAfter ?? null,
+    eloGames: rated.length,
+    wins: tally.wins,
+    losses: tally.losses,
+    ties: tally.ties,
+    counted: tally.games,
+    winRate: tally.winRate,
+  };
+}
+
+function priorLines(card: Scorecard): string[] {
+  const prior = card.progress.previous;
+  const current = card.progress;
+  const start = new Date(prior.start).toISOString();
+  const end = new Date(prior.end).toISOString();
+  const lines = [
+    `  vs prior   previous ${formatDuration(card.sinceMs)} (${start} → ${end}), same exclusions`,
+    `  Elo        ${eloPhrase(prior)} → ${eloPhrase(current)}`,
+    `  win rate   ${ratePhrase(prior)} → ${ratePhrase(current)}`,
+    `  record     ${recordPhrase(prior)} → ${recordPhrase(current)}`,
+  ];
+  if (prior.eloLast !== null && current.eloLast !== null) {
+    lines.push(`             end Elo ${signed(current.eloLast - prior.eloLast)} versus the previous window`);
+  }
+  if (prior.winRate !== null && current.winRate !== null) {
+    lines.push(`             win rate ${signedPoints((current.winRate - prior.winRate) * 100)} points versus the previous window`);
+  }
+  return lines;
+}
+
+function eloPhrase(record: WindowRecord): string {
+  if (record.eloGames === 0 || record.eloFirst === null || record.eloLast === null) return 'no rated ladder games';
+  return `${record.eloFirst} → ${record.eloLast} (${signed(record.eloLast - record.eloFirst)}) on ${record.eloGames} games`;
+}
+
+function ratePhrase(record: WindowRecord): string {
+  if (record.winRate === null) return 'n/a';
+  return pct(record.winRate);
+}
+
+function recordPhrase(record: WindowRecord): string {
+  return `${record.wins}-${record.losses}-${record.ties} on ${record.counted} games`;
+}
+
+function signedPoints(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  if (rounded > 0) return `+${rounded.toFixed(1)}`;
+  return rounded.toFixed(1);
 }
 
 function liveUptime(ctx: SentinelContext, since: number): { ratio: number | null; detail: string } {

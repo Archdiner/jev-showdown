@@ -47,6 +47,7 @@ export function observeGames(rows: LogRow[]): ObservedGame[] {
         rating: numberOrNull(value.rating) ?? numberOrNull(value.ratingAfter) ?? numberOrNull(value.elo),
       }),
       invalid: numberOrNull(value.invalidChoices) ?? numberOrNull(value.invalid) ?? 0,
+      invalidChoiceReasons: invalidChoiceReasonsOf(value.invalidChoiceReasons),
       crashes: numberOrNull(value.crashes) ?? 0,
       fallbacks: numberOrNull(value.fallbacks) ?? 0,
       minTimerMarginSec: numberOrNull(value.minTimerMarginSec) ?? numberOrNull(value.minTimerSeconds),
@@ -113,6 +114,35 @@ function latencyP95(value: Record<string, unknown>): number | null {
     return numberOrNull((latency as { p95?: unknown }).p95);
   }
   return null;
+}
+
+/**
+ * Reasons from `invalidChoiceReasons` when another writer has added the field.
+ * Accepts a string, a list of strings, or objects with `reason`, `message`, or `text`.
+ * An absent or empty field contributes nothing.
+ */
+export function invalidChoiceReasonsOf(value: unknown): string[] {
+  const found: string[] = [];
+  const push = (text: string) => {
+    const trimmed = text.trim();
+    if (trimmed && !found.includes(trimmed)) found.push(trimmed);
+  };
+  if (typeof value === 'string') {
+    push(value);
+    return found;
+  }
+  if (!Array.isArray(value)) return found;
+  for (const item of value) {
+    if (typeof item === 'string') {
+      push(item);
+      continue;
+    }
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    const reason = record.reason ?? record.message ?? record.text;
+    if (typeof reason === 'string') push(reason);
+  }
+  return found;
 }
 
 function text(value: unknown): string | null {

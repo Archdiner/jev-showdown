@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { percentile } from '../../client/live-metrics.js';
+import { invalidChoiceReasonsOf } from './games.js';
 import { defaultAnalystDirs, listGameJsonl } from '../ingest.js';
 import type { CheckHit, Evidence, InvariantCheck, ObservedGame, ProcessSnapshot, SentinelContext } from './types.js';
 
@@ -31,8 +32,8 @@ export const CHECKS: InvariantCheck[] = [
     id: 'invalid-choices',
     severity: 'P0',
     title: 'A finished game logged invalid choices',
-    suggestedFix: 'The choice must be one of the legal actions on that request. An invalid choice is a lost turn.',
-    detect: ctx => countField(ctx, 'invalid', game => game.invalid > 0, game => `invalidChoices=${game.invalid}`),
+    suggestedFix: 'The choice must be one of the legal actions on that request. An invalid choice is a lost turn. When invalidChoiceReasons is present, each new reason is listed on the incident.',
+    detect: invalidChoices,
   },
   {
     id: 'crash-or-fallback',
@@ -591,6 +592,69 @@ function malformedLines(ctx: SentinelContext): CheckHit[] {
       detail: `${row.file}:${row.line} ${row.error}`,
       evidence: [{ file: row.file, line: row.line, detail: row.error ?? 'invalid JSON' }],
     }));
+}
+
+function invalidChoices(ctx: SentinelContext): CheckHit[] {
+  const fromRows = reasonsOnRows(ctx);
+  const hits: CheckHit[] = [];
+  const seen = new Set<string>();
+  for (const game of recentReal(ctx)) {
+    const key = game.battleId || `${game.file}:${game.line}`;
+    if (seen.has(key)) continue;
+    const reasons = mergeReasons(game.invalidChoiceReasons, fromRows.get(game.battleId) ?? []);
+    if (game.invalid <= 0 && reasons.length === 0) continue;
+    seen.add(key);
+    const count = game.invalid > 0 ? `invalidChoices=${game.invalid}` : 'invalidChoiceReasons present with invalidChoices=0';
+    const detail = reasons.length ? `${count} reasons: ${reasons.join('; ')}` : count;
+    hits.push({
+      key,
+      detail: `${game.battleId || game.file} ${detail}`,
+      evidence: [
+        { file: game.file, line: game.line, detail },
+        ...reasons.map(reason => ({ file: game.file, line: game.line, detail: reason })),
+      ],
+    });
+  }
+  for (const [battleId, reasons] of fromRows) {
+    if (!battleId || seen.has(battleId) || reasons.length === 0) continue;
+    const row = ctx.rows.find(item => {
+      if (!item.value || !inLookback(ctx, numberOf(item.value.ts))) return false;
+      const id = text(item.value.battleId) ?? text(item.value.id);
+      return id === battleId;
+    });
+    if (!row) continue;
+    seen.add(battleId);
+    hits.push({
+      key: battleId,
+      detail: `${battleId} invalidChoiceReasons: ${reasons.join('; ')}`,
+      evidence: [
+        { file: row.file, line: row.line, detail: reasons.join('; ') },
+        ...reasons.map(reason => ({ file: row.file, line: row.line, detail: reason })),
+      ],
+    });
+  }
+  return hits;
+}
+
+function reasonsOnRows(ctx: SentinelContext): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const row of ctx.rows) {
+    if (!row.value || !Object.prototype.hasOwnProperty.call(row.value, 'invalidChoiceReasons')) continue;
+    if (!inLookback(ctx, numberOf(row.value.ts))) continue;
+    const battleId = text(row.value.battleId) ?? text(row.value.id) ?? '';
+    const reasons = invalidChoiceReasonsOf(row.value.invalidChoiceReasons);
+    if (!reasons.length) continue;
+    out.set(battleId, mergeReasons(out.get(battleId) ?? [], reasons));
+  }
+  return out;
+}
+
+function mergeReasons(left: string[], right: string[]): string[] {
+  const out = [...left];
+  for (const reason of right) {
+    if (!out.includes(reason)) out.push(reason);
+  }
+  return out;
 }
 
 function countField(

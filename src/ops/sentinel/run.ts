@@ -86,9 +86,10 @@ export async function runSentinel(
 }
 
 export function renderScorecard(layout: Layout, options: LoadOptions & { since?: string; markdown?: boolean } = {}): string {
-  const ctx = loadContext(layout, options);
+  const now = options.now ?? Date.now();
+  const ctx = loadContext(layout, { ...options, now });
   const store = incidentStore(layout.opsDir);
-  const sinceMs = parseSince(options.since, DEFAULTS.lookbackMs);
+  const sinceMs = parseSince(options.since, DEFAULTS.lookbackMs, now);
   const card = buildScorecard(ctx, loadIncidents(store), readEvents(store.eventsPath), sinceMs);
   return formatScorecard(card, options.markdown ? 'md' : 'text');
 }

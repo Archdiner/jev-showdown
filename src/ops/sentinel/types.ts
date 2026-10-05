@@ -98,6 +98,8 @@ export interface ObservedGame {
   eloBefore: number | null;
   eloAfter: number | null;
   invalid: number;
+  /** Reasons from `invalidChoiceReasons` when that field is present. Empty when the field is absent. */
+  invalidChoiceReasons: string[];
   crashes: number;
   fallbacks: number;
   minTimerMarginSec: number | null;

@@ -520,9 +520,10 @@ The same page has an Incidents panel and a Scorecard panel. Incidents come from 
 ```bash
 npm run ops -- sentinel              # loop every 60s
 npm run ops -- sentinel --once       # one pass; exit 1 when a P0 is open, acknowledged, or fixing
-npm run ops -- sentinel --once --json
+npm run ops -- sentinel --once --json   # one JSON object; exit 1 when a P0 is open
 npm run ops -- scorecard --since 24h
 npm run ops -- scorecard --since 24h --md
+npm run ops -- scorecard --md --since 2026-10-04T00:00:00.000Z
 npm run ops -- sentinel --ack inc-id
 npm run ops -- sentinel --fixing inc-id --pr https://github.com/Archdiner/jev-showdown/pull/1
 npm run ops -- sentinel --root-cause inc-id --text "two runners shared one login"
@@ -537,7 +538,7 @@ P0 is losing games or corrupting data now. P1 is the loop or visibility broken. 
 | duplicate-ladder-runners | P0 | More than one `ladder.ts` on one account, including two pids choosing in one room and the forfeit that follows |
 | choice-sent-not-applied | P0 | Turn-1 `our-timer` after a choice logged `sent: true` with no move, switch, or later turn |
 | phantom-games | P0 | Rows flagged `phantom`, or 0-turn ties whose reason is disconnect or unknown |
-| invalid-choices | P0 | `invalidChoices` greater than 0 |
+| invalid-choices | P0 | `invalidChoices` greater than 0, plus each reason in `invalidChoiceReasons` when that field is present |
 | crash-or-fallback | P0 | `crashes` or `fallbacks` greater than 0 |
 | species-count | P0 | `data/gen9-stats.json` missing or under 500 species (a test stub left in the repo) |
 | ghost-rooms | P1 | A room with no result while `state/DRAIN` or `live-runs/*.drain` exists |
@@ -558,7 +559,7 @@ P0 is losing games or corrupting data now. P1 is the loop or visibility broken. 
 | checkout-behind | P2 | `HEAD` is behind `origin/main` |
 | malformed-log-line | P3 | A JSONL line that is not an object |
 
-The scorecard names its files. It drops phantom games (`phantom: true`, or a 0-turn tie with end reason disconnect or unknown) and local games from Elo and win rate, and it says how many it dropped. Uptime is the share of the window covered by fresh `live` heartbeats. MTTR is the mean time from an incident's episode open to `verified`. Progress is the Elo series, per-batch and per-variant record, win rate against the target, gate decisions plus finished factory jobs, what was promoted or rejected and why, and open regressions. `src/ops/sentinel/fixtures.ts` writes a log set with all of the failures above for the tests.
+The scorecard names its files. It drops phantom games (`phantom: true`, or a 0-turn tie with end reason disconnect or unknown) and local games from Elo and win rate, and it says how many it dropped. `--since` is a duration (`24h`) or an ISO timestamp for the start of the window. Elo, win rate, and the win-loss-tie record are compared with the previous window of the same length. `npm run ops -- sentinel --once --json` prints the current incidents as one JSON object and exits 1 when a P0 is open, so a scheduler can call it. Uptime is the share of the window covered by fresh `live` heartbeats. MTTR is the mean time from an incident's episode open to `verified`. Progress is the Elo series, per-batch and per-variant record, win rate against the target, gate decisions plus finished factory jobs, what was promoted or rejected and why, and open regressions. `src/ops/sentinel/fixtures.ts` writes a log set with all of the failures above for the tests.
 
 `supervise` does not start the sentinel. A P0 makes `--once` exit 1, and the supervisor would treat that as a crash. Run sentinel beside the other four.
 
