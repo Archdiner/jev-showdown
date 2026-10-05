@@ -16,6 +16,9 @@ import switchProfile from '../../../experiments/switch-depth2/config.json' with 
 import { rankedSwitches } from './matchup.js';
 import { pruneReplies, replyDistribution, WeightedChoice } from './switch-model.js';
 import { teamEval } from './team-eval.js';
+import { sampleWorlds, type WorldSample, type WorldEvidence } from './worlds.js';
+
+export type { WorldEvidence };
 
 export interface ExactConfig {
   depth: number;
@@ -275,4 +278,142 @@ function rollout(
     if (score > best) best = score;
   }
   return best;
+}
+
+/**
+ * Determinized (sampled-world) exact search configuration.
+ */
+export interface DetConfig extends ExactConfig {
+  /** Number of opponent worlds to sample. */
+  worlds: number;
+  /** How to aggregate scores across worlds. */
+  aggregate: 'mean' | 'robust' | 'band75';
+  /** For 'robust': mean - lambda * std. */
+  robustLambda?: number;
+}
+
+export const EXACT_DET_1PLY: DetConfig = {
+  ...EXACT_1PLY,
+  samples: 2,
+  worlds: 8,
+  aggregate: 'mean',
+};
+
+export interface WorldTrace {
+  tag: string;
+  weight: number;
+  best: string;
+  bestScore: number;
+}
+
+export interface DetSearchTrace extends SearchTrace {
+  /** Per-world details for logging. */
+  worlds?: WorldTrace[];
+  /** Worlds completed before deadline. */
+  worldsCompleted?: number;
+}
+
+/**
+ * Determinized exact search over sampled opponent worlds.
+ * 
+ * Samples K plausible opponent teams from randbats data conditioned on
+ * revealed info, runs exact search in each world, and aggregates scores.
+ */
+export function determinizedSearch(
+  evidence: WorldEvidence,
+  buildBattle: (world: WorldSample) => Battle | null,
+  sideId: SideId,
+  cfg: DetConfig,
+  stats: any,
+  rng: PRNG,
+): DetSearchTrace {
+  const started = Date.now();
+  const deadline = (cfg as any).deadlineMs ? started + (cfg as any).deadlineMs : Infinity;
+  
+  // Sample worlds
+  const worlds = sampleWorlds(evidence, cfg.worlds, stats, rng);
+  if (worlds.length === 0) {
+    return { choice: 'default', scores: [], worldsCompleted: 0 };
+  }
+  
+  // Score each choice across all worlds
+  const perChoice = new Map<string, { scores: number[]; weights: number[] }>();
+  const worldTraces: WorldTrace[] = [];
+  let worldsCompleted = 0;
+  
+  for (const world of worlds) {
+    if (Date.now() >= deadline) break;
+    
+    const battle = buildBattle(world);
+    if (!battle) continue;
+    
+    const trace = exactSearch(battle, sideId, cfg);
+    worldsCompleted++;
+    
+    worldTraces.push({
+      tag: world.tag,
+      weight: world.weight,
+      best: trace.choice,
+      bestScore: trace.scores.find(s => s.choice === trace.choice)?.score ?? 0,
+    });
+    
+    for (const { choice, score } of trace.scores) {
+      if (!perChoice.has(choice)) {
+        perChoice.set(choice, { scores: [], weights: [] });
+      }
+      const entry = perChoice.get(choice)!;
+      entry.scores.push(score);
+      entry.weights.push(world.weight);
+    }
+  }
+  
+  if (perChoice.size === 0) {
+    return { choice: 'default', scores: [], worldsCompleted, worlds: worldTraces };
+  }
+  
+  // Aggregate scores
+  const aggregated: ScoredChoice[] = [];
+  for (const [choice, { scores, weights }] of perChoice.entries()) {
+    const score = aggregateScore(scores, weights, cfg);
+    aggregated.push({ choice, score });
+  }
+  
+  aggregated.sort((a, b) => b.score - a.score);
+  const best = aggregated[0];
+  
+  return {
+    choice: best.choice,
+    scores: aggregated,
+    worldsCompleted,
+    worlds: worldTraces,
+  };
+}
+
+function aggregateScore(scores: number[], weights: number[], cfg: DetConfig): number {
+  if (scores.length === 0) return -Infinity;
+  
+  // Normalize weights
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+  const normalized = totalWeight > 0 ? weights.map(w => w / totalWeight) : weights.map(() => 1 / weights.length);
+  
+  // Weighted mean
+  const mean = scores.reduce((sum, score, i) => sum + score * normalized[i], 0);
+  
+  if (cfg.aggregate === 'robust') {
+    const variance = scores.reduce(
+      (sum, score, i) => sum + normalized[i] * Math.pow(score - mean, 2),
+      0
+    );
+    const std = Math.sqrt(variance);
+    const lambda = cfg.robustLambda ?? 0.5;
+    return mean - lambda * std;
+  }
+  
+  if (cfg.aggregate === 'band75') {
+    // Foul Play style: uniform over choices within 75% of range
+    // This is handled at the policy level, so just return mean here
+    return mean;
+  }
+  
+  return mean;
 }

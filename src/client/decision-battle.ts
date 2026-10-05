@@ -1,10 +1,17 @@
 import { Battle, Dex, PRNG, PokemonSet } from '@pkmn/sim';
-import { Action } from '../types/index.js';
+import { Action, RandbatsStats } from '../types/index.js';
 import { decide } from '../engine/exact/policies.js';
 import { legalChoices } from '../engine/exact/battle-utils.js';
 import { EngineName } from './engines.js';
 import { sameAction } from './choice.js';
 import { ladderPolicy } from './ladder-engine.js';
+import { 
+  determinizedSearch, 
+  type DetConfig, 
+  type WorldEvidence 
+} from '../engine/exact/search.js';
+import { type WorldSample } from '../engine/exact/worlds.js';
+import { dataLoader } from '../data/data-loader.js';
 
 export interface StatBoosts {
   atk?: number;
@@ -252,6 +259,115 @@ export function buildDecisionBattle(position: LivePosition): Battle | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Build a battle from our side's request and a sampled opponent world.
+ * Our team comes from the request; the opponent team is the world sample.
+ */
+function buildBattleFromWorld(
+  position: LivePosition,
+  world: WorldSample,
+): Battle | null {
+  const request = position.request;
+  if (!request || request.wait || request.teamPreview) return null;
+  const ours = ourSets(request);
+  if (!ours) return null;
+
+  try {
+    const battle = new Battle({
+      formatid: 'gen9customgame' as any,
+      seed: [1, 2, 3, 4] as any,
+    });
+    battle.setPlayer('p1', { name: 'P1', team: ours });
+    battle.setPlayer('p2', { name: 'P2', team: world.foeTeam });
+    
+    if (battle.requestState === 'teampreview') {
+      if (!battle.choose('p1', 'default') || !battle.choose('p2', 'default')) return null;
+    }
+    if (!battle.p1.active[0] || !battle.p2.active[0]) return null;
+
+    // Apply our side's HP, status, boosts from the request
+    const slots: any[] = request.side?.pokemon || [];
+    battle.p1.pokemon.forEach((mon, i) => {
+      const condition = slots[i]?.condition as string | undefined;
+      const fainted = !!condition?.includes('fnt');
+      const hp = condition?.match(/(\d+)\/(\d+)/);
+      if (hp) applyFraction(mon, Number(hp[1]), Number(hp[2]), fainted);
+      else if (fainted) applyFraction(mon, 0, 1, true);
+      applyStatus(mon, condition, undefined);
+    });
+
+    // Apply foe HP/status for revealed mons from LivePosition
+    const knownFoesList = knownFoes(position);
+    battle.p2.pokemon.forEach((mon, i) => {
+      const info = knownFoesList[i];
+      if (!info) return;
+      applyFraction(mon, info.hp, info.maxhp, !!info.fainted);
+      applyStatus(mon, undefined, info.status);
+    });
+
+    for (const side of [battle.p1, battle.p2]) {
+      side.pokemonLeft = side.pokemon.filter(mon => !mon.fainted).length;
+    }
+
+    const active = battle.p1.active[0];
+    const liveMoves: any[] = request.active?.[0]?.moves || [];
+    for (let i = 0; i < liveMoves.length && i < active.moveSlots.length; i++) {
+      if (liveMoves[i].disabled) active.moveSlots[i].disabled = true;
+      if (liveMoves[i].pp === 0) active.moveSlots[i].pp = 0;
+    }
+    if (request.active?.[0]?.trapped || request.active?.[0]?.maybeTrapped) {
+      active.trapped = true;
+    }
+    applyBoosts(active, position.ourBoosts);
+    applyBoosts(battle.p2.active[0], position.foeActive?.boosts);
+
+    const weather = WEATHER[(position.weather || '').toLowerCase()];
+    if (weather) {
+      try {
+        battle.field.setWeather(weather as any);
+      } catch {
+        // Weather is a modifier. A failed set still leaves a legal request.
+      }
+    }
+
+    const force = isForceSwitch(request) || !!active.fainted;
+    if (force) active.switchFlag = true;
+    battle.makeRequest(force ? 'switch' : 'move');
+    if (legalChoices(battle, 'p1').length === 0) return null;
+    return battle;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Determinized exact search decision from a LivePosition.
+ * Samples K opponent worlds and aggregates exact search across them.
+ */
+export async function chooseDeterminized(
+  position: LivePosition,
+  config: DetConfig,
+  stats: RandbatsStats,
+): Promise<{ choice: string; score: number; worldsCompleted: number }> {
+  const evidence: WorldEvidence = {
+    knownFoes: knownFoes(position),
+    teamSize: 6,
+  };
+
+  const rng = new PRNG([1, 2, 3, 4] as any);
+  
+  const buildBattle = (world: WorldSample) => buildBattleFromWorld(position, world);
+  
+  const trace = determinizedSearch(evidence, buildBattle, 'p1', config, stats, rng);
+  
+  const best = trace.scores[0] || { choice: 'default', score: 0 };
+  return {
+    choice: trace.choice,
+    score: best.score,
+    worldsCompleted: trace.worldsCompleted ?? 0,
+  };
 }
 
 /**

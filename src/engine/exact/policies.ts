@@ -2,12 +2,13 @@ import { Battle, PRNG } from '@pkmn/sim';
 import { Action } from '../../types/index.js';
 import { SideId, legalChoices } from './battle-utils.js';
 import { maxDamageChoice } from './max-damage.js';
-import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2, ScoredChoice, battleToState, exactSearch } from './search.js';
+import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2, ScoredChoice, battleToState, exactSearch, EXACT_DET_1PLY, type DetConfig } from './search.js';
 
 export type PolicySpec =
   | { kind: 'random' }
   | { kind: 'maxdamage' }
   | { kind: 'exact'; config: ExactConfig }
+  | { kind: 'exact-det'; config: DetConfig }
   | { kind: 'legacy' };
 
 export interface Decision {
@@ -97,6 +98,10 @@ export function specFromId(id: string): PolicySpec {
     case 'challenger-exact-1ply':
     case 'champion-exact-1ply':
       return { kind: 'exact', config: EXACT_1PLY };
+    case 'exact-det-1ply':
+    case 'challenger-exact-det-1ply':
+    case 'champion-exact-det-1ply':
+      return { kind: 'exact-det', config: EXACT_DET_1PLY };
     case 'switch-depth2':
     case 'challenger-switch-depth2':
       return { kind: 'exact', config: SWITCH_DEPTH2 };
@@ -112,6 +117,19 @@ export function specFromId(id: string): PolicySpec {
             errorAsLoss: false,
           },
         };
+      }
+      if (id.startsWith('exact-det:')) {
+        // exact-det:K=8,agg=mean
+        const params = id.slice('exact-det:'.length);
+        const config = { ...EXACT_DET_1PLY };
+        for (const pair of params.split(',')) {
+          const [key, val] = pair.split('=');
+          if (key === 'K') config.worlds = Number(val) || 8;
+          else if (key === 'agg' && (val === 'mean' || val === 'robust' || val === 'band75')) {
+            config.aggregate = val;
+          }
+        }
+        return { kind: 'exact-det', config };
       }
       throw new Error(`Unknown policy id: ${id}`);
   }
