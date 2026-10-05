@@ -8,7 +8,9 @@ import { Format } from '../types/format.js';
 import { Action, GameState } from '../types/index.js';
 import { StateMismatch } from '../types/format.js';
 import { ShowdownClient, ReplayNotice, parseRatingLine, parseReplayUrl } from './showdown-client.js';
-import { DecisionClient } from './decision-client.js';
+import { DecisionClient, type EngineDecision } from './decision-client.js';
+import { localSimBridge } from '../ops/sim-bridge.js';
+import type { BuiltBot } from '../config/bot.js';
 import { OpponentTracker } from './opponent-tracker.js';
 import { GameLog, openGameLog } from './game-log.js';
 import {
@@ -91,6 +93,8 @@ export interface BattleDriverOptions {
   format: Format;
   engineName: string;
   decisions: DecisionClient;
+  /** Set for the strategist engine. Choices come from buildBot on the sim battle. */
+  builtBot?: BuiltBot;
   logDir: string;
   decisionTimeoutMs: number;
   replayDir?: string;
@@ -341,6 +345,25 @@ export class BattleDriver extends EventEmitter {
     if (toID(name) === toID(this.options.username)) room.ourSide = side;
   }
 
+  private async decideFromBot(room: RoomState, side: 'p1' | 'p2'): Promise<EngineDecision | null> {
+    const bot = this.options.builtBot;
+    if (!bot) return null;
+    const battle = localSimBridge.reconstruct({
+      room: room.roomId,
+      log: room.lines.join('\n'),
+      request: room.lastRequest,
+      side,
+    });
+    if (!battle) return null;
+    const decision = await bot.decide({ battle, side, gameId: room.roomId });
+    return {
+      action: choiceStringToAction(decision.choice),
+      score: decision.scores[0]?.score ?? null,
+      timeMs: decision.ms,
+      fallback: false,
+    };
+  }
+
   private async onRequest(room: RoomState, request: any): Promise<void> {
     if (room.ended || room.finalized || this.stopped) return;
     if (!request || isWaitRequest(request)) return;
@@ -402,6 +425,13 @@ export class BattleDriver extends EventEmitter {
           fallback: true,
           reason: `timer has ${room.secondsLeft}s left`,
         };
+      } else if (this.options.builtBot && room.ourSide) {
+        decision = await this.decideFromBot(room, room.ourSide) ?? await this.options.decisions.decide(
+          room.roomId,
+          state,
+          legal,
+          this.budgetMs(room),
+        );
       } else {
         const budget = this.budgetMs(room);
         decision = await this.options.decisions.decide(room.roomId, state, legal, budget, position);
@@ -837,4 +867,10 @@ export class BattleDriver extends EventEmitter {
     this.rooms.delete(room.roomId);
     this.emit('gameEnd', summary);
   }
+}
+
+function choiceStringToAction(choice: string): Action {
+  if (choice.startsWith('switch ')) return { type: 'switch', switchIndex: Number(choice.split(' ')[1]) };
+  const parts = choice.split(' ');
+  return { type: 'move', moveIndex: Number(parts[1]), terastallize: parts.includes('terastallize') };
 }

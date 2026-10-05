@@ -11,6 +11,9 @@ import { decide as legacyDecide } from '../../engine/exact/policies.js';
 import { exactSearch, searchBudgetExpired, type ExactConfig } from '../../engine/exact/search.js';
 import { register } from '../registry.js';
 import { SearchParamsSchema, type SearchParams } from '../schema.js';
+import { scoreWithJev } from '../../llm/jev-turn.js';
+import { verifyChoices, vetoChoice } from '../../llm/sim-veto.js';
+import { strategistDecide } from '../../llm/strategist.js';
 import type { GamePlan } from '../interfaces.js';
 import type { BehaviorImpl } from './opponent.js';
 import type { EvalImpl } from './evaluator.js';
@@ -22,6 +25,8 @@ export interface SearchTrace {
   note?: string;
   predictedSwitch?: boolean;
   answersPredictedSwitch?: boolean;
+  /** Set when this search already chose the plan. buildBot keeps it. */
+  gamePlan?: GamePlan | null;
 }
 
 export interface SearchCtx {
@@ -42,7 +47,7 @@ export interface SearchImpl {
   search(battle: Battle, side: SideId, ctx: SearchCtx): Promise<SearchTrace>;
 }
 
-const ALGORITHMS = ['greedy-1ply', 'expectimax', 'depth-n', 'mcts-stub', 'random', 'max-damage', 'legacy'] as const;
+const ALGORITHMS = ['greedy-1ply', 'expectimax', 'depth-n', 'mcts-stub', 'random', 'max-damage', 'legacy', 'strategist'] as const;
 
 export function registerSearch(): void {
   for (const id of ALGORITHMS) {
@@ -81,6 +86,7 @@ async function runSearch(
     const decision = await legacyDecide({ kind: 'legacy' }, battle, side, ctx.rng);
     return { choice: decision.choice, scores: decision.scores ?? [] };
   }
+  if (id === 'strategist') return strategistLine(battle, side, ctx);
   if (id === 'mcts-stub') {
     const trace = exactSearch(battle, side, exactConfig(params, 'max-damage', 'hp', 1, ctx.deadlineMs));
     return { ...trace, note: 'mcts-stub delegates the rollout to exact 1-ply' };
@@ -93,6 +99,43 @@ async function runSearch(
   const trace = outlined(battle, side, params, ctx, params.depth);
   if (params.samples > 1) trace.note = `samples=${params.samples} recorded; this battle is one world`;
   return trace;
+}
+
+/**
+ * Grok proposes the action and the plan. Jev scores every legal action.
+ * The simulator replaces the proposal when its line leads by more than 1 point.
+ * A missing key or a timeout leaves the proposal to exact search, then the veto.
+ */
+async function strategistLine(battle: Battle, side: SideId, ctx: SearchCtx): Promise<SearchTrace> {
+  const grok = await strategistDecide({ battle, side });
+  const jev = await scoreWithJev({ battle, side });
+  const sim = verifyChoices(battle, side);
+  const proposal = grok.source === 'grok' ? grok.choice : (jev.choice ?? grok.choice);
+  const decided = vetoChoice({
+    proposal,
+    scores: sim,
+    margin: 1,
+    legal: sim.map(row => row.choice),
+  });
+  const scores = sim.map(row => ({
+    choice: row.choice,
+    score: row.choice === decided.choice ? row.score + 1000 : row.score,
+  }));
+  if (decided.choice && !scores.some(row => row.choice === decided.choice)) {
+    scores.push({ choice: decided.choice, score: 1000 });
+  }
+  const gamePlan: GamePlan | null = grok.plan
+    ? {
+        style: ctx.plan?.style ?? 'balanced',
+        winCondition: grok.plan.winCondition || ctx.plan?.winCondition || 'the remaining win condition',
+        preserve: grok.plan.preserve,
+        notes: [grok.plan.notes, jev.switchProbability == null ? '' : `switch ${(jev.switchProbability * 100).toFixed(0)}%`]
+          .filter(Boolean)
+          .join(' '),
+      }
+    : ctx.plan;
+  const note = decided.veto ? 'veto' : jev.degraded ? grok.source : 'jev';
+  return { choice: decided.choice, scores, gamePlan, note };
 }
 
 function useExact(id: string, params: SearchParams, ctx: SearchCtx): boolean {

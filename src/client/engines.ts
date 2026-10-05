@@ -3,9 +3,9 @@ import { ABSOLUTE_MAX_CONCURRENCY, clampLimit } from './concurrency-config.js';
 /** Client safety ceiling. The server can still throttle sooner. */
 export const MAX_LADDER_CONCURRENCY = ABSOLUTE_MAX_CONCURRENCY;
 
-export type EngineName = 'search' | 'max-damage';
+export type EngineName = 'search' | 'max-damage' | 'strategist';
 
-export const ENGINE_NAMES: EngineName[] = ['search', 'max-damage'];
+export const ENGINE_NAMES: EngineName[] = ['search', 'max-damage', 'strategist'];
 
 export function parseEngine(name: string): EngineName {
   const id = name.trim().toLowerCase();

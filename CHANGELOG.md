@@ -20,6 +20,12 @@ The ladder rating parser now reads GXE from the HTML popup `(GXE: …)` and from
 
 `npm run ladder -- --engine search` and `--engine exact` call `exactSearch` with the gate champion `EXACT_1PLY` (8 samples). `--engine max-damage` calls `maxDamageChoice` from `@smogon/calc`. The ladder builds that choice from the live request, so the move index is the one the server asked for. Concurrency profiles, drain, and live metrics are unchanged.
 
+## Strategist ladder engine
+
+`configs/strategist.yaml` is a `buildBot` config. Each turn Grok 4.7 writes the plan and proposes one legal action, Jev scores the actions, and the simulator replaces the proposal when its line leads by more than 1 point. A missing key or a timeout uses exact 1-ply, then the same veto. `npm run ladder -- --engine strategist` selects it and keeps concurrency at 1.
+
+Local smoke, no key required: `npx tsx src/llm/strategist-engine-smoke.ts`
+
 ## Strategist
 
 Grok 4.7 (`spacexai/grok-4.7`) reads the situation brief and returns one legal action plus a game plan, as JSON. The action may be a move, a switch, or Terastallize when the request allows it. A missing key, a timeout (20s), unusable JSON, or an action that is not legal falls back to exact 1-ply search. The plan is kept on the battle and sent again next turn.

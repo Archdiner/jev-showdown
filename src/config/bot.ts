@@ -122,20 +122,21 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
       const activeConfig = applyAdjustment(loaded.config, adjustment);
       const active = activeConfig === loaded.config ? base : implsOf(activeConfig);
       const activeLayerIds = layerIdsOf(activeConfig);
-      const plan = await planFor(active, activeConfig, input, client, spend, runtime);
+      const drafted = await planFor(active, activeConfig, input, client, spend, runtime);
       const legal = legalChoices(input.battle, input.side);
       const budget = Math.min(activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs);
       const trace = legal.length === 0
-        ? { choice: 'default', scores: [] as Array<{ choice: string; score: number }>, predictedSwitch: undefined, answersPredictedSwitch: undefined }
+        ? { choice: 'default', scores: [] as Array<{ choice: string; score: number }>, predictedSwitch: undefined, answersPredictedSwitch: undefined, gamePlan: undefined }
         : await active.search.search(input.battle, input.side, {
           evaluate: active.evaluate,
           behavior: active.behavior,
-          plan,
+          plan: drafted,
           rng,
           rating: input.rating,
           variantId: input.variantId,
           deadlineMs: searchDeadline(Date.now(), activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs),
         });
+      const plan = trace.gamePlan !== undefined ? trace.gamePlan : drafted;
       let scores = trace.scores.length ? trace.scores : [{ choice: trace.choice, score: 0 }];
       let choice = applyPolicies(active, input.battle, input.side, legal, plan, scores);
       scores = scores.map(row => ({ ...row, score: row.score }));

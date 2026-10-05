@@ -10,6 +10,7 @@ import { BattleDriver, GameSummary } from '../client/battle-driver.js';
 import { DecisionClient } from '../client/decision-client.js';
 import { startLocalServer } from '../client/local-server.js';
 import { safeError, toID } from '../client/ids.js';
+import { buildBot } from '../config/bot.js';
 import { EngineName, MAX_LADDER_CONCURRENCY, parseEngine } from '../client/engines.js';
 import {
   loadConcurrencyFile,
@@ -171,9 +172,9 @@ Preflight (log in, print named/locked and the current rating, exit):
 Real ladder, from a residential or university network (this process never stores the password):
   SHOWDOWN_USERNAME=bot SHOWDOWN_PASSWORD=secret npm run ladder -- --games 10 --format gen9randombattle --engine max-damage --concurrency 1
 
-Engines: max-damage (default; @smogon/calc maxDamageChoice), search (exact 1-ply, the gate champion; exact is an alias), or grok (search + LLM prior, concurrency 1).
+Engines: max-damage (default; @smogon/calc maxDamageChoice), search (exact 1-ply, the gate champion; exact is an alias), grok (search + LLM prior, concurrency 1), or strategist (Grok plan, Jev scores, sim veto; concurrency 1).
 --concurrency K keeps up to K battles on one login (default 1, absolute max ${MAX_LADDER_CONCURRENCY}).
---use-engine-profile reads configs/live/concurrency.json (search 3, max-damage 4, grok 1).
+--use-engine-profile reads configs/live/concurrency.json (search 3, max-damage 4, grok 1, strategist 1).
 --concurrency-config FILE overrides those numbers. --runners N multiplies the limit. An explicit --concurrency wins.
 --ramp steps from 3 (search) or 4 (max-damage) up to K while p95 latency and the turn timer stay healthy, and steps back when they do not.
 Backpressure always pauses new searches when p95 latency degrades, the turn timer drops under the safety margin, or Showdown throttles a search. Games already running are left in place.
@@ -236,14 +237,16 @@ async function makePlayer(input: {
     format: input.formatId,
     loginServer: process.env.SHOWDOWN_LOGIN_URL,
   });
+  const strategist = input.engine === 'strategist';
   const driver = new BattleDriver({
     client,
     username: input.username,
     format: gen9RandomBattle,
     engineName: input.engine,
     decisions,
+    builtBot: strategist ? buildBot('configs/strategist.yaml', input.local ? 'local' : 'ladder') : undefined,
     logDir: input.opts.logDir,
-    decisionTimeoutMs: input.opts.decisionMs ?? (input.local ? 1500 : 12000),
+    decisionTimeoutMs: input.opts.decisionMs ?? (strategist ? 25000 : input.local ? 1500 : 12000),
     replayDir: path.join(input.opts.logDir, 'replays'),
     configId: null,
     configHash: configHash({ engine: input.engine, ...config }),

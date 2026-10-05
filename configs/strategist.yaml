@@ -1,0 +1,16 @@
+name: strategist
+extends: champion.yaml
+agent:
+  id: balanced
+  params:
+    style: balanced
+    preview: "off"
+search:
+  id: strategist
+  params:
+    timeBudgetMs: 25000
+advisor:
+  id: jev
+  params:
+    enabled: false
+    blend: "off"

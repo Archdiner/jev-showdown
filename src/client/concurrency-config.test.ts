@@ -70,6 +70,8 @@ describe('concurrency limit', () => {
     expect(selectLiveEngine('grok')).toEqual({ engine: 'search', profile: 'grok', useLLMPrior: true });
     expect(selectLiveEngine('exact')).toEqual({ engine: 'search', profile: 'search', useLLMPrior: false });
     expect(selectLiveEngine('exact-1ply')).toEqual({ engine: 'search', profile: 'search', useLLMPrior: false });
+    expect(selectLiveEngine('strategist')).toEqual({ engine: 'strategist', profile: 'strategist', useLLMPrior: false });
+    expect(resolveConcurrencyLimit({ engine: 'strategist', useEngineProfile: true }).limit).toBe(1);
     expect(selectLiveEngine('maxdamage').engine).toBe('max-damage');
     expect(() => selectLiveEngine('stockfish')).toThrow(/Unknown engine/);
   });
