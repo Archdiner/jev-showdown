@@ -1,0 +1,5 @@
+name: opponent-jev
+extends: ../champion.yaml
+opponentModel:
+  behavior:
+    id: jev-predictor

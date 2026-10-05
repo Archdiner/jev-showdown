@@ -8,6 +8,8 @@ export class GraphDB {
   constructor(dbPath?: string) {
     const finalPath = dbPath || path.join(process.cwd(), 'state', 'graph.db');
     this.db = new Database(finalPath);
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('busy_timeout = 5000');
     this.initSchema();
   }
 

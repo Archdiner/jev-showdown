@@ -1,0 +1,7 @@
+name: search-expectimax
+extends: ../champion.yaml
+search:
+  id: expectimax
+opponentModel:
+  behavior:
+    id: uniform

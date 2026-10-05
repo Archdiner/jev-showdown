@@ -1,0 +1,10 @@
+name: models-frontier
+extends: ../champion.yaml
+models:
+  params:
+    roles:
+      hypothesisGenerator:
+        models:
+          - openai/gpt-6.1-sol
+          - spacexai/grok-4.7
+        costCapUsd: 0.25

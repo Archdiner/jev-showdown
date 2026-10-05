@@ -1,0 +1,13 @@
+name: meta-phase
+extends: ../champion.yaml
+metaController:
+  id: phase
+  params:
+    openingTurns: 2
+    endgameMons: 2
+    phases:
+      opening:
+        searchDepth: 1
+      endgame:
+        agentId: attrition
+        searchDepth: 2

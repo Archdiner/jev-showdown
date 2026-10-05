@@ -1,5 +1,13 @@
 # Changelog
 
+## Operations layer
+
+Four long-running commands share the graph and the logs: `npm run ops -- factory`, `gatekeeper`, `live`, and `analyst`. The factory runs queued simulations and may propose a config. The gatekeeper is the only command that writes `champion` or `live-approved`, and only after SPRT and a 100% diagnostic pass. Live plays those configs on one Showdown login, gives the champion most of the games, and pulls a config after a loss streak or a rating drop. The analyst turns a live loss into a general hypothesis and a factory job. `status`, `report --daily`, and `supervise` read the same store. `deploy/jev-ops.service` is the systemd unit.
+
+## Config layer
+
+Bots are built only with `buildBot(config)`. The same file and configId are used in self-play, the gate, and diagnostics. Env profiles change time limits, logging, and LLM permission, not the strategy. `npm run exp` runs, sweeps, ablates, and compares configs. Sweeps use win rate and the dev position set. Held-out positions and live results are checked by the gatekeeper and are not tuning targets. A loss becomes a general mechanism or eval term. Promotion stays `npm run gate`.
+
 ## Situation brief
 
 `renderContextBrief` writes the turn context a later strategist will read: both sides that are allowed to be named, our bench and the opponent's revealed bench, a damage matrix of our moves and their likely moves into the active and every switch-in, a public speed index, field conditions, set inference from revealed moves or the random-battle movepool, and the fitted high-Elo switch probability. Unrevealed opponent species are a count, not a list. The function does not call a model. A missing `VERCEL_AI_GATEWAY_KEY` does not change it.

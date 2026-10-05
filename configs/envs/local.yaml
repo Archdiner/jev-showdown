@@ -1,0 +1,7 @@
+name: local
+timeLimitMs: 5000
+network: loopback
+logSink: file
+llm:
+  allowed: false
+  costCapUsd: 0

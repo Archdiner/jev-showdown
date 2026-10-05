@@ -1,0 +1,5 @@
+name: context-tiny
+extends: ../champion.yaml
+context:
+  params:
+    globalTokenBudget: 200

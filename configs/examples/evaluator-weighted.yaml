@@ -1,0 +1,4 @@
+name: evaluator-weighted
+extends: ../champion.yaml
+evaluator:
+  id: weighted

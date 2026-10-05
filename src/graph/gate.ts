@@ -1,8 +1,9 @@
 import { GraphDB } from './db.js';
+import { specForAlias } from '../config/aliases.js';
 import { championBlueprint, specFromId } from '../engine/exact/policies.js';
 import { EXACT_1PLY, ExactConfig } from '../engine/exact/search.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
-import { GameJob, GameResult as BenchGame } from '../bench/game.js';
+import { BenchPlayer, GameJob, GameResult as BenchGame } from '../bench/game.js';
 import { runGamesParallel } from '../bench/pool.js';
 import { heldOutPasses, scoreSplit, SplitScore } from '../engine/exact/position-sets.js';
 
@@ -118,6 +119,19 @@ export interface GuardrailsCheck {
   state_mismatches: number;
 }
 
+/** Config aliases play through buildBot. Engine-only ids, including switch-depth2, play the policy. */
+export function gatePlayer(id: string): BenchPlayer {
+  try {
+    return specForAlias(id, 'gate');
+  } catch (aliasError) {
+    try {
+      return specFromId(id);
+    } catch {
+      throw aliasError;
+    }
+  }
+}
+
 export class Gate {
   private db: GraphDB;
 
@@ -218,8 +232,8 @@ export class Gate {
     // baseline, so we do not also replay champion-v0: that engine rebuilds
     // a battle per node and the rebuild rejects the choice.
     void champion;
-    const challengerSpec = specFromId(challenger);
-    const opponentSpec = specFromId(opponent);
+    const challengerSpec = gatePlayer(challenger);
+    const opponentSpec = gatePlayer(opponent);
     const jobs: GameJob[] = [];
     const labels: Array<{ p1: string; p2: string }> = [];
 

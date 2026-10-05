@@ -1,0 +1,8 @@
+name: advisor-veto
+extends: ../champion.yaml
+advisor:
+  params:
+    enabled: true
+    blend: veto-blunders
+    trigger:
+      mode: always

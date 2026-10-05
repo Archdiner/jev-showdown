@@ -19,6 +19,8 @@
     "analyze": "tsx src/cli/analyze-losses.ts",
     "llm:smoke": "tsx src/llm/smoke.ts",
     "llm:review": "tsx src/llm/review-cli.ts",
+    "exp": "tsx src/exp/cli.ts",
+    "ops": "tsx src/ops/cli.ts",
     "benchmark": "tsx src/cli/benchmark.ts",
     "export-replays": "tsx src/cli/export-replays.ts",
     "lint": "eslint src/**/*.ts"
@@ -41,6 +43,7 @@
     "@smogon/calc": "^0.12.0",
     "better-sqlite3": "^11.7.0",
     "ws": "^8.18.0",
+    "yaml": "^2.9.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {

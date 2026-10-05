@@ -1,0 +1,15 @@
+[Unit]
+Description=Jev Showdown operations supervisor
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/jev-showdown
+ExecStart=/usr/bin/npm run ops -- supervise
+Restart=on-failure
+RestartSec=2
+Environment=SHOWDOWN_USERNAME=
+Environment=SHOWDOWN_PASSWORD=
+
+[Install]
+WantedBy=multi-user.target

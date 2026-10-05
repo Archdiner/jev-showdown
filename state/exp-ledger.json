@@ -1,0 +1,14 @@
+[
+  {
+    "ts": 1791159920450,
+    "kind": "run",
+    "specId": "smoke",
+    "configId": "374a5edff9039983",
+    "configName": "champion",
+    "opponentConfigId": "13e462ed6f0a0b5c",
+    "games": 20,
+    "wins": 19,
+    "winRate": 0.95,
+    "heldOutAgreement": 0
+  }
+]

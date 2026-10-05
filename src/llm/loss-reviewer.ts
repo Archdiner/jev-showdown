@@ -153,7 +153,8 @@ export function buildReviewMessages(
       'Do not propose editing code directly. The hypothesis must include a kill condition. ' +
       'Ground every claim about damage, KO chance, accuracy, priority, speed, or type effectiveness in the CALC block. ' +
       'Quote those numbers. Do not assert type matchups, immunities, or resistances from memory. ' +
-      'If the CALC block does not state a matchup as a damage number, do not claim it.',
+      'If the CALC block does not state a matchup as a damage number, do not claim it. ' +
+      'The hypothesis must be a general mechanism or eval term. Do not write a rule for this position, and do not name a species or a move to click.',
     user:
       `${clipped ? 'The log was truncated to the first 20000 characters.\n' : ''}` +
       `CALC (from @pkmn/dex, @smogon/calc, and the randbats role pool; this is the only source for matchup facts):\n${calc}\n\n` +

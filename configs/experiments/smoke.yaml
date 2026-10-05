@@ -1,0 +1,9 @@
+id: smoke
+challenger: configs/champion.yaml
+opponent: configs/panel/maxdamage.yaml
+panel:
+  - configs/panel/maxdamage.yaml
+games: 20
+seedStart: 1
+costCapUsd: 0
+env: gate

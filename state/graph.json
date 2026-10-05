@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "exported_at": 1791160488073,
+  "exported_at": 1791200000000,
   "nodes": [
     {
       "id": "goal-ladder-1",
@@ -777,6 +777,21 @@
       "insight": "The old search rebuilt a battle that still had a move request after a KO, rejected the legal switch, and scored that rejection as a loss.",
       "evidence": "src/engine/exact/legacy-repro.ts. The clone search is 98.0% vs random and 78.0% vs max-damage over 300 paired games, gate promoted, commit fcd9c92.",
       "confidence": "high"
+    },
+    {
+      "id": "task-ops-layer",
+      "type": "Task",
+      "status": "done",
+      "title": "Operations facilities",
+      "description": "factory, gatekeeper, live, and analyst share the graph and the JSONL logs. Only the gatekeeper writes champion and live-approved.",
+      "created_at": 1791200000000,
+      "updated_at": 1791200000000,
+      "commit_sha": "2b4d7a8b302ce24cdaf8f76b8e35ae01fd7a7651",
+      "acceptance_criteria": [
+        "npm run ops -- factory|gatekeeper|live|analyst|status|report|supervise",
+        "gatekeeper is the only writer of champion and live-approved",
+        "live --local plays one game on the local server and records rating and GXE"
+      ]
     }
   ],
   "edges": [

@@ -73,6 +73,18 @@ npm run graph -- render             # export graph
 
 See `src/graph/gate.ts` for full gate spec.
 
+## Config layer
+
+`buildBot(config)` is the only bot factory for self-play, the gate, regression snapshots, and the obvious-move guardrail. `configId` hashes the strategy file. Env profiles `selfplay`, `gate`, `local`, and `ladder` set time, network, logging, and whether LLM calls are allowed. They do not change the move. A time limit marks `overBudget` after the choice.
+
+Add a component: register it in `src/config/layers` with a zod params schema, add a YAML example under `configs/examples`, run `npm run exp -- validate`. Do not special-case a species, a move, or a fixture position.
+
+Position pools are generated from seeded random games and labeled by an exact search of depth at least 2, or mined from losses. `splitFor` holds out 20%. Sweeps and bandits score game win rate plus the dev set. Held-out agreement and live results are the gatekeeper (`npm run exp -- run` only). The analyst writes a mechanism or an eval term. Promotion stays `npm run gate`.
+
+`npm run exp -- validate|run|sweep|ablate|tournament|leaderboard|diff`.
+
+The advisor calls `JevAdvisor` and `GatewayClient`. Loss review calls `LossReviewer`. `npm run ladder` is the live client (`BattleDriver`). It does not import the ops facilities.
+
 ## No overfitting to examples
 
 Hand-written positions are smoke alarms, not the target. That includes the diagnostic suite and any single matchup such as Garchomp versus Rotom-Wash.
@@ -85,6 +97,17 @@ Hand-written positions are smoke alarms, not the target. That includes the diagn
   - Mine further positions from live and high-Elo replay logs. Keep a position only while this sim still matches the spectator log.
 - `state/positions/dev.json` is the only split that may be inspected. `state/positions/heldout.json` stays closed while tuning. Report agreement on both.
 - Promotion requires gate win rates against the frozen panel and the held-out set. Passing the hand-written fixtures is not enough to promote.
+
+## Operations layer
+
+`npm run ops -- factory|gatekeeper|live|analyst` are four processes. They share `state/graph.db`, `state/ops/*.jsonl`, and the game logs. They do not import each other.
+
+- **factory** pulls challenger, sweep, tournament, ablation, and position-replay jobs and writes results. It may attach a proposal. It never writes `champion` or `live-approved`.
+- **gatekeeper** is the only writer of those labels. A label requires the SPRT no-regression check and a 100% diagnostic pass, recorded as a Decision with the evidence.
+- **live** plays only those labels on one Showdown login (`SHOWDOWN_USERNAME` / `SHOWDOWN_PASSWORD`). The champion gets most games; live-approved challengers share a 10–20% explore slice. A config is pulled after too many consecutive losses or too large a rating drop. `--local` uses a local server instead of the ladder. Rating and GXE are stored after every game. Each game also draws one variant id from `state/ops/variants.json` by Thompson sampling and logs that id on the live game and on each decision. A missing or empty pool draws nothing, so the config allocation is unchanged.
+- **analyst** tails finished live games, runs the Grok 4.7 loss reviewer against the calc block, and writes a general hypothesis plus a factory job. Mined positions go to the ops pool (dev / held-out by hash). Opponent category priors are updated from live logs and scraped replays.
+
+`npm run ops -- status` is one screen: facility health, queue depth, live record, rating, open regressions. `npm run ops -- report --daily` is the plain-English day summary. `npm run ops -- supervise` restarts a facility that crashes; `deploy/jev-ops.service` runs it. Jobs are idempotent and leases expire, so a restart continues the queue.
 
 ## Where Creativity Allowed
 

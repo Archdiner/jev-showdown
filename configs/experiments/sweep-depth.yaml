@@ -1,0 +1,12 @@
+id: sweep-depth
+base: configs/champion.yaml
+opponent: configs/panel/maxdamage.yaml
+games: 4
+seedStart: 1
+costCapUsd: 0
+env: gate
+method: successive-halving
+devWeight: 1
+axes:
+  - path: search.params.depth
+    values: [1, 2, 3]

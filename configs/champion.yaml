@@ -1,0 +1,39 @@
+name: champion
+agent:
+  id: balanced
+  params:
+    style: balanced
+    preview: heuristic
+search:
+  id: greedy-1ply
+evaluator:
+  id: hp-fraction
+opponentModel:
+  setInference:
+    id: loose
+  behavior:
+    id: max-damage
+policies:
+  teraPolicy:
+    id: "off"
+  hazardPolicy:
+    id: "off"
+  sacPolicy:
+    id: "off"
+  switchPolicy:
+    id: "off"
+  leadPolicy:
+    id: "off"
+  endgamePolicy:
+    id: "off"
+context:
+  id: blocks
+advisor:
+  id: jev
+  params:
+    enabled: false
+    blend: "off"
+models:
+  id: catalog
+metaController:
+  id: static

@@ -1,8 +1,8 @@
-import { PolicySpec } from '../engine/exact/policies.js';
-import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2 } from '../engine/exact/search.js';
+import { specForAlias } from '../config/aliases.js';
+import { BenchPlayer, GameJob, GameResult, playerId } from './game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
+import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2 } from '../engine/exact/search.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
-import { GameJob, GameResult } from './game.js';
 import { p99, runGamesParallel } from './pool.js';
 
 function arg(name: string, fallback: string): string {
@@ -10,27 +10,28 @@ function arg(name: string, fallback: string): string {
   return hit ? hit.slice(name.length + 3) : fallback;
 }
 
-function policy(name: string): PolicySpec {
+/** Engine names play the policy directly. Config aliases and file paths play through buildBot. */
+function policy(name: string): BenchPlayer {
   if (name === 'random') return { kind: 'random' };
   if (name === 'maxdamage') return { kind: 'maxdamage' };
   if (name === 'legacy') return { kind: 'legacy' };
   if (name === 'exact') return { kind: 'exact', config: EXACT_1PLY };
   if (name === 'switch') return { kind: 'exact', config: SWITCH_DEPTH2 };
-  const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',');
   if (name.startsWith('exact')) {
+    const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',');
     const config: ExactConfig = {
       depth: Number(depth) || EXACT_1PLY.depth,
-      opponentModel: model === 'uniform' ? 'uniform' : 'max-damage',
-      evalMode: evalMode === 'full' ? 'full' : 'hp',
+      opponentModel: model === 'uniform' ? 'uniform' : model === 'switch' ? 'switch' : 'max-damage',
+      evalMode: evalMode === 'team' ? 'team' : evalMode === 'full' ? 'full' : 'hp',
       errorAsLoss: name.includes(',loss'),
       samples: 1,
     };
     return { kind: 'exact', config };
   }
-  throw new Error(`Unknown policy ${name}`);
+  return specForAlias(name, 'selfplay');
 }
 
-function pairedJobs(pairs: number, a: PolicySpec, b: PolicySpec, seedStart: number): GameJob[] {
+function pairedJobs(pairs: number, a: BenchPlayer, b: BenchPlayer, seedStart: number): GameJob[] {
   const jobs: GameJob[] = [];
   for (let i = 0; i < pairs; i++) {
     const seed = seedStart + i;
@@ -55,7 +56,7 @@ function pairedJobs(pairs: number, a: PolicySpec, b: PolicySpec, seedStart: numb
   return jobs;
 }
 
-export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate: PolicySpec): {
+export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate: BenchPlayer): {
   wins: number;
   losses: number;
   ties: number;
@@ -72,10 +73,11 @@ export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate
   let invalid = 0;
   let crashes = 0;
   const times: number[] = [];
+  const candidateId = playerId(candidate);
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
     const job = jobs[i];
-    const side = JSON.stringify(job.p1) === JSON.stringify(candidate) ? 'p1' : 'p2';
+    const side = playerId(job.p1) === candidateId ? 'p1' : 'p2';
     if (result.crashed) crashes++;
     if (result.winner === 'tie') ties++;
     else if (result.winner === side) wins++;
@@ -97,7 +99,7 @@ export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate
   };
 }
 
-function playRate(results: GameResult[], jobs: GameJob[], candidate: PolicySpec): {
+function playRate(results: GameResult[], jobs: GameJob[], candidate: BenchPlayer): {
   decisions: number;
   switches: number;
   predicted: number;
@@ -109,8 +111,9 @@ function playRate(results: GameResult[], jobs: GameJob[], candidate: PolicySpec)
   let switches = 0;
   let predicted = 0;
   let answered = 0;
+  const candidateId = playerId(candidate);
   for (let i = 0; i < results.length; i++) {
-    const side = JSON.stringify(jobs[i].p1) === JSON.stringify(candidate) ? 'p1' : 'p2';
+    const side = playerId(jobs[i].p1) === candidateId ? 'p1' : 'p2';
     if (side === 'p1') {
       decisions += results[i].p1Decisions || 0;
       switches += results[i].p1Switches || 0;

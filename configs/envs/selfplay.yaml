@@ -1,0 +1,7 @@
+name: selfplay
+timeLimitMs: 2000
+network: none
+logSink: memory
+llm:
+  allowed: false
+  costCapUsd: 0
