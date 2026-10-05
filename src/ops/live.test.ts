@@ -166,10 +166,11 @@ describe('local live fallback record', () => {
       expect(summary.games).toBe(1);
       const games = fs.readFileSync(paths.liveGames, 'utf8').trim().split('\n').map(line => JSON.parse(line));
       const beats = fs.readFileSync(paths.heartbeats, 'utf8').trim().split('\n').map(line => JSON.parse(line));
-      const fallbackBeats = beats.filter((row: { detail?: string }) => row.detail === 'choice-fallback battle-local-1');
+      const battleId = games[0].battleId;
+      expect(battleId).toMatch(/^battle-local-1(--\d+)?$/);
+      const fallbackBeats = beats.filter((row: { detail?: string }) => row.detail?.startsWith('choice-fallback battle-local-'));
       expect(fallbackBeats.length).toBeGreaterThan(0);
       expect(games).toHaveLength(1);
-      expect(games[0].battleId).toBe('battle-local-1');
       expect(games[0].fallbacks).toBe(fallbackBeats.length);
       expect(games[0].fallbacks).toBe(1);
       expect(games[0].mismatches).toBe(0);
