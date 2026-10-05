@@ -1,0 +1,8 @@
+name: evaluator-fitted-team
+extends: ../champion.yaml
+evaluator:
+  id: fitted-team
+search:
+  id: greedy-1ply
+  params:
+    samples: 8
