@@ -1,3 +1,4 @@
+import { countableGameRows, loadContaminationFlags } from '../client/game-integrity.js';
 import { isLocalLiveGame, recordedElo, recordedOutcome } from '../client/game-record.js';
 import { cycleLines, readCycle } from './cycle.js';
 import { openDb } from './db.js';
@@ -22,7 +23,7 @@ export function statusReport(paths: OpsPaths, now = Date.now()): string {
   const beats = latestHeartbeats(paths);
   const jobs = listJobs(paths);
   const queued = jobs.filter(job => job.status === 'open' || job.status === 'in_progress');
-  const games = readJsonl<LiveRow>(paths.liveGames);
+  const games = countableGameRows(readJsonl<LiveRow>(paths.liveGames), loadContaminationFlags(paths.liveGames));
   const db = openDb(paths);
   let labels: ReturnType<typeof readLabels> = [];
   let regressions = 0;

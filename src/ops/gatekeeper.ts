@@ -11,9 +11,19 @@ import { beat } from './heartbeat.js';
 import { writeChampion, writeLiveApproved } from './labels.js';
 import type { OpsPaths } from './paths.js';
 import { listProposals, completeJob, type Proposal } from './queue.js';
+import { countableGameRows } from '../client/game-integrity.js';
 import { sprt, tallySide } from './sprt.js';
 
 export { sprt } from './sprt.js';
+
+/**
+ * Ladder JSONL is not the paired sample the gatekeeper labels on.
+ * Anything that folds those rows into a promotion tally has to drop
+ * duplicate battle ids and contaminated results first.
+ */
+export function ladderGamesForGate<T extends object>(rows: readonly T[]): T[] {
+  return countableGameRows(rows);
+}
 
 const EXACT_SEARCHES = new Set(['greedy-1ply', 'depth-n', 'expectimax', 'mcts-stub']);
 const DEFAULT_MAX_GAMES = 1200;

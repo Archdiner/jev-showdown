@@ -19,8 +19,14 @@ import {
   percentile,
   replayIdFromBattle,
   toOpsLiveGame,
+  LADDER_ELO_FLOOR,
+  LADDER_TIMER_START_SEC,
+  TIMER_REASON_UNOBSERVED,
+  claimBattle,
+  publicReplayUrl,
   LadderGameInput,
 } from './game-record.js';
+import { replayMatchesRoom } from './showdown-client.js';
 import { BattleDriver } from './battle-driver.js';
 import { DecisionClient } from './decision-client.js';
 import { ShowdownClient } from './showdown-client.js';
@@ -139,12 +145,18 @@ describe('ladder game records', () => {
     expect(record.latencyP99Ms).toBe(40);
     expect(record.latencyMaxMs).toBe(40);
     expect(record.minTimerMarginSec).toBe(12);
+    expect(record.eloAfter).toBeNull();
+    expect(record.eloAfterReason).toBe('unreported');
+    expect(record.opponentRating).toBeNull();
+    expect(record.opponentRatingReason).toBe('unreported');
+    expect(JSON.stringify(record)).not.toMatch(/"opponentRating":-1|"eloAfter":-1/);
     expect(record).not.toHaveProperty('decisionLatencyMs');
     expect(record.replayStatus).toBe('unconfirmed');
     expect(record.beliefErrors).toBe(0);
     expect(buildLadderGameRecord(input({ beliefErrors: 3 })).beliefErrors).toBe(3);
     const ops = toOpsLiveGame(record);
     expect(ops.rating).toBeNull();
+    expect(ops.opponentRating).toBeNull();
     expect(ops.gxe).toBeNull();
     expect(ops.kind).toBe('live-game');
     expect(ops.invalid).toBe(0);
@@ -250,12 +262,24 @@ describe('ladder game records', () => {
     expect(eloDeltaConsistent('loss', 1185, 1200)).toBe(false);
     expect(eloDeltaConsistent('win', null, 1101)).toBe(true);
     expect(eloDeltaConsistent('win', 1072, null)).toBe(true);
+    expect(eloDeltaConsistent('loss', LADDER_ELO_FLOOR, LADDER_ELO_FLOOR)).toBe(true);
+    expect(eloDeltaConsistent('loss', 1100, 1100)).toBe(false);
+    expect(eloDeltaConsistent('win', LADDER_ELO_FLOOR, LADDER_ELO_FLOOR)).toBe(false);
     const down = eloForGame({ outcome: 'win', ratingBefore: 1148, ratingAfter: 1124, preRating: 1072 });
     expect(down).toEqual({ eloBefore: 1072, eloAfter: null });
     const up = eloForGame({ outcome: 'win', ratingBefore: 1072, ratingAfter: 1088, preRating: 1072 });
     expect(up).toEqual({ eloBefore: 1072, eloAfter: 1088 });
     const bare = eloForGame({ outcome: 'win', ratingBefore: null, ratingAfter: 1101, preRating: 1072 });
     expect(bare).toEqual({ eloBefore: 1072, eloAfter: null });
+    const floor = eloForGame({
+      outcome: 'loss',
+      ratingBefore: LADDER_ELO_FLOOR,
+      ratingAfter: LADDER_ELO_FLOOR,
+      preRating: LADDER_ELO_FLOOR,
+    });
+    expect(floor).toEqual({ eloBefore: LADDER_ELO_FLOOR, eloAfter: LADDER_ELO_FLOOR });
+    const stuck = eloForGame({ outcome: 'loss', ratingBefore: 1100, ratingAfter: 1100, preRating: 1100 });
+    expect(stuck).toEqual({ eloBefore: 1100, eloAfter: null });
     const loss = buildLadderGameRecord(input({
       winner: 'Rival',
       lines: ['|win|Rival'],
@@ -267,6 +291,7 @@ describe('ladder game records', () => {
     expect(loss.outcome).toBe('loss');
     expect(loss.eloBefore).toBe(1185);
     expect(loss.eloAfter).toBeNull();
+    expect(loss.eloAfterReason).toBe('unreported');
     expect(loss.gxe).toBeNull();
   });
 
@@ -287,11 +312,12 @@ describe('ladder game records', () => {
     expect(record.invalidChoiceReasons).toEqual(facts.invalidChoiceReasons);
   });
 
-  it('records the battle replay id and a URL only when the server confirms it', () => {
+  it('records a replay link even before the server confirms the upload', () => {
     expect(replayIdFromBattle('battle-gen9randombattle-42')).toBe('gen9randombattle-42');
     const pending = buildLadderGameRecord(input());
     expect(pending.replayId).toBe('gen9randombattle-1');
-    expect(pending.replayUrl).toBeNull();
+    expect(pending.replayUrl).toBe('https://replay.pokemonshowdown.com/gen9randombattle-1');
+    expect(pending.replayUnavailableReason).toBeNull();
     expect(pending.replayUploaded).toBe(false);
     expect(pending.replayStatus).toBe('unconfirmed');
 
@@ -304,7 +330,41 @@ describe('ladder game records', () => {
 
     const local = buildLadderGameRecord(input({ localServer: true }));
     expect(local.replayStatus).toBe('local-only');
-    expect(local.replayUrl).toBeNull();
+    expect(local.replayUrl).toBe('/tmp/replay.log');
+    expect(local.replayUnavailableReason).toBe('local-server');
+  });
+
+  it('keeps the hidden-room suffix on the replay link', () => {
+    const battleId = 'battle-gen9randombattle-2692991009-9o3axjtwpdkaa41h7pskjmbgwkgko89pw';
+    expect(replayMatchesRoom(battleId, 'gen9randombattle-2692991009')).toBe(true);
+    expect(replayMatchesRoom('battle-gen9randombattle-10', 'gen9randombattle-1')).toBe(false);
+    expect(publicReplayUrl(battleId)).toBe(
+      'https://replay.pokemonshowdown.com/gen9randombattle-2692991009-9o3axjtwpdkaa41h7pskjmbgwkgko89pw',
+    );
+    const hidden = buildLadderGameRecord(input({ battleId, replayUrl: null, replayId: null }));
+    expect(hidden.replayUrl).toBe(
+      'https://replay.pokemonshowdown.com/gen9randombattle-2692991009-9o3axjtwpdkaa41h7pskjmbgwkgko89pw',
+    );
+    expect(hidden.replayId).toBe('gen9randombattle-2692991009-9o3axjtwpdkaa41h7pskjmbgwkgko89pw');
+  });
+
+  it('records the opening clock when the game ends before any timer line', () => {
+    const forfeited = buildLadderGameRecord(input({
+      battleId: 'battle-gen9randombattle-2692991018',
+      turns: 3,
+      minTimerMarginSec: null,
+      lines: ['|turn|3', '|-message|Rival forfeited.', '|win|BotAlpha'],
+      winner: 'BotAlpha',
+      latencies: [],
+    }));
+    expect(forfeited.endReason).toBe('opponent-forfeit');
+    expect(forfeited.turns).toBe(3);
+    expect(forfeited.minTimerMarginSec).toBe(LADDER_TIMER_START_SEC);
+    expect(forfeited.minTimerMarginReason).toBe(TIMER_REASON_UNOBSERVED);
+    expect(forfeited.replayUrl).not.toBeNull();
+    expect(forfeited.durationMs).toBe(21_000);
+    expect(forfeited.configId).toBe('unconfigured');
+    expect(forfeited.gitSha).toBe('87b268f');
   });
 
   it('requires runId on new game rows', () => {
@@ -351,6 +411,48 @@ describe('ladder game records', () => {
     expect(JSON.parse(lines[0]).battleId).toBe('battle-gen9randombattle-1');
     expect(JSON.parse(lines[1]).endReason).toBe('ko');
     expect(JSON.parse(lines[1]).outcome).toBe('loss');
+  });
+
+  it('writes one row when the same process finalizes a battle twice', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-idempotent-'));
+    const record = buildLadderGameRecord(input());
+    expect(appendGameRecord(dir, record).reason).toBe('appended');
+    expect(appendGameRecord(dir, record).reason).toBe('duplicate');
+    const lines = fs.readFileSync(path.join(dir, 'games.jsonl'), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+  });
+
+  it('does not let a second process append another row for the same battle', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-owner-'));
+    const battleId = 'battle-gen9randombattle-2692985848';
+    expect(claimBattle(dir, battleId, 100).owned).toBe(true);
+    const intruder = buildLadderGameRecord(input({
+      battleId,
+      pid: 53856,
+      turns: 4,
+      winner: null,
+      lines: ['|turn|4'],
+      disconnected: true,
+      opponent: 'Jxjdndnd',
+    }));
+    expect(intruder.outcome).toBe('tie');
+    expect(intruder.endReason).toBe('disconnect');
+    expect(appendGameRecord(dir, intruder)).toMatchObject({ written: false, reason: 'non-owning-process' });
+    const owner = buildLadderGameRecord(input({
+      battleId,
+      pid: 100,
+      winner: 'Jxjdndnd',
+      lines: ['|win|Jxjdndnd'],
+      opponent: 'Jxjdndnd',
+    }));
+    expect(appendGameRecord(dir, owner).reason).toBe('appended');
+    const lines = fs.readFileSync(path.join(dir, 'games.jsonl'), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]).outcome).toBe('loss');
+    expect(JSON.parse(lines[0]).pid).toBe(100);
+    const flags = fs.readFileSync(path.join(dir, 'games.contamination.jsonl'), 'utf8');
+    expect(flags).toContain('non-owning-process');
+    expect(flags).toContain('53856');
   });
 });
 
@@ -409,6 +511,7 @@ describe('BattleDriver game record', () => {
       opponentRating: 1400,
       eloBefore: 1073,
       eloAfter: null,
+      eloAfterReason: 'unreported',
       gxe: null,
       outcome: 'win',
       endReason: 'opponent-forfeit',
@@ -562,5 +665,103 @@ describe('BattleDriver game record', () => {
     expect(summary.endReason).toBe('disconnect');
     const stored = JSON.parse(fs.readFileSync(path.join(logDir, 'games.jsonl'), 'utf8')) as { phantom?: boolean };
     expect(stored.phantom).toBe(true);
+  });
+
+  it('keeps one games.jsonl row when a second pid writes the same battle', async () => {
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-dup-proc-'));
+    const socket = new EventEmitter();
+    const driver = new BattleDriver({
+      client: Object.assign(socket, {
+        choose: () => true,
+        saveReplay: () => true,
+        enableBattleTimer: () => true,
+        trackRoom: () => undefined,
+        untrackRoom: () => undefined,
+        isReady: () => true,
+      }) as unknown as ShowdownClient,
+      username: 'BotAlpha',
+      format: gen9RandomBattle,
+      engineName: 'search',
+      decisions: {
+        openBattle() { /* unused */ },
+        closeBattle() { /* unused */ },
+        async stop() { /* unused */ },
+      } as unknown as DecisionClient,
+      logDir,
+      decisionTimeoutMs: 1000,
+      settleMs: 0,
+    });
+    const ended = new Promise<import('./game-record.js').LadderGameRecord>(resolve => driver.on('gameEnd', resolve));
+    const room = 'battle-gen9randombattle-2692985848';
+    socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
+    socket.emit('line', room, '|player|p2|Jxjdndnd|2|1400');
+    socket.emit('line', room, '|turn|4');
+    const intruder = buildLadderGameRecord(input({
+      battleId: room,
+      pid: 53856,
+      turns: 4,
+      winner: null,
+      lines: ['|turn|4'],
+      disconnected: true,
+      opponent: 'Jxjdndnd',
+      opponentRating: 1400,
+    }));
+    expect(appendGameRecord(logDir, intruder).reason).toBe('non-owning-process');
+    socket.emit('line', room, '|win|Jxjdndnd');
+    const summary = await ended;
+    expect(summary.contaminated).toBeUndefined();
+    expect(summary.outcome).toBe('loss');
+    const lines = fs.readFileSync(path.join(logDir, 'games.jsonl'), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]).pid).toBe(process.pid);
+    await driver.stop();
+  });
+
+  it('writes a suffixed replay url and the opening timer when the clock never arrives', async () => {
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-suffix-timer-'));
+    const socket = new EventEmitter();
+    const driver = new BattleDriver({
+      client: Object.assign(socket, {
+        choose: () => true,
+        saveReplay: () => true,
+        enableBattleTimer: () => true,
+        trackRoom: () => undefined,
+        untrackRoom: () => undefined,
+        isReady: () => true,
+      }) as unknown as ShowdownClient,
+      username: 'BotAlpha',
+      format: gen9RandomBattle,
+      engineName: 'search',
+      decisions: {
+        openBattle() { /* unused */ },
+        closeBattle() { /* unused */ },
+        async stop() { /* unused */ },
+      } as unknown as DecisionClient,
+      logDir,
+      decisionTimeoutMs: 1000,
+      settleMs: 0,
+    });
+    const ended = new Promise<import('./game-record.js').LadderGameRecord>(resolve => driver.on('gameEnd', resolve));
+    const room = 'battle-gen9randombattle-2692991009-9o3axjtwpdkaa41h7pskjmbgwkgko89pw';
+    socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
+    socket.emit('line', room, '|player|p2|Rival|2|1400');
+    socket.emit('line', room, '|turn|3');
+    socket.emit('line', room, '|-message|Rival forfeited.');
+    socket.emit('line', room, '|win|BotAlpha');
+    const summary = await ended;
+    expect(summary.replayUrl).toBe(
+      'https://replay.pokemonshowdown.com/gen9randombattle-2692991009-9o3axjtwpdkaa41h7pskjmbgwkgko89pw',
+    );
+    expect(summary.minTimerMarginSec).toBe(LADDER_TIMER_START_SEC);
+    expect(summary.minTimerMarginReason).toBe(TIMER_REASON_UNOBSERVED);
+    expect(summary.endReason).toBe('opponent-forfeit');
+    expect(summary.turns).toBe(3);
+    const stored = JSON.parse(fs.readFileSync(path.join(logDir, 'games.jsonl'), 'utf8')) as {
+      replayUrl: string;
+      minTimerMarginSec: number;
+    };
+    expect(stored.replayUrl).toBe(summary.replayUrl);
+    expect(stored.minTimerMarginSec).toBe(150);
+    await driver.stop();
   });
 });

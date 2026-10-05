@@ -31,6 +31,7 @@ import {
   appendGameRecord,
   buildLadderGameRecord,
   cappedInvalidChoiceReasons,
+  claimBattle,
   classifyEnd,
   eloDeltaConsistent,
   invalidChoiceReason,
@@ -415,6 +416,7 @@ export class BattleDriver extends EventEmitter {
       assignment,
     };
     this.rooms.set(roomId, room);
+    claimBattle(this.options.logDir, roomId);
     this.options.client.trackRoom(roomId);
     this.options.decisions.openBattle(
       roomId,
@@ -1192,19 +1194,22 @@ export class BattleDriver extends EventEmitter {
       logPath: room.log.filePath,
       calibration,
     });
-    const summary: GameSummary = {
+    let summary: GameSummary = {
       ...record,
       choiceDeliveryFailures: room.choiceDeliveryFailures,
       noLegalRetries: room.noLegalRetries,
       ambiguousPopups: room.ambiguousPopups,
     };
+    const appended = appendGameRecord(this.options.logDir, summary);
+    if (appended.reason === 'non-owning-process' || appended.reason === 'conflicting-result') {
+      summary = { ...summary, contaminated: true, contaminationReason: appended.reason };
+    }
 
     room.log.write({
       type: 'result',
       ...summary,
       gxeSource: room.elo?.gxeSource ?? 'missing',
     });
-    appendGameRecord(this.options.logDir, summary);
     this.options.onGame?.(summary);
     this.options.decisions.closeBattle(room.roomId);
     await room.log.close();

@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { countableGameRows } from '../client/game-integrity.js';
 import { isLocalLiveGame, isPhantomRecord } from '../client/game-record.js';
 import { inputLogFromTranscript } from './sim-bridge.js';
 
@@ -15,6 +16,13 @@ export interface AnalystGame {
   ourSide: Seat | null;
   foeSide: Seat | null;
   sourcePath: string;
+  battleId: string | null;
+  endReason: string | null;
+  turns: number | null;
+  pid: number | null;
+  ts: number | null;
+  contaminated?: boolean;
+  winner: string | null;
 }
 
 export function defaultAnalystDirs(cwd = process.cwd(), env: NodeJS.ProcessEnv = process.env): string[] {
@@ -116,6 +124,13 @@ export function gameFromRow(row: unknown, sourcePath: string): AnalystGame | nul
     ourSide,
     foeSide: ourSide ? foeOf(ourSide) : null,
     sourcePath,
+    battleId: typeof record.battleId === 'string' ? record.battleId : null,
+    endReason: typeof record.endReason === 'string' ? record.endReason : null,
+    turns: typeof record.turns === 'number' ? record.turns : null,
+    pid: typeof record.pid === 'number' ? record.pid : null,
+    ts: typeof record.ts === 'number' ? record.ts : null,
+    contaminated: record.contaminated === true,
+    winner: typeof record.winner === 'string' ? record.winner : null,
   };
 }
 
@@ -135,7 +150,7 @@ export function gamesInChunk(text: string, sourcePath: string): { games: Analyst
     const game = gameFromRow(row, sourcePath);
     if (game) games.push(game);
   }
-  return { games, corrupt };
+  return { games: countableGameRows(games), corrupt };
 }
 
 function isGameRecord(row: Record<string, unknown>): boolean {

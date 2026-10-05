@@ -418,7 +418,7 @@ async function playSeries(
     });
 
     const consider = (summary: GameSummary) => {
-      if (summary.phantom) return;
+      if (summary.phantom || summary.contaminated) return;
       if (finished.has(summary.battleId)) return;
       finished.set(summary.battleId, summary);
       metrics?.noteGame(summary);
@@ -612,7 +612,7 @@ function report(
   drain: LiveDrain | undefined,
   stamp: { runId: string; batchLabel: string | null; hostname: string },
 ): void {
-  const played = summaries.filter(game => !game.phantom);
+  const played = summaries.filter(game => !game.phantom && !game.contaminated);
   const invalidChoices = played.reduce((sum, game) => sum + game.invalidChoices, 0);
   const crashes = played.reduce((sum, game) => sum + game.crashes, 0);
   const fallbacks = played.reduce((sum, game) => sum + game.fallbacks, 0);
