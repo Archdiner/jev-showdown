@@ -224,6 +224,13 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     fs.utimesSync(file, drainAt, drainAt);
   }
 
+  fs.writeFileSync(path.join(runs, 'search10.log'), [
+    '[ladder] pid=4242 run=10',
+    '[ladder] 25/30 win vs foe turns=20 invalid=0 crashes=0 fallbacks=0 elo=1400',
+    '[ladder] Timed out after 25/30 games',
+    '',
+  ].join('\n'));
+
   fs.writeFileSync(path.join(ops, 'cycle.jsonl'), `${JSON.stringify({
     ts: now - 20 * 60 * 1000,
     type: 'loss',

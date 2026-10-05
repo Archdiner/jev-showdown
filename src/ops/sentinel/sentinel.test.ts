@@ -12,6 +12,7 @@ import { judge } from '../gatekeeper.js';
 import { openDb } from '../db.js';
 import { opsPaths } from '../paths.js';
 import { readLabels } from '../labels-read.js';
+import { loadContext, parseProcessTable, snapshotProcesses } from './load.js';
 import { readEvents } from './incidents.js';
 import { layoutFromEnv, renderScorecard, runSentinel, scanOnce } from './run.js';
 import type { GitStatus, Layout, ProcessSnapshot } from './types.js';
@@ -208,6 +209,129 @@ describe('pulled-config invariant', () => {
     fs.writeFileSync(path.join(layout.opsDir, 'circuits.json'), JSON.stringify(openFile));
     const quiet = scanOnce(layout, { now: now + 20, scanProcesses: false, git: quietGit });
     expect(quiet.hits.map(hit => hit.id)).not.toContain('circuits-all-pulled');
+
+describe('runner exit without a drain', () => {
+  test('a runner that timed out without a drain is a P1', () => {
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    fs.mkdirSync(layout.liveRunsDir, { recursive: true });
+    fs.writeFileSync(path.join(layout.liveRunsDir, 'search10.log'), [
+      '[ladder] 25/30 win vs foe turns=20 invalid=0 crashes=0 fallbacks=0 elo=1400',
+      '[ladder] Timed out after 25/30 games',
+      '',
+    ].join('\n'));
+    const result = scanOnce(layout, { now, processes: [], git: quietGit });
+    const hits = result.hits.filter(hit => hit.id === 'runner-exit-undrained');
+    expect(hits.map(hit => hit.severity)).toEqual(['P1']);
+    expect(hits.map(hit => hit.key)).toEqual(['undrained-exit']);
+    expect(hits[0].detail).toContain('Timed out after 25/30 games');
+    expect(result.hits.map(hit => hit.id)).not.toContain('runner-down');
+  });
+
+  test('a stalled batch end is a P1 and a user drain is not', () => {
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'summary.json'), JSON.stringify({
+      games: 25,
+      requested: 30,
+      endReason: 'stalled',
+      drained: true,
+      drainReason: 'stall',
+    }));
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'games.jsonl'), `${JSON.stringify({
+      schema: 'jev.ladder-game.v1',
+      kind: 'ladder-game',
+      source: 'ladder',
+      battleId: 'battle-timer',
+      ts: now - 1000,
+      outcome: 'loss',
+      endReason: 'our-timer',
+      turns: 4,
+      username: 'asad',
+      format: 'gen9randombattle',
+      minTimerMarginSec: 1,
+      invalidChoices: 0,
+      crashes: 0,
+      fallbacks: 0,
+    })}\n${JSON.stringify({
+      v: 1,
+      type: 'run',
+      ts: now - 500,
+      games: 25,
+      requested: 30,
+      endReason: 'stalled',
+      drainRequested: true,
+    })}\n`);
+    const stalled = scanOnce(layout, { now, processes: [], git: quietGit });
+    const hits = stalled.hits.filter(hit => hit.id === 'runner-exit-undrained');
+    expect(hits.map(hit => hit.key)).toEqual(['batch-stall']);
+    expect(hits[0].severity).toBe('P1');
+    expect(hits[0].detail).toContain('endReason=stalled');
+
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'summary.json'), JSON.stringify({
+      games: 12,
+      requested: 30,
+      endReason: 'drained',
+      drained: true,
+      drainReason: 'SIGTERM',
+    }));
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'games.jsonl'), `${JSON.stringify({
+      v: 1,
+      type: 'run',
+      ts: now - 500,
+      games: 12,
+      requested: 30,
+      endReason: 'drained',
+      drainRequested: true,
+    })}\n`);
+    const drained = scanOnce(layout, { now, processes: [], git: quietGit });
+    expect(drained.hits.map(hit => hit.id)).not.toContain('runner-exit-undrained');
+
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'summary.json'), JSON.stringify({
+      games: 30,
+      requested: 30,
+      endReason: 'completed',
+      drained: false,
+      drainReason: null,
+    }));
+    const completed = scanOnce(layout, { now, processes: [], git: quietGit });
+    expect(completed.hits.map(hit => hit.id)).not.toContain('runner-exit-undrained');
+  });
+
+  test('a missing /proc lists ladder processes from ps and a failed listing does not scan', () => {
+    const table = [
+      '  10 /usr/bin/sshd',
+      '  42 node /Users/me/jev/src/cli/ladder.ts --games 30 --engine search',
+      '  43 node /Users/me/jev/src/ops/cli.ts analyst',
+      '  44 bash ./run-live.sh --games 30',
+    ].join('\n');
+    expect(parseProcessTable(table).map(proc => proc.pid)).toEqual([42, 43, 44]);
+    const missing = path.join(os.tmpdir(), `jev-noproc-${process.pid}`);
+    const listed = snapshotProcesses({ procRoot: missing, readTable: () => table });
+    expect(listed.scanned).toBe(true);
+    expect(listed.processes.map(proc => proc.pid)).toEqual([42, 43, 44]);
+    expect(listed.processes[0].cmd).toContain('src/cli/ladder.ts');
+    const failed = snapshotProcesses({
+      procRoot: missing,
+      readTable: () => {
+        throw new Error('ps failed');
+      },
+    });
+    expect(failed).toEqual({ processes: [], scanned: false });
+
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-proc-'));
+    const pidDir = path.join(root, '77');
+    fs.mkdirSync(pidDir);
+    fs.writeFileSync(path.join(pidDir, 'cmdline'), 'node\0src/cli/ladder.ts\0--username\0asad\0');
+    fs.writeFileSync(path.join(pidDir, 'environ'), 'SHOWDOWN_USERNAME=asad\0');
+    const fromProc = snapshotProcesses({ procRoot: root });
+    expect(fromProc.scanned).toBe(true);
+    expect(fromProc.processes).toEqual([{
+      pid: 77,
+      cmd: 'node src/cli/ladder.ts --username asad',
+      env: { SHOWDOWN_USERNAME: 'asad' },
+    }]);
   });
 });
 

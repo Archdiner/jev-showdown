@@ -45,7 +45,7 @@ describe('live metrics', () => {
     });
     metrics.noteThrottle('Due to high load, you are limited to 5 games at the same time.');
     metrics.noteGame({ battleId: 'battle-1', turns: 2, outcome: 'win' });
-    metrics.finish({ games: 1, requested: 4 });
+    metrics.finish({ games: 1, requested: 4, endReason: 'completed', drainRequested: false });
     await metrics.close();
 
     const lines = fs.readFileSync(filePath, 'utf8').trim().split('\n').map(line => JSON.parse(line));
@@ -80,6 +80,8 @@ describe('live metrics', () => {
       type: 'run',
       games: 1,
       requested: 4,
+      endReason: 'completed',
+      drainRequested: false,
       decisions: 2,
       minTimerMarginSec: 12,
       throttleEvents: 1,

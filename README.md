@@ -188,7 +188,9 @@ Concurrency is 1 unless you pass `--concurrency K` (absolute max 16). `--use-eng
 
 ### Graceful drain
 
-Use a drain to swap engines in the middle of a batch. The runner stops starting new ladder searches, lets games already in progress finish, writes `logs/ladder/summary.json` (`drained` and `drainReason`), and exits. Live games are not forfeited. A battle room whose newest `|t:|` is more than 70 minutes old is forfeited when it is rejoined and does not count as in progress or against concurrency. A room with no `|t:|` stays live.
+Use a drain to swap engines in the middle of a batch. The runner stops starting new ladder searches, lets games already in progress finish, writes `logs/ladder/summary.json` (`endReason`, `drained`, and `drainReason`), and exits. `endReason` is `completed`, `drained`, or `stalled`. Live games are not forfeited. A battle room whose newest `|t:|` is more than 70 minutes old is forfeited when it is rejoined and does not count as in progress or against concurrency. A room with no `|t:|` stays live.
+
+A healthy batch has no wall-clock deadline. `--idle-ms` (default 20 minutes) is the stall window. A turn, a request, a search update, or a finished game resets it. When it fires, the runner stops queueing and waits for in-flight games to finish, then exits with `endReason=stalled`. That is a different exit from a drain you requested.
 
 At startup it prints the pid and run id. From another shell:
 
@@ -243,6 +245,8 @@ Percentiles are nearest-rank: sort the samples and take index `ceil(p/100 * n) -
 | Field | Meaning |
 | --- | --- |
 | `games`, `requested` | Finished games and the `--games` target |
+| `endReason` | `completed`, `drained`, or `stalled` |
+| `drainRequested` | True when a drain, including a stall drain, was requested |
 | `decisions` | Decision samples in the run |
 | `latencyP50Ms`, `latencyP95Ms`, `latencyP99Ms` | Run-wide nearest-rank latency |
 | `minTimerMarginSec` | Smallest timer reading in the run |
@@ -515,7 +519,7 @@ The same page has an Incidents panel and a Scorecard panel. Incidents come from 
 
 ## Reliability sentinel
 
-`npm run ops -- sentinel` is a fifth long-running process next to factory, gatekeeper, live, and analyst. It does not change the move. Every 60 seconds it reads the ladder logs, the ops files, the data file, and the process list, and it records each broken invariant as an incident.
+`npm run ops -- sentinel` is a fifth long-running process next to factory, gatekeeper, live, and analyst. It does not change the move. Every 60 seconds it reads the ladder logs, the ops files, the data file, and the process list, and it records each broken invariant as an incident. The process list is `/proc` on Linux. When `/proc` is missing (macOS), the same list comes from `ps -axww`. If that listing fails, checks that need live pids stay quiet instead of treating every runner as dead. The undrained-exit check reads runner logs and `summary.json` and does not need a process list.
 
 ```bash
 npm run ops -- sentinel              # loop every 60s
@@ -544,6 +548,7 @@ P0 is losing games or corrupting data now. P1 is the loop or visibility broken. 
 | ghost-rooms | P1 | A room with no result while `state/DRAIN` or `live-runs/*.drain` exists |
 | drain-pending | P1 | A drain file older than 10 minutes |
 | runner-down | P1 | A `live-runs/*.json` pid that is not `ladder.ts`, and `summary.json` is not newer |
+| runner-exit-undrained | P1 | The runner logged `Timed out after N/M games` without a drain, or a batch `endReason` is `stalled` or `timeout`. A requested drain is not this |
 | ops-worker-missing | P1 | factory, gatekeeper, live, or analyst has no fresh heartbeat while another worker is up |
 | ops-worker-duplicate | P1 | Two fresh pids for one of those workers |
 | improvement-stall | P1 | Losses reviewed and nothing queued for 15 minutes |
