@@ -10,6 +10,7 @@ import { assertRandbatsSpecies, randbatsSpeciesCount, statsFileSpeciesCount } fr
 import { wilson } from '../dashboard/stats.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
 import { p99, runGamesParallel } from './pool.js';
+import { specFromId } from '../engine/exact/policies.js';
 
 function arg(name: string, fallback: string): string {
   const hit = process.argv.find(a => a.startsWith(`--${name}=`));
@@ -26,8 +27,8 @@ function policy(name: string): BenchPlayer {
   if (name === 'fitted-depth2' || name === 'fitted-d2') return { kind: 'exact', config: FITTED_DEPTH2 };
   if (name === 'qw' || name === 'exact-qw') return { kind: 'exact', config: EXACT_1PLY_QW };
   if (name === 'switch') return { kind: 'exact', config: SWITCH_DEPTH2 };
-  if (name.startsWith('exact')) {
-    const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',');
+  if (name.startsWith('exact:')) {
+    const [, depth, model, evalMode] = name.split(':');
     const config: ExactConfig = {
       depth: Number(depth) || EXACT_1PLY.depth,
       opponentModel: model === 'uniform' ? 'uniform' : model === 'switch' ? 'switch' : 'max-damage',
@@ -37,7 +38,15 @@ function policy(name: string): BenchPlayer {
     };
     return { kind: 'exact', config };
   }
-  return specForAlias(name, 'selfplay');
+  
+  // Try to resolve as a policy ID first
+  try {
+    const spec = specFromId(name);
+    return spec;
+  } catch {
+    // Fall back to config alias (file path)
+    return specForAlias(name, 'selfplay');
+  }
 }
 
 function usesFitted(player: BenchPlayer): boolean {

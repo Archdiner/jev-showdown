@@ -3,6 +3,7 @@ import { Action } from '../../types/index.js';
 import { SideId, legalChoices, moveSlotIndex } from './battle-utils.js';
 import { maxDamageChoice } from './max-damage.js';
 import { EXACT_1PLY, EXACT_1PLY_QW, ExactConfig, FITTED_1PLY, FITTED_DEPTH2, QUICK_WIN_POLICY_ID, SWITCH_DEPTH2, ScoredChoice, battleToState, exactSearch } from './search.js';
+import nashProfile from '../../../experiments/exact-1ply-qw-nash/config.json' with { type: 'json' };
 
 export type PolicySpec =
   | { kind: 'random' }
@@ -111,6 +112,9 @@ export function specFromId(id: string): PolicySpec {
     case 'fitted-depth2':
     case 'fitted-d2':
       return { kind: 'exact', config: FITTED_DEPTH2 };
+    case 'exact-1ply-qw-nash':
+    case 'challenger-exact-1ply-qw-nash':
+      return { kind: 'exact', config: nashProfile as ExactConfig };
     default:
       if (id.startsWith('exact:')) {
         const [, depth, model, evalMode] = id.split(':');

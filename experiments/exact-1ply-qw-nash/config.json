@@ -1,0 +1,17 @@
+{
+  "id": "exact-1ply-qw-nash",
+  "depth": 1,
+  "opponentModel": "max-damage",
+  "evalMode": "hp",
+  "errorAsLoss": false,
+  "samples": 1,
+  "tera": true,
+  "progress": true,
+  "foePrior": true,
+  "solver": "regret-matching",
+  "solverIterations": 200,
+  "solverPurificationThreshold": 0.1,
+  "playMixed": false,
+  "maxReplies": 3,
+  "replyCap": 3
+}
