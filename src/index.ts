@@ -7,6 +7,21 @@ export { ShowdownClient } from './client/showdown-client.js';
 export { BattleLogger } from './learning/battle-logger.js';
 export { SelfPlayHarness } from './learning/self-play.js';
 export { BeliefTracker } from './engine/belief-tracker.js';
+export {
+  SetInference,
+  inferenceFromBelief,
+  inferenceFromFoes,
+  probabilityOf,
+  sampleWorlds,
+  toPokemonSet,
+  topOf,
+} from './engine/set-inference/index.js';
+export type {
+  ConcretePokemon,
+  FoeSketch,
+  OpponentWorld,
+  RevealEvent,
+} from './engine/set-inference/index.js';
 export { MCTSEngine } from './engine/mcts.js';
 export { Evaluator } from './engine/evaluator.js';
 export { DamageCalculator } from './engine/damage-calc.js';

@@ -3,6 +3,8 @@ import * as path from 'path';
 import type { Battle } from '@pkmn/sim';
 import { legalChoices, type SideId } from '../../engine/exact/battle-utils.js';
 import { maxDamageChoice } from '../../engine/exact/max-damage.js';
+import { dataLoader } from '../../data/data-loader.js';
+import { inferenceFromBelief } from '../../engine/set-inference/index.js';
 import { OpponentModel } from '../../engine/opponent-model.js';
 import type { PokemonBelief } from '../../types/index.js';
 import { register } from '../registry.js';
@@ -59,6 +61,13 @@ export function registerOpponent(): void {
     defaults: { minRoleWeight: 0, maxCandidates: 32 },
     create: params => inference('unconstrained', params),
   });
+  register<SetInferenceParams>({
+    layer: 'setInference',
+    id: 'calibrated',
+    schema: SetInferenceParamsSchema,
+    defaults: { minRoleWeight: 0, maxCandidates: 12 },
+    create: params => calibrated(params),
+  });
 
   const behaviorDefaults = BehaviorParamsSchema.parse({});
   const specs: Array<[string, 'max-damage' | 'uniform' | null, Partial<BehaviorParams>]> = [
@@ -85,6 +94,34 @@ export function registerOpponent(): void {
       }),
     });
   }
+}
+
+function calibrated(params: SetInferenceParams): SetInferenceImpl {
+  return {
+    id: 'calibrated',
+    params,
+    narrow(belief) {
+      let rows: Array<{ role: string; probability: number; moves: string[] }> = [];
+      try {
+        const inference = inferenceFromBelief(dataLoader.getStats(), belief);
+        rows = inference.roleDistribution(belief.species).map(row => ({
+          role: row.value,
+          probability: row.probability,
+          moves: inference.moveInclusion(belief.species)
+            .filter(move => move.probability > 0)
+            .sort((a, b) => b.probability - a.probability)
+            .slice(0, 4)
+            .map(move => move.value),
+        }));
+      } catch {
+        rows = [];
+      }
+      if (params.minRoleWeight > 0) {
+        rows = rows.filter(row => row.probability >= params.minRoleWeight);
+      }
+      return rows.slice(0, params.maxCandidates);
+    },
+  };
 }
 
 function inference(id: string, params: SetInferenceParams): SetInferenceImpl {
