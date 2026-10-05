@@ -84,6 +84,17 @@ Position pools are generated from seeded random games and labeled by an exact se
 
 The live client implements `LiveBattleBridge`. A new search registers an id in the search layer and does not add an entry point. The advisor calls `JevAdvisor` and `GatewayClient`. Loss review calls `LossReviewer`.
 
+## Operations layer
+
+`npm run ops -- factory|gatekeeper|live|analyst` are four processes. They share `state/graph.db`, `state/ops/*.jsonl`, and the game logs. They do not import each other.
+
+- **factory** pulls challenger, sweep, tournament, ablation, and position-replay jobs and writes results. It may attach a proposal. It never writes `champion` or `live-approved`.
+- **gatekeeper** is the only writer of those labels. A label requires the SPRT no-regression check and a 100% diagnostic pass, recorded as a Decision with the evidence.
+- **live** plays only those labels on one Showdown login (`SHOWDOWN_USERNAME` / `SHOWDOWN_PASSWORD`). The champion gets most games; live-approved challengers share a 10–20% explore slice. A config is pulled after too many consecutive losses or too large a rating drop. `--local` uses the local server instead of the ladder. Rating and GXE are stored after every game.
+- **analyst** tails finished live games, runs the Grok 4.7 loss reviewer against the calc block, and writes a general hypothesis plus a factory job. Mined positions go to the ops pool (dev / held-out by hash). Opponent category priors are updated from live logs and scraped replays.
+
+`npm run ops -- status` is one screen: facility health, queue depth, live record, rating, open regressions. `npm run ops -- report --daily` is the plain-English day summary. `npm run ops -- supervise` restarts a facility that crashes; `deploy/jev-ops.service` runs it. Jobs are idempotent and leases expire, so a restart continues the queue.
+
 ## Where Creativity Allowed
 
 ✓ New hypotheses (strategy, eval, search improvements)  

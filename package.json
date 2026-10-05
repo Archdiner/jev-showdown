@@ -19,6 +19,7 @@
     "llm:smoke": "tsx src/llm/smoke.ts",
     "llm:review": "tsx src/llm/review-cli.ts",
     "exp": "tsx src/exp/cli.ts",
+    "ops": "tsx src/ops/cli.ts",
     "benchmark": "tsx src/cli/benchmark.ts",
     "export-replays": "tsx src/cli/export-replays.ts",
     "lint": "eslint src/**/*.ts"

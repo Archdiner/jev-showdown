@@ -43,7 +43,9 @@ export interface DecisionLogger {
   games(): GameLogRecord[];
 }
 
-const FILE_DIR = path.join(process.cwd(), 'state');
+function logDir(): string {
+  return process.env.JEV_LOG_DIR || path.join(process.cwd(), 'state');
+}
 
 export function createLogger(env: EnvProfile): DecisionLogger {
   const decisions: DecisionLogRecord[] = [];
@@ -64,6 +66,7 @@ export function createLogger(env: EnvProfile): DecisionLogger {
 }
 
 function append(file: string, record: unknown): void {
-  fs.mkdirSync(FILE_DIR, { recursive: true });
-  fs.appendFileSync(path.join(FILE_DIR, file), `${JSON.stringify(record)}\n`);
+  const dir = logDir();
+  fs.mkdirSync(dir, { recursive: true });
+  fs.appendFileSync(path.join(dir, file), `${JSON.stringify(record)}\n`);
 }

@@ -113,11 +113,18 @@ export class ShowdownClient extends EventEmitter {
         const side = requestData?.side?.id;
         if (room && (side === 'p1' || side === 'p2')) this.sides.set(room, side);
         this.emit('request', room, requestData);
+      } else if (line.startsWith('|rating|')) {
+        const parts = line.split('|');
+        this.emit('rating', {
+          rating: Number(parts[2]),
+          gxe: Number(parts[3]),
+          games: Number(parts[4] || 0),
+        });
       } else if (line.startsWith('|win|')) {
         const winner = line.slice(5);
         this.emit('battleEnd', room, winner);
         if (room) this.battleRooms.delete(room);
-      } else if (line.startsWith('|tie')) {
+      } else if (line === '|tie' || line.startsWith('|tie|')) {
         this.emit('battleEnd', room, null);
         if (room) this.battleRooms.delete(room);
       }

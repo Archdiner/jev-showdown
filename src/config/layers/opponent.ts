@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import type { Battle } from '@pkmn/sim';
 import { legalChoices, type SideId } from '../../engine/exact/battle-utils.js';
 import { maxDamageChoice } from '../../engine/exact/max-damage.js';
@@ -9,6 +11,7 @@ import {
   CategoryPriorsSchema,
   SetInferenceParamsSchema,
   type BehaviorParams,
+  type CategoryPriors,
   type SetInferenceParams,
 } from '../schema.js';
 import { moveOf } from './battle.js';
@@ -107,6 +110,24 @@ function inference(id: string, params: SetInferenceParams): SetInferenceImpl {
   };
 }
 
+/** Analyst writes this file. The strategy code only reads it. */
+export function loadReplayPriors(fallback: CategoryPriors): CategoryPriors {
+  const candidates = [
+    process.env.JEV_PRIORS_FILE,
+    path.join(process.cwd(), 'state', 'ops', 'behavior.json'),
+    path.join(process.cwd(), 'state', 'priors', 'behavior.json'),
+  ].filter((file): file is string => Boolean(file));
+  for (const file of candidates) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      return CategoryPriorsSchema.parse({ ...fallback, ...JSON.parse(fs.readFileSync(file, 'utf8')) });
+    } catch {
+      continue;
+    }
+  }
+  return fallback;
+}
+
 function behaviorLines(
   id: string,
   params: BehaviorParams,
@@ -124,17 +145,18 @@ function behaviorLines(
   if (id === 'uniform') return legal.map(choice => ({ choice, weight: 1 }));
 
   const ratingBoost = params.ratingConditioned && (rating ?? 0) >= 1400 ? 1.25 : 1;
+  const priors = id === 'replay-prior' ? loadReplayPriors(params.priors) : params.priors;
   return legal.map(choice => {
     if (choice.startsWith('switch ')) {
-      const weight = (id === 'switch-prone' || id === 'jev-predictor' ? params.switchWeight : params.priors.switch) * ratingBoost;
+      const weight = (id === 'switch-prone' || id === 'jev-predictor' ? params.switchWeight : priors.switch) * ratingBoost;
       return { choice, weight };
     }
     const move = moveOf(battle, side, choice);
     if (!move) return { choice, weight: 1 };
-    let weight = params.priors[categoryKey(move)] ?? 1;
-    if (move.sideCondition && move.target === 'foeSide') weight *= params.priors.hazard;
-    if (move.boosts) weight *= params.priors.setup;
-    if (move.priority > 0) weight *= params.priors.priority;
+    let weight = priors[categoryKey(move)] ?? 1;
+    if (move.sideCondition && move.target === 'foeSide') weight *= priors.hazard;
+    if (move.boosts) weight *= priors.setup;
+    if (move.priority > 0) weight *= priors.priority;
     return { choice, weight };
   });
 }
