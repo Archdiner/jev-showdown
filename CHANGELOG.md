@@ -16,6 +16,10 @@ Unit tests write sets and stats under `JEV_DATA_DIR` (a temp directory) and set 
 
 Unit tests clear `VERCEL_AI_GATEWAY_KEY`, `AI_GATEWAY_API_KEY`, `XAI_API_KEY`, `OPENAI_API_KEY`, `CEREBRAS_API_KEY`, and `POSTHOG_API_KEY`, and replace `fetch` with a stub that throws. A test fails if any attempt was recorded, including when the caller catches the error.
 
+## The live breaker cannot idle the only champion
+
+A loss streak no longer pulls the champion. Five losses is normal variance for a config winning about 20% of games, and pulling the only approved config made `ops live` exit every cycle with `every approved config is pulled`. The champion stays schedulable. A streak that is unlikely at that config's baseline win rate flags a regression, and if a distinct previous champion exists the live worker plays that one. A challenger is pulled only when its own streak crosses that same baseline threshold (or its ladder rating drops), then returns after a 30 minute cooldown. Local games and ladder games keep separate counters in `circuits.json`, so a local loss cannot add to the ladder streak. `npm run ops -- sentinel` raises P1 when live reports that skip or when every approved config in a scope is pulled. The check does not read `/proc`.
+
 ## A ladder batch no longer dies on a wall-clock deadline
 
 `./run-live.sh --games 30 --engine search --concurrency 3` used to set a timer of 3 minutes per wave of games (30 minutes for that batch). When the timer fired it rejected the batch, printed `Timed out after N/M games`, and exited. Games still on the ladder were left without a client. Showdown's disconnect timer then forfeited them about a minute later. Real games plus queue time are longer than 3 minutes each, so a 30-game batch at concurrency 3 hit this on essentially every run.

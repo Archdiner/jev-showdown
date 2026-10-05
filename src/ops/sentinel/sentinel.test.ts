@@ -7,7 +7,11 @@ import { CHECKS } from './checks.js';
 import { writeTonightFixture } from './fixtures.js';
 import { acknowledge, incidentStore, loadIncidents, markFixing } from './incidents.js';
 import { buildScorecard, formatScorecard, parseSince } from './scorecard.js';
-import { loadContext, parseProcessTable, snapshotProcesses } from './load.js';
+import { loadContext, parseProcessTable, scanProcesses, snapshotProcesses } from './load.js';
+import { judge } from '../gatekeeper.js';
+import { openDb } from '../db.js';
+import { opsPaths } from '../paths.js';
+import { readLabels } from '../labels-read.js';
 import { readEvents } from './incidents.js';
 import { layoutFromEnv, renderScorecard, runSentinel, scanOnce } from './run.js';
 import type { GitStatus, Layout, ProcessSnapshot } from './types.js';
@@ -148,6 +152,62 @@ describe('sentinel checks', () => {
     expect(incident.status).toBe('fixing');
     expect(incident.pr).toContain('/pull/1');
     expect(incident.count).toBe(2);
+  });
+});
+
+describe('pulled-config invariant', () => {
+  test('ops live idle and every approved config pulled are P1 without /proc', () => {
+    const missing = path.join(os.tmpdir(), `jev-noproc-${process.pid}`);
+    expect(scanProcesses({ procRoot: missing })).toEqual([]);
+
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    fs.writeFileSync(path.join(layout.opsDir, 'live-summary.jsonl'), `${JSON.stringify({
+      ts: now - 1000,
+      games: 488,
+      rating: 2720,
+      gxe: 100,
+      skipped: 'every approved config is pulled',
+    })}\n`);
+    const reported = scanOnce(layout, { now, scanProcesses: false, git: quietGit });
+    const skip = reported.hits.find(hit => hit.id === 'circuits-all-pulled');
+    expect(skip?.severity).toBe('P1');
+    expect(skip?.key).toBe('live-reported');
+    expect(skip?.detail).toContain('every approved config is pulled');
+    expect(reported.openP1).toBeGreaterThan(0);
+
+    const paths = opsPaths(layout.opsDir);
+    layout.graphDb = paths.graph;
+    judge(paths, {
+      configPath: 'configs/champion.yaml',
+      action: 'champion',
+      wins: 250,
+      losses: 100,
+      invalid: 0,
+      crashes: 0,
+      diagnostics: { passed: 1, failed: 0, total: 1 },
+    });
+    const db = openDb(paths);
+    const id = readLabels(db)[0].configId;
+    db.close();
+    fs.rmSync(path.join(layout.opsDir, 'live-summary.jsonl'));
+    fs.writeFileSync(path.join(layout.opsDir, 'circuits.json'), JSON.stringify({
+      [id]: { consecutiveLosses: 5, ratings: [], pulled: true, reason: '5 consecutive losses' },
+      other: { consecutiveLosses: 0, ratings: [], pulled: false },
+    }));
+    const pulled = scanOnce(layout, { now: now + 10, scanProcesses: false, git: quietGit });
+    const circuitHit = pulled.hits.find(hit => hit.id === 'circuits-all-pulled');
+    expect(circuitHit?.severity).toBe('P1');
+    expect(circuitHit?.detail).toContain(id);
+    expect(circuitHit?.detail).toContain('every approved config is pulled');
+
+    const openFile = JSON.parse(fs.readFileSync(path.join(layout.opsDir, 'circuits.json'), 'utf8')) as {
+      [key: string]: { pulled: boolean };
+    };
+    openFile[id].pulled = false;
+    fs.writeFileSync(path.join(layout.opsDir, 'circuits.json'), JSON.stringify(openFile));
+    const quiet = scanOnce(layout, { now: now + 20, scanProcesses: false, git: quietGit });
+    expect(quiet.hits.map(hit => hit.id)).not.toContain('circuits-all-pulled');
   });
 });
 
