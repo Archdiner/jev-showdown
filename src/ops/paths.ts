@@ -14,6 +14,9 @@ export interface OpsPaths {
   priors: string;
   pool: string;
   variants: string;
+  cycle: string;
+  dispositions: string;
+  hypotheses: string;
 }
 
 const DEFAULT_ROOT = path.join(process.cwd(), 'state', 'ops');
@@ -40,6 +43,9 @@ export function opsPaths(root = process.env.OPS_DIR || DEFAULT_ROOT): OpsPaths {
     priors,
     pool: path.join(root, 'mined-pool.json'),
     variants: path.join(root, 'variants.json'),
+    cycle: path.join(root, 'cycle.jsonl'),
+    dispositions: path.join(root, 'dispositions.jsonl'),
+    hypotheses: path.join(root, 'hypotheses.json'),
   };
 }
 
