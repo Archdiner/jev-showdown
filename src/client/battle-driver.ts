@@ -263,7 +263,8 @@ export class BattleDriver extends EventEmitter {
       engine: this.options.engineName,
     });
     this.emit('battleStart', roomId);
-    this.options.client.enableBattleTimer(roomId);
+    // Partial test clients implement only the methods that battle uses.
+    this.options.client.enableBattleTimer?.(roomId);
     return room;
   }
 
