@@ -4,6 +4,7 @@ import type { BotSpec } from '../config/interfaces.js';
 import { isBotSpec } from '../config/load.js';
 import { hazardScore } from '../config/layers/battle.js';
 import {
+  choiceAccepted,
   hpEval,
   legalChoices,
   safeChoose,
@@ -66,6 +67,7 @@ export interface GameResult {
     turn: number;
     choice: string;
     configId: string;
+    source?: string;
     scores?: Array<{ choice: string; score: number }>;
   }>;
   log?: string;
@@ -165,7 +167,7 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         const decision = await choose(p1, battle, 'p1', rng, gameId, job.seed);
         result.p1TurnTimes.push(decision.ms);
         notePlay(result, 'p1', p1Legal, decision);
-        if (!p1Legal.includes(decision.choice) && decision.choice !== 'default') result.p1Invalid++;
+        if (!choiceAccepted(battle, 'p1', decision.choice) && decision.choice !== 'default') result.p1Invalid++;
         const ok = safeChoose(battle, 'p1', decision.choice);
         if (!ok) result.p1Invalid++;
         result.decisions?.push({
@@ -173,6 +175,7 @@ export async function runGame(job: GameJob): Promise<GameResult> {
           turn: battle.turn,
           choice: decision.choice,
           configId: decision.configId,
+          source: decision.source,
           scores: decision.scores,
         });
       }
@@ -180,7 +183,7 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         const decision = await choose(p2, battle, 'p2', rng, gameId, job.seed);
         result.p2TurnTimes.push(decision.ms);
         notePlay(result, 'p2', p2Legal, decision);
-        if (!p2Legal.includes(decision.choice) && decision.choice !== 'default') result.p2Invalid++;
+        if (!choiceAccepted(battle, 'p2', decision.choice) && decision.choice !== 'default') result.p2Invalid++;
         const ok = safeChoose(battle, 'p2', decision.choice);
         if (!ok) result.p2Invalid++;
         result.decisions?.push({
@@ -188,6 +191,7 @@ export async function runGame(job: GameJob): Promise<GameResult> {
           turn: battle.turn,
           choice: decision.choice,
           configId: decision.configId,
+          source: decision.source,
           scores: decision.scores,
         });
       }
@@ -227,6 +231,7 @@ async function choose(
   choice: string;
   ms: number;
   configId: string;
+  source?: string;
   scores?: Array<{ choice: string; score: number }>;
   predictedSwitch?: boolean;
   answersPredictedSwitch?: boolean;

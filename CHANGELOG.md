@@ -1,5 +1,11 @@
 # Changelog
 
+## Strategist
+
+Grok 4.7 (`spacexai/grok-4.7`) reads the situation brief and returns one legal action plus a game plan, as JSON. The action may be a move, a switch, or Terastallize when the request allows it. A missing key, a timeout (20s), unusable JSON, or an action that is not legal falls back to exact 1-ply search. The plan is kept on the battle and sent again next turn.
+
+Screen on a machine with `VERCEL_AI_GATEWAY_KEY`: `npx tsx src/llm/strategist-screen.ts 20`
+
 ## Operations layer
 
 Four long-running commands share the graph and the logs: `npm run ops -- factory`, `gatekeeper`, `live`, and `analyst`. The factory runs queued simulations and may propose a config. The gatekeeper is the only command that writes `champion` or `live-approved`, and only after SPRT and a 100% diagnostic pass. Live plays those configs on one Showdown login, gives the champion most of the games, and pulls a config after a loss streak or a rating drop. The analyst turns a live loss into a general hypothesis and a factory job. `status`, `report --daily`, and `supervise` read the same store. `deploy/jev-ops.service` is the systemd unit.
