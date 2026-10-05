@@ -508,19 +508,26 @@ export function parseRatingLine(text: string): RatingUpdate | null {
 }
 
 export function parseReplayUrl(text: string): ReplayNotice | null {
-  // The public URL is `{format}-{number}` plus an optional `-{password}`.
-  // The password is not part of the battle room id.
+  // `{format}-{number}` plus an optional `-{password}`. A hidden room's password
+  // is also part of the room id (`…-{password}pw`). The returned id is the
+  // numeric prefix; `url` keeps the suffix.
   const match = text.match(/https?:\/\/replay\.pokemonshowdown\.com\/([a-z0-9]+-\d+)(-[a-z0-9]+)?/i);
   if (!match) return null;
   return { id: match[1], url: match[0] };
 }
 
-/** True when a replay id names this battle room, and not a longer room id. */
+/**
+ * True when a replay id names this battle room, and not a longer room id.
+ * A hidden room is `battle-{format}-{n}-{password}pw`. The popup's id is the
+ * numeric prefix, so the room matches when its extra segment is the password.
+ */
 export function replayMatchesRoom(roomId: string, replayId: string): boolean {
   if (!replayId) return false;
-  if (roomId === replayId || roomId === `battle-${replayId}`) return true;
   const bare = roomId.startsWith('battle-') ? roomId.slice('battle-'.length) : roomId;
-  return bare === replayId;
+  if (bare === replayId || roomId === replayId || roomId === `battle-${replayId}`) return true;
+  if (!bare.startsWith(`${replayId}-`)) return false;
+  const suffix = bare.slice(replayId.length + 1);
+  return /^[a-z0-9]+$/i.test(suffix);
 }
 
 /**

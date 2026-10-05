@@ -93,9 +93,17 @@ describe('ladder rating records', () => {
     ]);
     expect(missing.summaryGxe).toBeNull();
     expect(missing.summaryElo).toBeNull();
-    expect(missing.events.some(event => event.gxe === 50 || event.eloAfter === 1000 || event.after === 1000)).toBe(false);
+    expect(missing.events.some(event => event.gxe === 50 || event.eloAfter === 1000 || event.after === 1000 || event.eloAfter === -1 || event.opponentRating === -1)).toBe(false);
     const missingResult = missing.events.find(event => event.type === 'result');
-    expect(missingResult).toMatchObject({ gxe: null, eloBefore: null, eloAfter: null, gxeSource: 'missing' });
+    expect(missingResult).toMatchObject({
+      gxe: null,
+      eloBefore: null,
+      eloAfter: null,
+      eloAfterReason: 'unreported',
+      opponentRating: null,
+      opponentRatingReason: 'unreported',
+      gxeSource: 'missing',
+    });
   });
 
   it('reads a forfeit rating popup that arrives after the result', async () => {

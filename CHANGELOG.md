@@ -1,5 +1,13 @@
 # Changelog
 
+## Ladder game rows stay one per battle, with a replay link and a timer
+
+A second process on the same account could append another `games.jsonl` row for a room the first process already owned. A disconnect tie with turns already played was counted next to the real result. The recorder now claims the room when it opens and appends one row per battle id. A different pid does not append; the attempt is flagged in `games.contamination.jsonl`. `npm run ops -- repair-games` writes those flags for rows already on disk and does not delete or rewrite the log. Ladder totals, the dashboard, the analyst, the circuit-breaker window, and `ladderGamesForGate` skip a flagged or conflicting row and keep a single decisive result. The reliability sentinel reports `duplicate-battle-id`, `null-replay-url`, and `null-required-field`. The scorecard drops a duplicate disconnect tie.
+
+A hidden battle room is `battle-gen9randombattle-<n>-<password>pw`. The shareable replay is `https://replay.pokemonshowdown.com/gen9randombattle-<n>-<password>pw`. The popup's id is only the numeric prefix, so it used to miss that room and the row stored `replayUrl: null`. The link is now the room id without `battle-`, or the server's own URL when that arrives. A local server has no public replay: the row keeps the local log path and `replayUnavailableReason: local-server`.
+
+Showdown's opening clock is 150 seconds. A game that ends before any `|inactive|` line used to store `minTimerMarginSec: null`. It now stores 150 and `minTimerMarginReason: no-timer-update`. A missing opponent rating stays null with `opponentRatingReason: unreported`. `eloAfter` stays null when the update is missing or does not match the result. A loss that stays at the 1000 floor is consistent and is kept. Scorecards do not treat a missing rating as Elo 1000 or as -1.
+
 ## Live losses reach the factory
 
 A ladder loss used to write a hypothesis and then stop. Per-battle logs have no `>start` input log, so position mining returned nothing and no factory job was enqueued. The same generic fallback text for every loss never became a self-play variant. Each reviewed loss now queues a challenger for that mechanism or eval term, or a mined position when the log can be reconstructed, or a line in `state/ops/dispositions.jsonl` saying why it was skipped. The factory claims open hypotheses, including `state/meta/hypotheses.json` rows, and plays them against max-damage. `npm run ops -- status` prints the cycle counts. The sentinel check `improvement-stall` is a P1 when losses were reviewed and nothing was queued for 15 minutes.

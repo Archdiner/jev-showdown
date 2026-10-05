@@ -1,4 +1,4 @@
-export const OPS_USAGE = `usage: npm run ops -- factory|gatekeeper|live|analyst|sentinel|scorecard|status|report|supervise|dry-run
+export const OPS_USAGE = `usage: npm run ops -- factory|gatekeeper|live|analyst|sentinel|scorecard|status|report|supervise|repair-games|dry-run
   factory, gatekeeper, live, analyst, supervise accept --once
   live --local
       Start a local server on a free port, log in as localbot, and do not contact
@@ -16,13 +16,17 @@ export const OPS_USAGE = `usage: npm run ops -- factory|gatekeeper|live|analyst|
   Opponent priors use the foe's seat from ourSide or the |player| line. A scraped replay counts both players.
   report --daily is the plain-English day summary
   sentinel [--once] [--json]
-      Run the reliability checks every 60s. --once exits 1 when a P0 incident is open.
+      Run the reliability checks every 60s, including duplicate-battle-id,
+      null-replay-url, and null-required-field. --once exits 1 when a P0 incident is open.
       --once --json prints those incidents as one JSON object on stdout, then exits 1 when a P0 is open.
       --ack ID, --fixing ID --pr URL, and --root-cause ID --text REASON move an incident.
   scorecard [--since 24h|ISO] [--md]
       One screen for the owner. --since 24h is a duration. An ISO timestamp is the start of the window.
       Elo, win rate, and record are compared with the previous window of the same length.
-      Phantom games and local games are excluded.
+      Phantom games, local games, and a duplicate disconnect tie are excluded.
+  repair-games
+      Flag contaminated rows in games.contamination.jsonl. Does not delete or
+      rewrite the game log. --games and --live select the files.
 Facilities share the graph and the JSONL logs. They do not import each other.`;
 
 export function opsFlag(argv: string[], name: string): boolean {
