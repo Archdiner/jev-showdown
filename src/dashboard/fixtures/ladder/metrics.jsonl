@@ -1,0 +1,3 @@
+{"v":1,"ts":1100,"runId":"run-1","engine":"max-damage","type":"decision","battleId":"battle-gen9randombattle-9","turn":1,"latencyMs":80,"secondsLeft":20,"fallback":false,"concurrency":1}
+{"v":1,"ts":1200,"runId":"run-1","engine":"max-damage","type":"game","battleId":"battle-gen9randombattle-9","turns":14,"outcome":"win","decisions":1,"latencyP50Ms":80,"latencyP95Ms":120,"latencyP99Ms":200,"minTimerMarginSec":12,"throttleEvents":0}
+{"v":1,"ts":1300,"runId":"run-1","engine":"max-damage","type":"throttle","message":"Due to high load, you are limited to 5 games at the same time.","concurrency":1}

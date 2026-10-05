@@ -1,0 +1,2 @@
+{"kind":"live-game","id":"battle-1","ts":2000,"configId":"champion-hash","configPath":"configs/champion.yaml","winner":"win","rating":1204,"gxe":62.5}
+{"kind":"live-game","id":"battle-2","ts":3000,"configId":"depth2-hash","configPath":"configs/depth2.yaml","winner":"loss","rating":1190,"gxe":60.1}

@@ -1,0 +1,4 @@
+{"ts":1000,"type":"game_start","battleId":"battle-gen9randombattle-9","username":"jevbot","engine":"max-damage"}
+{"ts":1100,"type":"turn","battleId":"battle-gen9randombattle-9","turn":1,"searchMs":80,"secondsLeft":20}
+{"ts":1200,"type":"result","battleId":"battle-gen9randombattle-9","username":"jevbot","opponent":"ace","outcome":"win","turns":14,"replayId":"gen9randombattle-555","eloBefore":1100,"eloAfter":1116,"invalidChoices":0,"crashes":0,"fallbacks":0,"engine":"max-damage"}
+{not json
