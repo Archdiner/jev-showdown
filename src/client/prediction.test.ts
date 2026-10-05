@@ -303,8 +303,10 @@ describe('BattleDriver prediction log', () => {
     expect(summary.calibration?.compared).toBe(1);
     expect(summary.calibration?.turns).toBe(1);
     expect(summary.calibration?.ourActions).toBe(1);
-    const file = fs.readdirSync(logDir).find(name => name.endsWith('.jsonl') && name !== 'games.jsonl');
-    const text = fs.readFileSync(path.join(logDir, file || ''), 'utf8');
+    const text = fs.readdirSync(logDir)
+      .filter(name => name.endsWith('.jsonl') && name !== 'games.jsonl')
+      .map(name => fs.readFileSync(path.join(logDir, name), 'utf8'))
+      .join('\n');
     expect(text).toContain('"type":"prediction_error"');
     expect(text).toContain(TURN_FORECAST_SCHEMA);
     expect(text).toContain('"schema":"jev.prediction-error.v1"');
