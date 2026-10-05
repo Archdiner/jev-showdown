@@ -1,5 +1,5 @@
 import { PRNG, type Battle } from '@pkmn/sim';
-import { legalChoices, type SideId } from '../engine/exact/battle-utils.js';
+import { choiceAccepted, legalChoices, type SideId } from '../engine/exact/battle-utils.js';
 import { battleToState } from '../engine/exact/search.js';
 import { blendCandidates } from '../llm/blend.js';
 import { toAdvisorCandidates } from '../llm/state-summary.js';
@@ -139,7 +139,8 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
         });
       const plan = trace.gamePlan !== undefined ? trace.gamePlan : drafted;
       let scores = trace.scores.length ? trace.scores : [{ choice: trace.choice, score: 0 }];
-      let choice = applyPolicies(active, input.battle, input.side, legal, plan, scores);
+      const ranked = applyPolicies(active, input.battle, input.side, legal, plan, scores);
+      let choice = playedChoice(input.battle, input.side, trace, ranked);
       scores = scores.map(row => ({ ...row, score: row.score }));
       let advisorCalled = false;
       let advisorSource: string | undefined;
@@ -238,6 +239,21 @@ function applyAdjustment(config: ResolvedConfig, adjustment: MetaAdjustment): Re
     };
   }
   return next;
+}
+
+/**
+ * A committed search choice is the move that is sent, including Terastallize.
+ * Re-ranking only the plain legal list drops that suffix and can play a switch
+ * the veto already rejected. Other searches still go through the policy rank.
+ */
+export function playedChoice(
+  battle: Battle,
+  side: SideId,
+  trace: Pick<SearchTrace, 'choice' | 'committed'>,
+  ranked: string,
+): string {
+  if (trace.committed && choiceAccepted(battle, side, trace.choice)) return trace.choice;
+  return ranked;
 }
 
 function applyPolicies(

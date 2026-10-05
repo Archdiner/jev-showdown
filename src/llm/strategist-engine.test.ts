@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
-import { buildBot } from '../config/bot.js';
+import { buildBot, playedChoice } from '../config/bot.js';
 import { loadConfig } from '../config/load.js';
-import { legalChoices, startRandomBattle, teamsForSeed } from '../engine/exact/battle-utils.js';
+import { choiceAccepted, legalChoices, startRandomBattle, teamsForSeed } from '../engine/exact/battle-utils.js';
 
 describe('strategist engine', () => {
   it('is a buildBot config whose search id is strategist', () => {
@@ -24,13 +24,27 @@ describe('strategist engine', () => {
       const battle = startRandomBattle(teams.p1, teams.p2, 8);
       const bot = buildBot('configs/strategist.yaml', 'local');
       const decision = await bot.decide({ battle, side: 'p1', gameId: 'smoke', seed: 8 });
-      const legal = legalChoices(battle, 'p1');
-      expect(legal).toContain(decision.choice);
+      expect(choiceAccepted(battle, 'p1', decision.choice)).toBe(true);
       expect(decision.layerIds.search).toBe('strategist');
       expect(decision.configId).toBe(loadConfig('configs/strategist.yaml').configId);
     } finally {
       if (saved !== undefined) process.env.VERCEL_AI_GATEWAY_KEY = saved;
       if (savedAlt !== undefined) process.env.AI_GATEWAY_API_KEY = savedAlt;
     }
+  });
+
+  it('plays a committed Terastallize line instead of the switch a re-rank would pick', () => {
+    const teams = teamsForSeed(4);
+    const battle = startRandomBattle(teams.p1, teams.p2, 4);
+    battle.getSide('p1').activeRequest = {
+      active: [{
+        moves: [{ disabled: false }, { disabled: false }, { disabled: false }, { disabled: false }],
+        canTerastallize: 'Fire',
+      }],
+    } as never;
+    expect(legalChoices(battle, 'p1')).not.toContain('move 1 terastallize');
+    expect(choiceAccepted(battle, 'p1', 'move 1 terastallize')).toBe(true);
+    expect(playedChoice(battle, 'p1', { choice: 'move 1 terastallize', committed: true }, 'switch 2')).toBe('move 1 terastallize');
+    expect(playedChoice(battle, 'p1', { choice: 'move 1 terastallize' }, 'switch 2')).toBe('switch 2');
   });
 });

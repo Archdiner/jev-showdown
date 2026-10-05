@@ -29,6 +29,11 @@ export interface SearchTrace {
   budgetMs?: number;
   /** Whether this turn called Grok, reused a plan, or skipped it. */
   grok?: string;
+  /**
+   * The search already applied its own veto. Do not re-rank this choice away.
+   * Terastallize is legal on the request and absent from the plain choice list.
+   */
+  committed?: boolean;
 }
 
 export interface SearchCtx {
@@ -152,6 +157,7 @@ async function strategistLine(
     note,
     budgetMs,
     grok: decided.grok,
+    committed: true,
   };
 }
 
