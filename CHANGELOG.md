@@ -1,5 +1,11 @@
 # Changelog
 
+## Self-play uses the ladder's hidden information
+
+Local self-play, the factory, and the gatekeeper used to search the real battle, so each bot saw the opponent's full team, sets, and unrevealed moves. They now build the decision the way the live ladder does: a `@pkmn/client` replay of the lines that side would receive, then `livePositionFromClient` and `buildDecisionBattle`. Unrevealed teammates, moves, items, and abilities stay hidden. The foe model is that same function, so a later change to the ladder's opponent sets applies here too.
+
+`information: full` on a game, `--information=full` on `npx tsx src/bench/cli.ts`, or `JEV_INFORMATION=full` keeps the old omniscient sim for comparison. The default is hidden.
+
 ## Rating and GXE stay null when the server omits them
 
 The ladder rating parser now reads GXE from the HTML popup `(GXE: …)` and from a `|rating|elo|gxe` line. If that number is not there, `gxe` is null. A missing rating stays null. The client does not fill in 1000 or 50. Each parsed update is a `rating` event in the per-battle JSONL, and the game `result` copies Elo before/after, GXE, and `gxeSource`. `ops live` writes the same nulls on its live-game row and does not feed a stand-in Elo into the circuit breaker.

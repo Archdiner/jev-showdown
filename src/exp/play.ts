@@ -1,6 +1,7 @@
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
 import { GameJob, GameResult, runGame } from '../bench/game.js';
 import { runGamesParallel } from '../bench/pool.js';
+import type { InformationMode } from '../client/hidden-info.js';
 import type { BotSpec } from '../config/interfaces.js';
 
 /** Each seed is played twice with swapped sides. `games` is the total. */
@@ -9,7 +10,8 @@ export async function playPaired(
   b: BotSpec,
   games: number,
   seedStart: number,
-  parallel = true
+  parallel = true,
+  information?: InformationMode,
 ): Promise<GameResult[]> {
   if (games % 2 !== 0) throw new Error('games must be even: each seed is played on both sides');
   const pairs = games / 2;
@@ -17,8 +19,8 @@ export async function playPaired(
   for (let i = 0; i < pairs; i++) {
     const seed = seedStart + i;
     const teams = teamsForSeed(seed);
-    jobs.push({ index: jobs.length, seed, p1Team: teams.p1, p2Team: teams.p2, p1: a, p2: b });
-    jobs.push({ index: jobs.length, seed, p1Team: teams.p1, p2Team: teams.p2, p1: b, p2: a });
+    jobs.push({ index: jobs.length, seed, p1Team: teams.p1, p2Team: teams.p2, p1: a, p2: b, information });
+    jobs.push({ index: jobs.length, seed, p1Team: teams.p1, p2Team: teams.p2, p1: b, p2: a, information });
   }
   if (!parallel || jobs.length < 2) {
     const results: GameResult[] = [];
