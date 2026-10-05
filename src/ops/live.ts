@@ -1,8 +1,9 @@
 import * as fs from 'fs';
-import { LadderSession } from '../config/adapters.js';
+import { fallbackChoice, LadderSession } from '../config/adapters.js';
 import { buildBot } from '../config/bot.js';
 import { resolveConcurrencyLimit } from '../client/concurrency-config.js';
 import { buildLadderGameRecord, currentGitSha, factsFromTranscript } from '../client/game-record.js';
+import { LadderQueue } from '../client/ladder-queue.js';
 import { ShowdownClient } from '../client/showdown-client.js';
 import { allocate, nextCircuit, type Allocatable, type CircuitState, clampExplore } from './allocate.js';
 import { openDb } from './db.js';
@@ -39,11 +40,6 @@ export interface LiveSummary {
 interface RoomWatch {
   startedAt: number;
   latencies: number[];
-}
-
-interface Seat {
-  config: Allocatable;
-  variantId: string | null;
 }
 
 export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
@@ -89,38 +85,50 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   let rating: number | undefined;
   let gxe: number | undefined;
   let finished = 0;
-  let active = 0;
-  const pending: Seat[] = [];
   const sessions = new Map<string, { config: Allocatable; variantId: string | null; session: LadderSession }>();
   const transcripts = new Map<string, string[]>();
   const watches = new Map<string, RoomWatch>();
   const sides = new Map<string, 'p1' | 'p2'>();
+  const started = new Set<string>();
 
   const timeoutMs = opts.timeoutMs ?? 120_000;
+  let queue!: LadderQueue;
+  const hasOpenConfig = () => allocate(withPulls(approved, circuits), () => 0, exploreRate) !== null;
+  queue = new LadderQueue(
+    client,
+    'gen9randombattle',
+    slots,
+    message => beat(paths, 'live', 'error', message),
+    true,
+    () => finished + queue.activeBattles < target && hasOpenConfig(),
+  );
   const summary = await new Promise<LiveSummary>((resolve, reject) => {
     const timer = setTimeout(() => {
+      queue.stop();
       client.disconnect();
       reject(new Error(`live timed out after ${finished} games`));
     }, timeoutMs);
     const finish = (value: LiveSummary) => {
       clearTimeout(timer);
+      queue.stop();
       resolve(value);
     };
-    const launch = () => {
-      while (active < slots && finished + active < target) {
-        const config = allocate(withPulls(approved, circuits), Math.random, exploreRate);
-        if (!config) {
-          if (active === 0) finish({ games: finished, rating, gxe, skipped: 'every approved config is pulled' });
-          return;
-        }
-        const variantId = thompsonDraw(variantPool, variantCounts, Math.random);
-        pending.push({ config, variantId });
-        active += 1;
-        client.search();
+    const maybeFill = () => {
+      if (finished >= target) {
+        finish({ games: finished, rating, gxe });
+        return;
       }
+      if (!hasOpenConfig() && queue.activeBattles === 0) {
+        finish({ games: finished, rating, gxe, skipped: 'every approved config is pulled' });
+        return;
+      }
+      queue.fill();
     };
 
     const transcript = (room: string) => (transcripts.get(room) || []).join('\n');
+
+    client.on('popup', (message: string) => queue.notePopup(message));
+    client.on('lobby', (line: string) => queue.noteLobby(line));
 
     client.on('rating', (update: { after?: number; rating?: number; gxe?: number }) => {
       if (typeof update.after === 'number') rating = update.after;
@@ -129,6 +137,10 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
     });
 
     client.on('line', (room: string, line: string) => {
+      if (room.startsWith('battle-') && !started.has(room)) {
+        started.add(room);
+        queue.noteBattle(room);
+      }
       if (room) {
         const bucket = transcripts.get(room) || [];
         bucket.push(line);
@@ -157,23 +169,32 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
       if (side === 'p1' || side === 'p2') sides.set(room, side);
       let current = sessions.get(room);
       if (!current) {
-        const seat = pending.shift();
-        if (!seat) return;
-        const bot = buildBot(seat.config.configPath, local ? 'local' : 'ladder');
+        const config = allocate(withPulls(approved, circuits), Math.random, exploreRate);
+        if (!config) {
+          const choice = fallbackChoice(request);
+          if (choice) client.choose(room, choice);
+          beat(paths, 'live', 'error', `choice-fallback ${room}`);
+          return;
+        }
+        const variantId = thompsonDraw(variantPool, variantCounts, Math.random);
+        const bot = buildBot(config.configPath, local ? 'local' : 'ladder');
         current = {
-          config: seat.config,
-          variantId: seat.variantId,
-          session: new LadderSession(bot, local ? localSimBridge : undefined, seat.variantId ?? undefined),
+          config,
+          variantId,
+          session: new LadderSession(bot, local ? localSimBridge : undefined, variantId ?? undefined),
         };
         sessions.set(room, current);
       }
       const choiceStarted = Date.now();
-      void current.session.onRequest(room, request, transcript(room), side).then(choice => {
+      void current.session.onRequest(room, request, transcript(room), side).then(delivered => {
         const row = watches.get(room);
         if (row) row.latencies.push(Date.now() - choiceStarted);
-        client.choose(room, choice);
+        if (delivered.fallback) beat(paths, 'live', 'error', `choice-fallback ${room}`);
+        if (delivered.choice) client.choose(room, delivered.choice);
       }).catch(error => {
         beat(paths, 'live', 'error', error instanceof Error ? error.message : String(error));
+        const choice = fallbackChoice(request);
+        if (choice) client.choose(room, choice);
       });
     });
 
@@ -181,7 +202,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
       const winner = line.startsWith('|win|') ? line.slice('|win|'.length).trim() : null;
       const current = sessions.get(room);
       sessions.delete(room);
-      active = Math.max(0, active - 1);
+      queue.noteEnd(room);
       finished += 1;
       if (current) {
         const lines = transcripts.get(room) || [];
@@ -237,22 +258,19 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
       }
       transcripts.delete(room);
       watches.delete(room);
-      if (finished >= target) {
-        finish({ games: finished, rating, gxe });
-        return;
-      }
-      launch();
+      maybeFill();
     });
 
     client.connect().then(() => {
       beat(paths, 'live', 'ok', `logged in ${username}`);
-      launch();
+      maybeFill();
     }).catch(error => {
       beat(paths, 'live', 'error', error instanceof Error ? error.message : String(error));
       reject(error);
     });
   });
 
+  queue.stop();
   client.disconnect();
   beat(paths, 'live', 'stopped', `games ${summary.games}`);
   return summary;

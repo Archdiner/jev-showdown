@@ -51,6 +51,7 @@ export class LadderQueue {
     concurrency: number,
     private readonly log: (message: string) => void = message => console.warn(`[ladder] ${message}`),
     private readonly autoSearch = true,
+    private readonly searchGate: () => boolean = () => true,
   ) {
     this.maxActive = concurrency;
   }
@@ -169,7 +170,7 @@ export class LadderQueue {
   }
 
   private canSearch(): boolean {
-    return !this.stopped && !this.draining && !this.paused;
+    return !this.stopped && !this.draining && !this.paused && this.searchGate();
   }
 
   private cancelOutstanding(): void {
