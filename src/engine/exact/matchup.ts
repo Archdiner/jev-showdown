@@ -101,6 +101,11 @@ export function estimatedMaxHp(species: string, level: number): number {
 
 const damageCache = new Map<string, number>();
 
+/** Drop cached damage between games so a long panel does not retain every roll. */
+export function clearMatchupCache(): void {
+  damageCache.clear();
+}
+
 function asCalcMon(pokemon: any): any {
   const name = calcSpeciesName(pokemon?.species?.name || '');
   if (!pokemon?.species || name === pokemon.species.name) return pokemon;
@@ -122,12 +127,25 @@ function synth(species: string, level: number, hpFrac: number): any {
   };
 }
 
+function spreadKey(pokemon: any): string {
+  const set = pokemon?.set || {};
+  const evs = set.evs || {};
+  const ivs = set.ivs || {};
+  return [
+    set.nature || '',
+    evs.hp, evs.atk, evs.def, evs.spa, evs.spd, evs.spe,
+    ivs.hp, ivs.atk, ivs.def, ivs.spa, ivs.spd, ivs.spe,
+  ].join(',');
+}
+
 export function cachedDamage(attacker: any, defender: any, move: string, weather?: string): number {
   const key = [
     attacker.species?.name, attacker.level, attacker.ability, attacker.item, attacker.status, attacker.hp,
-    attacker.boosts?.atk, attacker.boosts?.spa,
-    defender.species?.name, defender.level, defender.ability, defender.item, defender.status,
-    defender.boosts?.def, defender.boosts?.spd,
+    attacker.boosts?.atk, attacker.boosts?.def, attacker.boosts?.spa, attacker.boosts?.spd,
+    spreadKey(attacker),
+    defender.species?.name, defender.level, defender.ability, defender.item, defender.status, defender.hp,
+    defender.boosts?.atk, defender.boosts?.def, defender.boosts?.spa, defender.boosts?.spd,
+    spreadKey(defender),
     move, weather || '',
   ].join('|');
   const hit = damageCache.get(key);

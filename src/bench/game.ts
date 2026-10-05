@@ -7,6 +7,7 @@ import {
   safeChoose,
   startRandomBattle,
 } from '../engine/exact/battle-utils.js';
+import { clearMatchupCache } from '../engine/exact/matchup.js';
 
 export interface GameJob {
   index: number;
@@ -92,6 +93,7 @@ export async function runGame(job: GameJob): Promise<GameResult> {
 
   const started = Date.now();
   let loops = 0;
+  clearMatchupCache();
   try {
     const battle = startRandomBattle(job.p1Team, job.p2Team, job.seed);
     while (!battle.ended && loops < MAX_LOOPS) {
