@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
-import { Battle } from '@pkmn/client';
+import { Battle, Pokemon as ClientPokemon } from '@pkmn/client';
 import { Generations } from '@pkmn/data';
 import { Dex } from '@pkmn/dex';
 import { Format } from '../types/format.js';
@@ -21,6 +21,7 @@ import {
   teamPreviewChoice,
 } from './choice.js';
 import { alignToRequest, cloneGameState, mismatchData, overlayProtocol } from './tracked-state.js';
+import { FoeMon, LivePosition } from './decision-battle.js';
 import { safeError, toID } from './ids.js';
 
 export interface GameSummary {
@@ -41,6 +42,16 @@ export interface GameSummary {
   fallbacks: number;
   mismatches: number;
   logPath: string;
+}
+
+function boostsOf(mon: ClientPokemon): LivePosition['ourBoosts'] {
+  return {
+    atk: mon.boosts?.atk || 0,
+    def: mon.boosts?.def || 0,
+    spa: mon.boosts?.spa || 0,
+    spd: mon.boosts?.spd || 0,
+    spe: mon.boosts?.spe || 0,
+  };
 }
 
 interface RoomState {
@@ -294,6 +305,7 @@ export class BattleDriver extends EventEmitter {
       probability: Number(role.probability.toFixed(4)),
     }));
 
+    const position = this.livePosition(room, request);
     let decision;
     const startedAt = Date.now();
     const tightTimer = room.secondsLeft !== null && room.secondsLeft <= 4;
@@ -308,7 +320,7 @@ export class BattleDriver extends EventEmitter {
         };
       } else {
         const budget = this.budgetMs(room);
-        decision = await this.options.decisions.decide(room.roomId, state, legal, budget);
+        decision = await this.options.decisions.decide(room.roomId, state, legal, budget, position);
       }
     } catch (err) {
       room.crashes += 1;
@@ -374,6 +386,41 @@ export class BattleDriver extends EventEmitter {
       fallback: decision.fallback || adjusted,
     });
     this.sendChoice(room, choice, rqid, safe, false);
+  }
+
+  private livePosition(room: RoomState, request: any): LivePosition {
+    const foeSide = room.ourSide === 'p2' ? room.battle.p1 : room.battle.p2;
+    const ourSide = room.ourSide === 'p2' ? room.battle.p2 : room.battle.p1;
+    const active = foeSide?.active?.[0] ?? null;
+    const snap = (mon: ClientPokemon): FoeMon | null => {
+      const species = mon.speciesForme || '';
+      if (!species) return null;
+      return {
+        species,
+        level: mon.level || 80,
+        hp: mon.hp,
+        maxhp: mon.maxhp || 100,
+        status: mon.status,
+        ability: mon.ability || undefined,
+        item: mon.item || undefined,
+        moves: [...(mon.moves || [])],
+        boosts: boostsOf(mon),
+        fainted: mon.fainted || mon.hp <= 0,
+      };
+    };
+    const foeActive = active ? snap(active) : null;
+    const foeBench = (foeSide?.team || [])
+      .filter(mon => mon && mon !== active)
+      .map(mon => snap(mon))
+      .filter((mon): mon is FoeMon => !!mon);
+    const weather = room.battle.currentWeather();
+    return {
+      request,
+      foeActive,
+      foeBench,
+      ourBoosts: ourSide?.active?.[0] ? boostsOf(ourSide.active[0]) : undefined,
+      weather: weather ? String(weather) : undefined,
+    };
   }
 
   private reconcile(room: RoomState, request: any): StateMismatch[] {

@@ -1,12 +1,11 @@
 import { parentPort } from 'node:worker_threads';
-import { Bot } from '../bot/bot.js';
-import { BattleLogger } from '../learning/battle-logger.js';
 import { gen9RandomBattle } from '../formats/gen9-randombattle.js';
 import { dataLoader } from '../data/data-loader.js';
-import { Action, BotConfig, GameState } from '../types/index.js';
+import { BotConfig } from '../types/index.js';
 import { pickBestLegal, sameAction } from './choice.js';
+import { chooseLive } from './decision-battle.js';
 import { DecideRequest, WorkerRequest, WorkerResponse } from './decision-messages.js';
-import { EngineName, freshConfig, maxDamageAction } from './engines.js';
+import { EngineName } from './engines.js';
 
 if (!parentPort) {
   throw new Error('decision-worker must be started as a worker thread');
@@ -14,79 +13,35 @@ if (!parentPort) {
 
 const port = parentPort;
 
-interface IsolatedEngine {
-  selectAction(state: GameState, legal: Action[]): Promise<Action>;
-  getLastEngineError(): string | null;
-  getLastDecision(): { evaluation: { score: number } } | undefined;
-}
-
-interface BattleEngine {
-  engine: IsolatedEngine;
-  config: BotConfig;
-}
-
 let engineName: EngineName = 'search';
-let baseConfig: BotConfig | null = null;
-const battles = new Map<string, BattleEngine>();
+const battles = new Set<string>();
 let chain = Promise.resolve();
 
 function send(message: WorkerResponse): void {
   port.postMessage(message);
 }
 
-async function init(config: BotConfig, engine: EngineName): Promise<void> {
+async function init(_config: BotConfig, engine: EngineName): Promise<void> {
   engineName = engine;
-  baseConfig = config;
   await dataLoader.load(gen9RandomBattle);
   send({ type: 'ready' });
 }
 
-async function openBattle(battleId: string): Promise<void> {
-  if (battles.has(battleId) || !baseConfig) return;
-  const config = freshConfig(baseConfig, baseConfig.searchTimeMs);
-  if (engineName === 'max-damage') {
-    battles.set(battleId, {
-      config,
-      engine: {
-        async selectAction(state, legal) {
-          return maxDamageAction(state, legal);
-        },
-        getLastEngineError: () => null,
-        getLastDecision: () => undefined,
-      },
-    });
-    return;
-  }
-
-  const bot = new Bot(config, gen9RandomBattle, new BattleLogger(':memory:'));
-  await bot.initialize();
-  bot.startBattle(battleId);
-  battles.set(battleId, { config, engine: bot });
+function openBattle(battleId: string): void {
+  battles.add(battleId);
 }
 
 function closeBattle(battleId: string): void {
-  const held = battles.get(battleId);
   battles.delete(battleId);
-  if (held?.engine instanceof Bot) {
-    held.engine.endBattle('tie', 'closed', 0);
-  }
 }
 
 async function decide(message: DecideRequest): Promise<void> {
-  if (!battles.has(message.battleId)) await openBattle(message.battleId);
-  const held = battles.get(message.battleId);
-  if (!held) {
-    send({ type: 'worker-error', message: `no engine for ${message.battleId}` });
-    return;
-  }
-
-  held.config.searchTimeMs = message.searchTimeMs;
+  if (!battles.has(message.battleId)) openBattle(message.battleId);
   const started = Date.now();
   try {
-    const action = await held.engine.selectAction(message.state, message.legal);
-    const engineError = held.engine.getLastEngineError();
-    const known = message.legal.some(candidate => sameAction(candidate, action));
-    if (engineError || !known) {
+    const picked = await chooseLive(engineName, message.position, message.legal);
+    const known = message.legal.some(candidate => sameAction(candidate, picked.action));
+    if (!known) {
       send({
         type: 'decision',
         id: message.id,
@@ -94,7 +49,7 @@ async function decide(message: DecideRequest): Promise<void> {
         score: null,
         timeMs: Date.now() - started,
         fallback: true,
-        reason: engineError || 'engine returned a choice that is not legal',
+        reason: 'engine returned a choice that is not legal',
       });
       return;
     }
@@ -102,8 +57,8 @@ async function decide(message: DecideRequest): Promise<void> {
     send({
       type: 'decision',
       id: message.id,
-      action,
-      score: held.engine.getLastDecision()?.evaluation.score ?? null,
+      action: picked.action,
+      score: picked.score,
       timeMs: Date.now() - started,
       fallback: false,
     });
@@ -133,7 +88,7 @@ async function handle(message: WorkerRequest): Promise<void> {
     return;
   }
   if (message.type === 'open-battle') {
-    await openBattle(message.battleId);
+    openBattle(message.battleId);
     return;
   }
   if (message.type === 'close-battle') {

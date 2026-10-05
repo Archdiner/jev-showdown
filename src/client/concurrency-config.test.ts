@@ -68,6 +68,8 @@ describe('concurrency limit', () => {
 
   it('maps grok onto the search battle engine', () => {
     expect(selectLiveEngine('grok')).toEqual({ engine: 'search', profile: 'grok', useLLMPrior: true });
+    expect(selectLiveEngine('exact')).toEqual({ engine: 'search', profile: 'search', useLLMPrior: false });
+    expect(selectLiveEngine('exact-1ply')).toEqual({ engine: 'search', profile: 'search', useLLMPrior: false });
     expect(selectLiveEngine('maxdamage').engine).toBe('max-damage');
     expect(() => selectLiveEngine('stockfish')).toThrow(/Unknown engine/);
   });

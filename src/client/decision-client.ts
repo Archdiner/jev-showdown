@@ -2,6 +2,7 @@ import { Worker } from 'node:worker_threads';
 import { Action, BotConfig, GameState } from '../types/index.js';
 import { pickBestLegal } from './choice.js';
 import { WorkerResponse } from './decision-messages.js';
+import { LivePosition } from './decision-battle.js';
 import { budgetSearchMs, EngineName } from './engines.js';
 import { safeError } from './ids.js';
 
@@ -75,6 +76,7 @@ export class DecisionClient {
     state: GameState,
     legal: Action[],
     timeoutMs = this.options.timeoutMs,
+    position?: LivePosition,
   ): Promise<EngineDecision> {
     if (legal.length === 0) {
       throw new Error('decide() called with no legal actions');
@@ -91,7 +93,7 @@ export class DecisionClient {
         return this.fallback(state, legal, 0, 'engine unavailable');
       }
       await slot.ready;
-      return await this.send(slot, battleId, state, legal, timeoutMs, searchTimeMs);
+      return await this.send(slot, battleId, state, legal, timeoutMs, searchTimeMs, position);
     } catch (err) {
       return this.fallback(state, legal, 0, `engine unavailable: ${safeError(err)}`);
     } finally {
@@ -124,6 +126,7 @@ export class DecisionClient {
     legal: Action[],
     timeoutMs: number,
     searchTimeMs: number,
+    position?: LivePosition,
   ): Promise<EngineDecision> {
     const id = ++this.seq;
     const started = Date.now();
@@ -143,6 +146,7 @@ export class DecisionClient {
         state,
         legal,
         searchTimeMs,
+        position,
       });
     });
   }
