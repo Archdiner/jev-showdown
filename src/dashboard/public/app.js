@@ -8,6 +8,9 @@ const calNote = document.querySelector('#calNote');
 const filtered = document.querySelector('#filtered');
 const rows = document.querySelector('#rows');
 const configRows = document.querySelector('#configRows');
+const incidentsMeta = document.querySelector('#incidents-meta');
+const incidentsBody = document.querySelector('#incidents');
+const scorecard = document.querySelector('#scorecard');
 
 function text(value) {
   if (value === null || value === undefined || value === '') return '—';
@@ -181,12 +184,46 @@ function render(body, status) {
   }
 }
 
+function renderIncidents(payload) {
+  const list = payload && payload.incidents ? payload.incidents : [];
+  const open = list.filter(item => item.status === 'open' || item.status === 'acknowledged' || item.status === 'fixing');
+  incidentsMeta.textContent = list.length === 0
+    ? 'No open incidents. npm run ops -- sentinel writes state/ops/incidents.jsonl.'
+    : `${open.length} open, ${list.length} not yet verified. Ranked by severity.`;
+  incidentsBody.replaceChildren();
+  if (list.length === 0) return;
+  for (const incident of list) {
+    const tr = document.createElement('tr');
+    const severity = document.createElement('td');
+    severity.className = `sev-${incident.severity}`;
+    severity.textContent = incident.severity;
+    tr.append(
+      severity,
+      cell(incident.status),
+      cell(incident.count),
+      cell(incident.title),
+      cell(incident.detail),
+    );
+    incidentsBody.append(tr);
+  }
+}
+
 async function load() {
   const params = new URLSearchParams({ endReason: endReason.value, band: band.value });
-  const [gamesResponse, statusResponse] = await Promise.all([
+  const [gamesResponse, statusResponse, incidentsResponse, scorecardResponse] = await Promise.all([
     fetch(`/api/games?${params}`),
     fetch('/api/status'),
+    fetch('/api/incidents'),
+    fetch('/api/scorecard'),
   ]);
+  if (incidentsResponse.ok) renderIncidents(await incidentsResponse.json());
+  else incidentsMeta.textContent = `Incidents API returned ${incidentsResponse.status}.`;
+  if (scorecardResponse.ok) {
+    const body = await scorecardResponse.json();
+    scorecard.textContent = body.scorecard || 'Scorecard is empty.';
+  } else {
+    scorecard.textContent = `Scorecard API returned ${scorecardResponse.status}.`;
+  }
   if (!gamesResponse.ok) {
     meta.textContent = `Games API returned ${gamesResponse.status}.`;
     return;
