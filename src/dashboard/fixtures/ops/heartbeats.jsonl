@@ -1,0 +1,4 @@
+{"facility":"factory","pid":11,"ts":1000,"status":"ok","detail":"idle"}
+{"facility":"gatekeeper","pid":12,"ts":1000,"status":"ok","detail":"idle"}
+{"facility":"live","pid":13,"ts":3000,"status":"ok","detail":"champion-hash win rating 1204"}
+{"facility":"analyst","pid":14,"ts":1000,"status":"ok","detail":"idle"}

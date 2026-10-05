@@ -1,0 +1,122 @@
+const endReason = document.querySelector('#endReason');
+const band = document.querySelector('#band');
+const meta = document.querySelector('#meta');
+const ops = document.querySelector('#ops');
+const rates = document.querySelector('#rates');
+const filtered = document.querySelector('#filtered');
+const rows = document.querySelector('#rows');
+
+function text(value) {
+  if (value === null || value === undefined || value === '') return '—';
+  return String(value);
+}
+
+function pct(rate) {
+  return rate === null || rate === undefined ? '—' : `${(rate * 100).toFixed(1)}%`;
+}
+
+function duration(ms) {
+  if (ms === null || ms === undefined) return '—';
+  const seconds = Math.round(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function card(parent, title, tally, className) {
+  const node = document.createElement('div');
+  node.className = `card ${className}`;
+  const label = document.createElement('span');
+  label.textContent = title;
+  const strong = document.createElement('strong');
+  const ci = tally.ciLow === null ? '' : ` (${pct(tally.ciLow)}–${pct(tally.ciHigh)})`;
+  strong.textContent = `${pct(tally.winRate)}  ${tally.wins}-${tally.losses}-${tally.ties}${ci}`;
+  node.append(label, strong);
+  parent.append(node);
+}
+
+function cell(value) {
+  const td = document.createElement('td');
+  td.textContent = text(value);
+  return td;
+}
+
+function render(body, status) {
+  if (status && status.ops) ops.textContent = `${status.ops.statusText}\n\n${status.ops.reportText}`;
+  const games = body.games;
+  const report = games.report;
+  meta.textContent = `${body.fixtureMode ? 'Fixture data. ' : ''}${games.record.games} games, rating ${text(games.elo)}. Strategy excludes timer, disconnect, and crash. Ladder lines have no end reason, so they stay in strategy and their losses are also counted as unclassified (${report.unclassifiedLosses}).`;
+  rates.replaceChildren();
+  card(rates, 'Strategy', report.strategy, 'strategy');
+  card(rates, 'Timer / disconnect', report.timerDisconnect, 'timer');
+  card(rates, 'Crash', report.crash, 'crash');
+  card(rates, 'All finished', report.all, '');
+  const slice = games.filteredReport.all;
+  const noun = slice.games === 1 ? 'game' : 'games';
+  filtered.textContent = `This filter (${games.filter.endReason}, ${games.filter.band}): ${pct(slice.winRate)} on ${slice.games} ${noun}, ${slice.wins}-${slice.losses}-${slice.ties}. Across all games: strategy losses ${report.strategyLosses}, timer/disconnect losses ${report.timerDisconnectLosses}, crash losses ${report.crashLosses}, unclassified losses ${report.unclassifiedLosses}.`;
+  rows.replaceChildren();
+  if (games.filtered.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 19;
+    td.textContent = 'No games in this filter. Per-game JSONL is used when present; otherwise [ladder] N/M lines are shown without an end reason.';
+    tr.append(td);
+    rows.append(tr);
+    return;
+  }
+  for (const game of games.filtered) {
+    const tr = document.createElement('tr');
+    tr.className = game.lossClass;
+    const replay = document.createElement('td');
+    if (game.replayUrl) {
+      const link = document.createElement('a');
+      link.href = game.replayUrl;
+      link.target = '_blank';
+      link.rel = 'noreferrer';
+      link.textContent = 'replay';
+      replay.append(link);
+    } else {
+      replay.textContent = '—';
+    }
+    tr.append(
+      replay,
+      cell(game.opponent),
+      cell(game.opponentRating),
+      cell(game.ratingBefore),
+      cell(game.ratingAfter),
+      cell(game.outcome),
+      cell(game.endReason),
+      cell(game.lossClass),
+      cell(duration(game.durationMs)),
+      cell(game.latency && game.latency.p50),
+      cell(game.latency && game.latency.p95),
+      cell(game.latency && game.latency.p99),
+      cell(game.latency && game.latency.max),
+      cell(game.minTimerSeconds),
+      cell(game.engine),
+      cell(game.configId),
+      cell(game.configHash),
+      cell(game.gitSha),
+      cell(game.concurrency),
+    );
+    rows.append(tr);
+  }
+}
+
+async function load() {
+  const params = new URLSearchParams({ endReason: endReason.value, band: band.value });
+  const [gamesResponse, statusResponse] = await Promise.all([
+    fetch(`/api/games?${params}`),
+    fetch('/api/status'),
+  ]);
+  if (!gamesResponse.ok) {
+    meta.textContent = `Games API returned ${gamesResponse.status}.`;
+    return;
+  }
+  render(await gamesResponse.json(), statusResponse.ok ? await statusResponse.json() : null);
+}
+
+endReason.addEventListener('change', load);
+band.addEventListener('change', load);
+load();
+const events = new EventSource('/api/events');
+events.addEventListener('snapshot', load);
