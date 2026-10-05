@@ -315,6 +315,15 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
     });
   }
 
+  if (paths.fixtureMode) {
+    const newest = Math.max(0, ...games.map(game => game.ts), ...beats.map(beat => beat.ts));
+    const shift = now - newest;
+    if (Number.isFinite(shift) && shift !== 0) {
+      for (const game of games) game.ts += shift;
+      for (const beat of beats) beat.ts += shift;
+    }
+  }
+
   const latest = new Map<string, Heartbeat>();
   for (const beat of beats) latest.set(beat.facility, beat);
   const facilities = FACILITIES.map(name => {
