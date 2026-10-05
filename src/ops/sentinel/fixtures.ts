@@ -192,6 +192,7 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     { facility: 'analyst', pid: 14, ts: now - 2000, status: 'ok', detail: 'reviewed 0' },
     { facility: 'live', pid: 15, ts: now - 120_000, status: 'ok', detail: 'localbot win rating 1000', scope: 'local' },
     { facility: 'live', pid: 15, ts: now - 110_000, status: 'ok', detail: 'asad loss rating 1510', scope: 'ladder' },
+    { facility: 'live', pid: 15, ts: now - 9000, status: 'ok', detail: 'localbot ladder rating 1510 on sim3.psim.us', scope: 'local' },
     { facility: 'live', pid: 15, ts: now - 8000, status: 'error', detail: 'choice-fallback battle-local' },
     { facility: 'live', pid: 15, ts: now - 7000, status: 'error', detail: 'choice-fallback battle-local' },
     { facility: 'live', pid: 15, ts: now - 6000, status: 'error', detail: 'choice-fallback battle-local' },
