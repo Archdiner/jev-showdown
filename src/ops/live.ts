@@ -3,9 +3,15 @@ import { fallbackChoice, LadderSession } from '../config/adapters.js';
 import { buildBot } from '../config/bot.js';
 import { resolveConcurrencyLimit } from '../client/concurrency-config.js';
 import { buildLadderGameRecord, currentGitSha, factsFromTranscript } from '../client/game-record.js';
+import {
+  defaultLadderRunDirs,
+  publicAccountConflict,
+  readLadderRuns,
+} from '../client/ladder-run.js';
 import { LadderQueue } from '../client/ladder-queue.js';
 import { parseRatingLine, ShowdownClient } from '../client/showdown-client.js';
 import { allocate, nextCircuit, type Allocatable, type CircuitState, clampExplore } from './allocate.js';
+import { startLocalServer, type LocalServer } from './local-server.js';
 import { openDb } from './db.js';
 import { beat } from './heartbeat.js';
 import { readLabels } from './labels-read.js';
@@ -32,6 +38,8 @@ export interface LiveOptions {
   paths: OpsPaths;
   local?: boolean;
   server?: string;
+  /** TCP port for the local server this process starts. 0 picks a free port. */
+  port?: number;
   games?: number;
   runners?: number;
   concurrency?: number;
@@ -43,6 +51,62 @@ export interface LiveOptions {
   window?: number;
   once?: boolean;
   timeoutMs?: number;
+  /** Directories of ladder.ts run files. Tests pass one temp dir. */
+  ladderRunDirs?: string[];
+}
+
+export const PUBLIC_WEBSOCKET = 'wss://sim3.psim.us/showdown/websocket';
+const PUBLIC_LOGIN_SERVER = 'https://play.pokemonshowdown.com/action.php';
+
+export function isLoopbackWebSocket(server: string): boolean {
+  try {
+    const url = new URL(server);
+    const host = url.hostname;
+    return url.protocol === 'ws:' && (host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Local play uses a guest name and an empty password, so ShowdownClient never
+ * POSTs to the public login server. A loopback `--server` is local even when
+ * the flag was omitted.
+ */
+export function resolveLiveIdentity(
+  opts: Pick<LiveOptions, 'local' | 'server' | 'username' | 'password' | 'port'>,
+  env: NodeJS.ProcessEnv = process.env,
+): {
+  local: boolean;
+  username: string;
+  password: string;
+  server: string | null;
+  port: number;
+  loginServer?: string;
+} {
+  const loopback = Boolean(opts.server && isLoopbackWebSocket(opts.server));
+  if (opts.local && opts.server && !loopback) {
+    throw new Error('--local only talks to a loopback websocket. Omit --server to start one, or omit --local for the public ladder.');
+  }
+  const local = Boolean(opts.local) || loopback;
+  if (local) {
+    return {
+      local: true,
+      username: opts.username || 'localbot',
+      password: '',
+      server: opts.server || null,
+      port: opts.port ?? 0,
+      loginServer: 'http://127.0.0.1:9/unused',
+    };
+  }
+  return {
+    local: false,
+    username: opts.username || env.SHOWDOWN_USERNAME || '',
+    password: opts.password ?? env.SHOWDOWN_PASSWORD ?? '',
+    server: opts.server || PUBLIC_WEBSOCKET,
+    port: 0,
+    loginServer: env.SHOWDOWN_LOGIN_URL || PUBLIC_LOGIN_SERVER,
+  };
 }
 
 export interface LiveSummary {
@@ -67,13 +131,26 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
     return { games: 0, skipped };
   }
 
-  const local = Boolean(opts.local);
-  const username = opts.username || process.env.SHOWDOWN_USERNAME || (local ? 'localbot' : '');
-  const password = opts.password || process.env.SHOWDOWN_PASSWORD || '';
+  const identity = resolveLiveIdentity(opts);
+  const local = identity.local;
+  const username = identity.username;
+  const password = identity.password;
   if (!username || (!local && !password)) {
     const skipped = 'missing SHOWDOWN_USERNAME or SHOWDOWN_PASSWORD';
     beat(paths, 'live', 'error', skipped);
     return { games: 0, skipped };
+  }
+  if (!local) {
+    const dirs = opts.ladderRunDirs ?? defaultLadderRunDirs();
+    const conflict = publicAccountConflict(username, dirs.flatMap(readLadderRuns));
+    if (conflict?.action === 'refuse') {
+      beat(paths, 'live', 'error', conflict.message);
+      throw new Error(conflict.message);
+    }
+    if (conflict) {
+      console.error(conflict.message);
+      beat(paths, 'live', 'error', conflict.message);
+    }
   }
 
   const target = opts.games ?? (opts.once ? 1 : Number.POSITIVE_INFINITY);
@@ -86,15 +163,33 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   const gitSha = currentGitSha();
   process.env.JEV_LOG_DIR = paths.root;
 
-  const server = opts.server || (local
-    ? 'ws://127.0.0.1:8000/showdown/websocket'
-    : 'wss://sim3.psim.us/showdown/websocket');
+  let ownedServer: LocalServer | null = null;
+  let server = identity.server;
+  try {
+  if (local && !server) {
+    if (!Number.isInteger(identity.port) || identity.port < 0 || identity.port > 65535) {
+      throw new Error('--port must be an integer from 0 to 65535');
+    }
+    try {
+      ownedServer = await startLocalServer(identity.port);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Could not start the local server on port ${identity.port}: ${reason}`);
+    }
+    server = ownedServer.url;
+  }
+  if (!server) throw new Error('ops live has no server');
+  beat(paths, 'live', 'ok', `${local ? 'local' : 'public'} ${server} user ${username}`);
+  console.log(local
+    ? `[ops live] ${server} username=${username} local=yes`
+    : `[ops live] ${server} username=${username} local=no`);
   const client = new ShowdownClient({
     server,
     username,
     password,
     format: 'gen9randombattle',
     local,
+    loginServer: identity.loginServer,
   });
 
   let rating: number | undefined;
@@ -293,6 +388,9 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   client.disconnect();
   beat(paths, 'live', 'stopped', `games ${summary.games}`);
   return summary;
+  } finally {
+    if (ownedServer) await ownedServer.close();
+  }
 }
 
 /**

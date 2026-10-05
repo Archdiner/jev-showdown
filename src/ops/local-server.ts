@@ -15,7 +15,7 @@ export interface LocalServer {
  */
 export async function startLocalServer(port = 0): Promise<LocalServer> {
   ensureGenerators();
-  const wss = new WebSocketServer({ port });
+  const wss = new WebSocketServer({ port, host: '127.0.0.1' });
   await new Promise<void>(resolve => wss.once('listening', () => resolve()));
   const address = wss.address();
   if (!address || typeof address === 'string') throw new Error('local server has no port');
