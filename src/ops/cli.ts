@@ -14,6 +14,7 @@ import { startLocalServer } from './local-server.js';
 import { OPS_USAGE, opsFlag, opsNumber, opsValue } from './args.js';
 import { acknowledge, acknowledgeMatching, incidentStore, linkIncident, markFixing, recordRootCause, resolveMatching } from './sentinel/incidents.js';
 import { layoutFromEnv, renderScorecard, runSentinel } from './sentinel/run.js';
+import { defaultGameLogs, runRepair } from './sentinel.js';
 
 function flag(name: string): boolean {
   return opsFlag(process.argv, name);
@@ -129,6 +130,12 @@ async function main(): Promise<void> {
   }
   if (command === 'report') {
     console.log(dailyReport(paths));
+    return;
+  }
+  if (command === 'repair-games') {
+    const listed = [opt('games'), opt('live')].filter((file): file is string => Boolean(file));
+    const files = (listed.length > 0 ? listed : defaultGameLogs()).filter(file => fs.existsSync(file));
+    console.log(runRepair(files));
     return;
   }
   if (command === 'supervise' || command === 'supervisor') {

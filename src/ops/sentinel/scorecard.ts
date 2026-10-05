@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { battleRowChoice, isDuplicateDisconnect } from '../../client/game-integrity.js';
 import { GraphDB } from '../../graph/db.js';
 import { compareIncidents, openP0 } from './incidents.js';
 import { actionable, type Incident, type IncidentEvent, type ObservedGame, type SentinelContext } from './types.js';
@@ -72,6 +73,7 @@ export function buildScorecard(ctx: SentinelContext, incidents: Incident[], _eve
   const local = currentGames.filter(game => !game.phantom && game.local);
   const counted = countable(currentGames);
   const previousCounted = countable(previousGames);
+  const duplicateTies = droppedDisconnectTies(currentGames);
   const ladderRated = ratedLadder(counted);
   const previous = { ...windowRecord(previousCounted), start: since - sinceMs, end: since };
   const sources = sourceList(ctx);
@@ -91,6 +93,7 @@ export function buildScorecard(ctx: SentinelContext, incidents: Incident[], _eve
   const notes = [
     `Phantom games excluded: ${phantoms.length}. Rule: ${PHANTOM_RULE}.`,
     `Local games excluded from Elo and win rate: ${local.length}.`,
+    `Duplicate disconnect ties excluded: ${duplicateTies}. A mid-game disconnect tie next to one decisive result for the same battle is not counted.`,
   ];
   if (!ctx.processesScanned) notes.push('Process list was not scanned. Runner pid checks are in npm run ops -- sentinel.');
   if (ctx.git.behind === null) notes.push(`Git: ${ctx.git.detail}`);
@@ -246,7 +249,48 @@ function gamesBetween(games: ObservedGame[], start: number, end: number, endIncl
 }
 
 function countable(games: ObservedGame[]): ObservedGame[] {
-  return games.filter(game => !game.phantom && !game.local && game.outcome);
+  const eligible = games.filter(game => !game.phantom && !game.local && game.outcome);
+  return oneRowPerBattle(eligible);
+}
+
+/** Keep one row per battle. A disconnect tie loses to a decisive result. Two decisive results drop the battle. */
+function oneRowPerBattle(games: ObservedGame[]): ObservedGame[] {
+  const byId = new Map<string, ObservedGame>();
+  const dropped = new Set<string>();
+  const noId: ObservedGame[] = [];
+  for (const game of games) {
+    if (!game.battleId) {
+      noId.push(game);
+      continue;
+    }
+    if (dropped.has(game.battleId)) continue;
+    const prev = byId.get(game.battleId);
+    if (!prev) {
+      byId.set(game.battleId, game);
+      continue;
+    }
+    const choice = battleRowChoice(
+      { outcome: prev.outcome, endReason: prev.endReason, turns: prev.turns },
+      { outcome: game.outcome, endReason: game.endReason, turns: game.turns },
+    );
+    if (choice === 'drop') {
+      byId.delete(game.battleId);
+      dropped.add(game.battleId);
+      continue;
+    }
+    if (choice === 'b') byId.set(game.battleId, game);
+  }
+  return [...byId.values(), ...noId];
+}
+
+function droppedDisconnectTies(games: ObservedGame[]): number {
+  const eligible = games.filter(game => !game.phantom && !game.local && game.outcome);
+  const kept = new Set(oneRowPerBattle(eligible));
+  return eligible.filter(game => isDuplicateDisconnect({
+    turns: game.turns,
+    outcome: game.outcome,
+    endReason: game.endReason,
+  }) && !kept.has(game)).length;
 }
 
 function ratedLadder(games: ObservedGame[]): ObservedGame[] {

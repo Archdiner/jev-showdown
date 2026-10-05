@@ -1,4 +1,4 @@
-export const OPS_USAGE = `usage: npm run ops -- factory|gatekeeper|live|analyst|sentinel|incidents|scorecard|status|report|supervise|dry-run
+export const OPS_USAGE = `usage: npm run ops -- factory|gatekeeper|live|analyst|sentinel|incidents|scorecard|status|report|supervise|repair-games|dry-run
   factory, gatekeeper, live, analyst, supervise accept --once
   live --local
       Start a local server on a free port, log in as localbot, and do not contact
@@ -28,7 +28,10 @@ export const OPS_USAGE = `usage: npm run ops -- factory|gatekeeper|live|analyst|
   scorecard [--since 24h|ISO] [--md]
       One screen for the owner. --since 24h is a duration. An ISO timestamp is the start of the window.
       Elo, win rate, and record are compared with the previous window of the same length.
-      Phantom games and local games are excluded.
+      Phantom games, local games, and a duplicate disconnect tie are excluded.
+  repair-games
+      Flag contaminated rows in games.contamination.jsonl. Does not delete or
+      rewrite the game log. --games and --live select the files.
 Facilities share the graph and the JSONL logs. They do not import each other.`;
 
 export function opsFlag(argv: string[], name: string): boolean {

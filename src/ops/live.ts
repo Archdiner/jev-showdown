@@ -1,8 +1,10 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { fallbackChoice, LadderSession } from '../config/adapters.js';
 import { buildBot } from '../config/bot.js';
 import { resolveConcurrencyLimit } from '../client/concurrency-config.js';
-import { buildLadderGameRecord, currentGitSha, factsFromTranscript } from '../client/game-record.js';
+import { countableGameRows, loadContaminationFlags } from '../client/game-integrity.js';
+import { appendGameRecord, buildLadderGameRecord, currentGitSha, factsFromTranscript, recordedElo } from '../client/game-record.js';
 import { currentHostname, readBatchLabel } from '../client/run-stamp.js';
 import {
   defaultLadderRunDirs,
@@ -16,7 +18,7 @@ import { startLocalServer, type LocalServer } from './local-server.js';
 import { openDb } from './db.js';
 import { beat } from './heartbeat.js';
 import { readLabels } from './labels-read.js';
-import { appendJsonl, readJsonl, type OpsPaths } from './paths.js';
+import { readJsonl, type OpsPaths } from './paths.js';
 import { inputLogFromTranscript, localSimBridge } from './sim-bridge.js';
 import { countsFromLiveGames, loadVariantPool, observeVariant, thompsonDraw, type ArmCount } from './variants.js';
 
@@ -160,7 +162,9 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   const limits = { maxLosses: opts.maxLosses ?? 5, maxDrop: opts.maxDrop ?? 40, window: opts.window ?? 10 };
   const circuits = readCircuits(paths);
   const variantPool = loadVariantPool(paths);
-  const variantCounts: Record<string, ArmCount> = countsFromLiveGames(readJsonl(paths.liveGames));
+  const variantCounts: Record<string, ArmCount> = countsFromLiveGames(
+    countableGameRows(readJsonl(paths.liveGames), loadContaminationFlags(paths.liveGames)),
+  );
   const gitSha = currentGitSha();
   process.env.JEV_LOG_DIR = paths.root;
 
@@ -382,18 +386,21 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
           inputLog: inputLogFromTranscript(text) || '',
           log: text.slice(-6000),
         });
-        appendJsonl(paths.liveGames, record);
-        observeVariant(variantCounts, current.variantId, record.outcome);
-        circuits[current.config.configId] = nextCircuit(
-          circuits[current.config.configId],
-          record.outcome,
-          local ? null : record.eloAfter,
-          limits,
-        );
-        writeCircuits(paths, circuits);
+        const appended = appendGameRecord(path.dirname(paths.liveGames), record, path.basename(paths.liveGames));
+        if (appended.written) {
+          observeVariant(variantCounts, current.variantId, record.outcome);
+          const rating = local ? null : recordedElo(record);
+          circuits[current.config.configId] = nextCircuit(
+            circuits[current.config.configId],
+            record.outcome,
+            rating,
+            limits,
+          );
+          writeCircuits(paths, circuits);
+        }
         beat(paths, 'live', 'ok', local
           ? `${current.config.configId} ${record.outcome} local`
-          : `${current.config.configId} ${record.outcome} rating ${record.eloAfter ?? 'n/a'}`);
+          : `${current.config.configId} ${record.outcome} rating ${recordedElo(record) ?? 'n/a'}`);
       }
       transcripts.delete(room);
       watches.delete(room);

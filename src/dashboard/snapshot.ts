@@ -7,6 +7,7 @@ import type { OpsPaths } from '../ops/paths.js';
 import { dailyReport } from '../ops/report.js';
 import { statusReport } from '../ops/status.js';
 import type { DashboardPaths } from './paths.js';
+import { battleRowChoice } from '../client/game-integrity.js';
 import { groupByRunId } from '../client/game-record.js';
 import { classifyLoss, parseLog, parseSummary, runnerFromName, type GameRecord, type Heartbeat, type LatencySummary } from './parse.js';
 import { configPanels, reportGames, type ConfigPanel, type GameReport } from './games.js';
@@ -150,12 +151,29 @@ function mergeLatency(left: LatencySummary | null, right: LatencySummary | null)
 /** One row per battle. A metrics.jsonl `game` line fills latency onto the ladder result with the same id. */
 function dedupe(games: GameRecord[]): GameRecord[] {
   const byId = new Map<string, GameRecord>();
+  const dropped = new Set<string>();
   const lines: GameRecord[] = [];
   const seenLines = new Set<string>();
   for (const game of games) {
     if (game.battleId) {
+      if (dropped.has(game.battleId)) continue;
       const prev = byId.get(game.battleId);
-      byId.set(game.battleId, prev ? combine(prev, game) : game);
+      if (!prev) {
+        byId.set(game.battleId, game);
+        continue;
+      }
+      const choice = battleRowChoice(prev, game);
+      if (choice === 'drop') {
+        byId.delete(game.battleId);
+        dropped.add(game.battleId);
+        continue;
+      }
+      if (choice === 'a') continue;
+      if (choice === 'b') {
+        byId.set(game.battleId, game);
+        continue;
+      }
+      byId.set(game.battleId, combine(prev, game));
       continue;
     }
     const key = `${game.source}:${game.progress ?? ''}:${game.opponent ?? ''}:${game.outcome}:${game.turns ?? ''}`;
