@@ -14,13 +14,15 @@ function policy(name: string): PolicySpec {
   if (name === 'random') return { kind: 'random' };
   if (name === 'maxdamage') return { kind: 'maxdamage' };
   if (name === 'legacy') return { kind: 'legacy' };
-  const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',') ;
-  if (name === 'exact' || name.startsWith('exact')) {
+  if (name === 'exact') return { kind: 'exact', config: EXACT_1PLY };
+  const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',');
+  if (name.startsWith('exact')) {
     const config: ExactConfig = {
       depth: Number(depth) || EXACT_1PLY.depth,
       opponentModel: model === 'uniform' ? 'uniform' : 'max-damage',
       evalMode: evalMode === 'full' ? 'full' : 'hp',
       errorAsLoss: name.includes(',loss'),
+      samples: 1,
     };
     return { kind: 'exact', config };
   }

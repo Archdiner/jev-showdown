@@ -1,5 +1,6 @@
-import { Battle, PokemonSet } from '@pkmn/sim';
+import { Battle, PokemonSet, PRNG } from '@pkmn/sim';
 import { ensureGenerators, legalChoices, moveChoice, switchChoice } from './battle-utils.js';
+import { maxDamageChoice } from './max-damage.js';
 import { EXACT_1PLY, ExactConfig, exactSearch } from './search.js';
 
 interface Position {
@@ -7,6 +8,8 @@ interface Position {
   reason: string;
   battle: Battle;
   expected: string;
+  /** When set, the @smogon/calc max-damage line must make this choice too. */
+  calcExpected?: string;
 }
 
 function set(
@@ -37,7 +40,10 @@ function benchFodder(species: string, ability: string): PokemonSet {
 
 function start(p1: PokemonSet[], p2: PokemonSet[]): Battle {
   ensureGenerators();
-  const battle = new Battle({ formatid: 'gen9customgame' as any });
+  const battle = new Battle({
+    formatid: 'gen9customgame' as any,
+    seed: new PRNG([1, 2, 3, 4] as any).startingSeed,
+  });
   battle.setPlayer('p1', { name: 'P1', team: p1 });
   battle.setPlayer('p2', { name: 'P2', team: p2 });
   if (battle.p1.requestState === 'teampreview') {
@@ -361,7 +367,7 @@ export function buildPositions(): Position[] {
   {
     const battle = start(
       [
-        set('Machamp', 'No Guard', 'Leftovers', ['knockoff', 'closecombat', 'bulletpunch', 'earthquake'], { nature: 'Adamant' }),
+        set('Machamp', 'No Guard', 'Leftovers', ['knockoff', 'closecombat', 'bulletpunch', 'icepunch'], { nature: 'Adamant' }),
         benchFodder('Magikarp', 'Swift Swim'),
         benchFodder('Wobbuffet', 'Shadow Tag'),
         benchFodder('Ditto', 'Limber'),
@@ -606,10 +612,10 @@ export function buildPositions(): Position[] {
         benchFodder('Wobbuffet', 'Shadow Tag'),
         benchFodder('Ditto', 'Limber'),
         benchFodder('Smeargle', 'Own Tempo'),
-        benchFodder('Unown', 'Levitate'),
+        benchFodder('Slowbro', 'Oblivious'),
       ],
       [
-        set('Garchomp', 'Rough Skin', 'Choice Scarf', ['earthquake', 'outrage', 'firefang', 'stoneedge'], { nature: 'Jolly' }),
+        set('Garchomp', 'Rough Skin', 'Choice Scarf', ['earthquake', 'outrage', 'dragonclaw', 'swordsdance'], { nature: 'Jolly' }),
         benchFodder('Magikarp', 'Swift Swim'),
         benchFodder('Wobbuffet', 'Shadow Tag'),
         benchFodder('Ditto', 'Limber'),
@@ -619,6 +625,7 @@ export function buildPositions(): Position[] {
     );
     setHp(battle, 'p1', 'Scizor', 1);
     setHp(battle, 'p2', 'Garchomp', 1);
+    for (const species of ['Magikarp', 'Wobbuffet', 'Ditto', 'Smeargle', 'Slowbro']) setHp(battle, 'p1', species, 1);
     positions.push({
       name: '19-bullet-punch-race',
       reason: 'Scizor is at 1 HP and slower. Bullet Punch KOs. Close Combat faints first.',
@@ -648,9 +655,11 @@ export function buildPositions(): Position[] {
       ],
     );
     boostSpe(battle, 'p1', 6);
+    setHp(battle, 'p2', 'Garchomp', 1);
+    for (const species of ['Magikarp', 'Wobbuffet', 'Ditto', 'Smeargle', 'Unown']) setHp(battle, 'p1', species, 1);
     positions.push({
       name: '20-hydro-pump-not-thunderbolt',
-      reason: 'Garchomp is immune to Electric. Hydro Pump is neutral and deals damage.',
+      reason: 'Garchomp is at 1 HP and immune to Electric. Hydro Pump KOs. Thunderbolt does not.',
       battle,
       expected: must(moveChoice(battle, 'p1', 'hydropump'), 'hydropump'),
     });
@@ -713,6 +722,52 @@ export function buildPositions(): Position[] {
     expected: must(moveChoice(kingambit, 'p1', 'kowtowcleave'), 'kowtowcleave'),
   });
 
+  // Garchomp (Life Orb, Adamant, 209 Spe) vs Levitate Rotom-Wash (Bold, 193 Spe).
+  // These spreads are the ones whose calc rolls are Earthquake 0, Stone Edge
+  // 84-100 at 80% accuracy, Dragon Claw 101-121 at 100% accuracy.
+  {
+    const evs = { hp: 85, atk: 85, def: 85, spa: 85, spd: 85, spe: 85 };
+    const battle = start(
+      [
+        set('Garchomp', 'Rough Skin', 'Life Orb', ['dragonclaw', 'stoneedge', 'earthquake', 'swordsdance'], {
+          nature: 'Adamant',
+          level: 80,
+          evs,
+        }),
+        benchFodder('Skarmory', 'Sturdy'),
+        benchFodder('Magikarp', 'Swift Swim'),
+        benchFodder('Wobbuffet', 'Shadow Tag'),
+        benchFodder('Ditto', 'Limber'),
+        benchFodder('Unown', 'Levitate'),
+      ],
+      [
+        set('Rotom-Wash', 'Levitate', 'Leftovers', ['hydropump', 'voltswitch', 'willowisp', 'painsplit'], {
+          nature: 'Bold',
+          level: 84,
+          evs,
+        }),
+        benchFodder('Magikarp', 'Swift Swim'),
+        benchFodder('Wobbuffet', 'Shadow Tag'),
+        benchFodder('Ditto', 'Limber'),
+        benchFodder('Smeargle', 'Own Tempo'),
+        benchFodder('Porygon', 'Trace'),
+      ],
+    );
+    const garchomp = active(battle, 'p1');
+    const rotom = active(battle, 'p2');
+    if (garchomp.storedStats.spe !== 209 || rotom.storedStats.spe !== 193) {
+      throw new Error(`speed fixture drifted: Garchomp ${garchomp.storedStats.spe}, Rotom ${rotom.storedStats.spe}`);
+    }
+    const claw = must(moveChoice(battle, 'p1', 'dragonclaw'), 'dragonclaw');
+    positions.push({
+      name: '22-dragon-claw-not-stone-edge',
+      reason: 'Dragon Claw is STAB and always hits for 101-121. Stone Edge is 84-100 at 80% and has no STAB. Earthquake is immune on Levitate.',
+      battle,
+      expected: claw,
+      calcExpected: claw,
+    });
+  }
+
   return positions;
 }
 
@@ -728,7 +783,9 @@ export function runDiagnosticSuite(config: ExactConfig = EXACT_1PLY): { passed: 
       continue;
     }
     const trace = exactSearch(position.battle, 'p1', config);
-    if (trace.choice === position.expected) {
+    const calcChoice = position.calcExpected ? maxDamageChoice(position.battle, 'p1', legal) : undefined;
+    const calcOk = !position.calcExpected || calcChoice === position.calcExpected;
+    if (trace.choice === position.expected && calcOk) {
       console.log(`✓ ${position.name}`);
       passed++;
     } else {
@@ -736,6 +793,7 @@ export function runDiagnosticSuite(config: ExactConfig = EXACT_1PLY): { passed: 
       console.log(`  reason: ${position.reason}`);
       console.log(`  expected ${position.expected}`);
       console.log(`  got      ${trace.choice}`);
+      if (!calcOk) console.log(`  calc got ${calcChoice}, expected ${position.calcExpected}`);
       const ranked = [...trace.scores].sort((a, b) => b.score - a.score).slice(0, 6);
       for (const row of ranked) {
         console.log(`    ${row.score.toFixed(2).padStart(8)}  ${row.choice}`);

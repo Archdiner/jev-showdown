@@ -1,4 +1,4 @@
-import { Battle } from '@pkmn/sim';
+import { Battle, PRNG } from '@pkmn/sim';
 import { Evaluator } from '../evaluator.js';
 import { GameState } from '../../types/index.js';
 import {
@@ -22,6 +22,11 @@ export interface ExactConfig {
    * "Not all choices done" reconstruction failure.
    */
   errorAsLoss: boolean;
+  /**
+   * Independent RNG draws averaged at the root. One draw treats an 80%
+   * move as a hit or a miss; the average ranks it by how often it lands.
+   */
+  samples?: number;
 }
 
 export const EXACT_1PLY: ExactConfig = {
@@ -29,6 +34,7 @@ export const EXACT_1PLY: ExactConfig = {
   opponentModel: 'max-damage',
   evalMode: 'hp',
   errorAsLoss: false,
+  samples: 8,
 };
 
 export interface ScoredChoice {
@@ -128,7 +134,7 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
   let bestScore = -Infinity;
 
   for (const choice of mine) {
-    const score = scoreChoice(snap, battle, sideId, choice, config.depth, config);
+    const score = scoreChoice(snap, battle, sideId, choice, config.depth, config, config.samples ?? 1);
     scores.push({ choice, score });
     if (score > bestScore) {
       bestScore = score;
@@ -139,6 +145,11 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
   return { choice: best, scores };
 }
 
+function reseed(battle: Battle, sample: number): void {
+  const prng = new PRNG([sample + 1, 0x6d2b79f5, 0x1b873593, 0x85ebca6b] as any);
+  battle.resetRNG(prng.startingSeed);
+}
+
 function scoreChoice(
   snap: string,
   live: Battle,
@@ -146,14 +157,21 @@ function scoreChoice(
   myChoice: string,
   depth: number,
   config: ExactConfig,
+  samples: number,
 ): number {
   const root = snap ? cloneFromSnapshot(snap) : live;
   const opp = otherSide(sideId);
   const lines = opponentLines(root, opp, config);
-  if (lines.length === 0) {
-    return rollout(root, sideId, myChoice, undefined, depth, config);
+  const draws = Math.max(1, samples);
+  const replies = lines.length > 0 ? lines : [undefined];
+  const values: number[] = [];
+  for (let sample = 0; sample < draws; sample++) {
+    for (const oppChoice of replies) {
+      const battle = cloneFromSnapshot(snap);
+      reseed(battle, sample);
+      values.push(rollout(battle, sideId, myChoice, oppChoice, depth, config));
+    }
   }
-  const values = lines.map(oppChoice => rollout(cloneFromSnapshot(snap), sideId, myChoice, oppChoice, depth, config));
   return average(values);
 }
 
@@ -177,7 +195,7 @@ function rollout(
   const snap = snapshot(battle);
   let best = -Infinity;
   for (const choice of next) {
-    const score = scoreChoice(snap, battle, sideId, choice, depth - 1, config);
+    const score = scoreChoice(snap, battle, sideId, choice, depth - 1, config, 1);
     if (score > best) best = score;
   }
   return best;
