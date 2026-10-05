@@ -5,7 +5,7 @@ import { legalChoices } from '../engine/exact/battle-utils.js';
 import { EngineName } from './engines.js';
 import { sameAction } from './choice.js';
 import { ladderPolicy } from './ladder-engine.js';
-import { markFoeHidden } from '../engine/exact/stats-prior.js';
+import { FOE_TEAM_SIZE, markFoeHidden, placeholderSets } from '../engine/exact/stats-prior.js';
 
 export interface StatBoosts {
   atk?: number;
@@ -199,6 +199,29 @@ function knownFoes(position: LivePosition): FoeMon[] {
   return [position.foeActive, ...position.foeBench].filter((mon): mon is FoeMon => !!mon?.species);
 }
 
+/**
+ * Opt-in (search param foeUnseen: placeholder): append stand-ins for foe
+ * teammates that have not appeared, up to a full team. See placeholderSets.
+ */
+function withPlaceholders(foes: FoeMon[], teamSize = FOE_TEAM_SIZE): FoeMon[] {
+  if (foes.length === 0 || foes.length >= teamSize) return foes;
+  const extra = placeholderSets(foes.map(mon => mon.species), teamSize - foes.length);
+  return [
+    ...foes,
+    ...extra.map(set => ({
+      species: set.species,
+      level: set.level,
+      hp: 100,
+      maxhp: 100,
+      moves: set.moves,
+      item: set.item,
+      ability: set.ability,
+      itemUnknown: true,
+      abilityUnknown: true,
+    })),
+  ];
+}
+
 function foeSets(foes: FoeMon[]): { sets: PokemonSet[]; kept: FoeMon[] } {
   const sets: PokemonSet[] = [];
   const kept: FoeMon[] = [];
@@ -223,7 +246,13 @@ function foeSets(foes: FoeMon[]): { sets: PokemonSet[]; kept: FoeMon[] } {
  * A @pkmn/sim battle whose `move N` / `switch N` indexes match the live request.
  * Slot 0 is the active pokemon. That is the same indexing the server uses.
  */
-export function buildDecisionBattle(position: LivePosition, options?: { quickWins?: boolean }): Battle | null {
+export interface DecisionBattleOptions {
+  quickWins?: boolean;
+  /** Fill unseen foe teammates with placeholders (opt-in config param). */
+  foePlaceholders?: boolean;
+}
+
+export function buildDecisionBattle(position: LivePosition, options?: DecisionBattleOptions): Battle | null {
   const request = position.request;
   if (!request || request.wait || request.teamPreview) return null;
   // options.quickWins is retained for call-site compatibility; tera mirroring
@@ -231,7 +260,8 @@ export function buildDecisionBattle(position: LivePosition, options?: { quickWin
   // request is the only source of truth after Tera has been spent.
   void options?.quickWins;
   const ours = ourSets(request);
-  const foe = foeSets(knownFoes(position));
+  const known = knownFoes(position);
+  const foe = foeSets(options?.foePlaceholders ? withPlaceholders(known) : known);
   if (!ours || foe.sets.length === 0) return null;
 
   try {
@@ -330,6 +360,8 @@ export interface LiveConfigPlayer {
   }): Promise<{ choice: string; scores?: Array<{ choice: string; score: number }> }>;
   /** Exact 1-ply quick wins. The champion player leaves this unset. */
   quickWins?: boolean;
+  /** Config opted into foe placeholders (search param foeUnseen: placeholder). */
+  foePlaceholders?: boolean;
 }
 
 /**
@@ -344,7 +376,10 @@ export async function chooseLive(
   player?: LiveConfigPlayer | null,
 ): Promise<{ action: Action; score: number | null }> {
   if (!position) throw new Error('missing live position');
-  const battle = buildDecisionBattle(position, { quickWins: player?.quickWins === true });
+  const battle = buildDecisionBattle(position, {
+    quickWins: player?.quickWins === true,
+    foePlaceholders: player?.foePlaceholders === true,
+  });
   if (!battle) throw new Error('could not build a sim battle');
   const decision = player
     ? await player.decide({ battle, side: 'p1' })

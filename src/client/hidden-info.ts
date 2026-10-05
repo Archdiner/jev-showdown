@@ -80,7 +80,7 @@ function replayClient(log: readonly string[], side: ViewerSide, request: unknown
 export function ladderDecisionBattle(
   battle: SimBattle,
   side: SideId,
-  options?: { quickWins?: boolean },
+  options?: { quickWins?: boolean; foePlaceholders?: boolean },
 ): SimBattle | null {
   const request = battle.getSide(side).activeRequest;
   if (!request || request.wait || request.teamPreview) return null;
@@ -92,7 +92,7 @@ export function decisionBattleFromViewerLog(
   log: string,
   side: ViewerSide,
   request: unknown,
-  options?: { quickWins?: boolean },
+  options?: { quickWins?: boolean; foePlaceholders?: boolean },
 ): SimBattle | null {
   if (!request || typeof request !== 'object') return null;
   const client = replayClient(log.split('\n'), side, request);

@@ -58,6 +58,13 @@ const idIndex = new Map<string, string>();
 
 const toId = (text: string) => String(text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
+/** Unit tests inject a small table here instead of touching data/. Pass null to reset. */
+export function setUsageStatsForTests(table: Record<string, SpeciesStats> | null): void {
+  statsCache = table;
+  idIndex.clear();
+  for (const key of Object.keys(table || {})) idIndex.set(toId(key), key);
+}
+
 /** The usage dump. Refuses a fixture-sized file so a test fixture can never steer a screen. */
 export function usageStats(): Record<string, SpeciesStats> {
   if (statsCache) return statsCache;
@@ -210,4 +217,78 @@ export function applyStatsPrior(
   if (!changed) return;
   const state = battle.requestState;
   if (state === 'move' || state === 'switch') battle.makeRequest(state);
+}
+
+/** Gen 9 Random Battle singles teams are always six. */
+export const FOE_TEAM_SIZE = 6;
+
+export interface PlaceholderSet {
+  species: string;
+  level: number;
+  moves: string[];
+  item: string;
+  ability: string;
+}
+
+function hashSeed(text: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Stand-ins for foe teammates that have not appeared yet, so the decision
+ * battle has a full team: knocking out the last revealed foe is no longer a
+ * terminal win, and team features (hp / faint differences, matchups) see six
+ * foes like the positions the fitted eval was trained on.
+ *
+ * Species are drawn without replacement from the randbats usage dump,
+ * excluding revealed species (species clause), with a seed hashed from the
+ * revealed species so a decision is reproducible. Moves / item / ability are
+ * the role-prior modes.
+ */
+export function placeholderSets(seenSpecies: string[], count: number): PlaceholderSet[] {
+  if (count <= 0) return [];
+  const stats = usageStats();
+  const seenIds = new Set(seenSpecies.map(name => toId(Dex.species.get(name).baseSpecies || name)));
+  const pool = Object.keys(stats)
+    .filter(name => {
+      const species = Dex.species.get(name);
+      return species.exists && !seenIds.has(toId(species.baseSpecies || name)) && species.name !== 'Ditto';
+    })
+    .sort();
+  let state = hashSeed(seenSpecies.map(toId).sort().join('|')) || 1;
+  const next = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+  const out: PlaceholderSet[] = [];
+  const used = new Set<string>();
+  while (out.length < count && pool.length > used.size) {
+    const name = pool[Math.floor(next() * pool.length)];
+    const base = toId(Dex.species.get(name).baseSpecies || name);
+    if (used.has(base)) continue;
+    used.add(base);
+    const entry = stats[name] as SpeciesStats & { level?: number };
+    const posterior = rolePosterior(entry, { moves: [] });
+    const moves: string[] = [];
+    for (const [move] of marginal(posterior, 'moves')) {
+      if (moves.length >= 4) break;
+      const id = toId(move);
+      if (damaging(id) && !moves.includes(id)) moves.push(id);
+    }
+    const [item] = marginal(posterior, 'items');
+    const [ability] = marginal(posterior, 'abilities');
+    out.push({
+      species: name,
+      level: entry.level || 80,
+      moves: moves.length ? moves : ['tackle'],
+      item: item?.[0] || '',
+      ability: ability && toId(ability[0]) !== 'imposter' ? ability[0] : '',
+    });
+  }
+  return out;
 }

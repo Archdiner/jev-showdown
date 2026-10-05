@@ -70,6 +70,7 @@ async function decide(message: DecideRequest): Promise<void> {
       ? {
         decide: routed.player.decide.bind(routed.player),
         quickWins: routed.player.config.search.id === QUICK_WIN_SEARCH_ID,
+        foePlaceholders: routed.player.config.search.params.foeUnseen === 'placeholder',
       }
       : null;
     const picked = await chooseLive(routed.engine, message.position, message.legal, player);

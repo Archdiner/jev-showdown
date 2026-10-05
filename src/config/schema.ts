@@ -68,6 +68,12 @@ export const SearchParamsSchema = z.object({
    * full: + posterior-mode hidden ability.
    */
   foeStats: z.enum(['off', 'moves', 'items', 'full']).optional(),
+  /**
+   * Opt-in: placeholder fills unseen foe teammates up to six in the decision
+   * battle, so KOing the last revealed foe is not scored as a won game.
+   * Unset keeps the revealed-only foe team and existing config ids.
+   */
+  foeUnseen: z.enum(['revealed', 'placeholder']).optional(),
 }).strict();
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
 

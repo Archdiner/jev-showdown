@@ -271,7 +271,10 @@ async function chooseSeen(
   // Mirror live: QW (and any tera-enabled search) needs the request's tera
   // state on the decision battle. buildDecisionBattle always syncs now, but
   // pass quickWins so call sites stay aligned with the ladder path.
-  const viewed = ladderDecisionBattle(battle, side, { quickWins: allowsTera(playerSpec) });
+  const viewed = ladderDecisionBattle(battle, side, {
+    quickWins: allowsTera(playerSpec),
+    foePlaceholders: wantsPlaceholders(playerSpec),
+  });
   if (!viewed) return { choice: legal[0] || 'default', ms: 0, configId: player.id, viewMiss: true };
   return choose(player, viewed, 'p1', rng, gameId, seed);
 }
@@ -310,6 +313,11 @@ function noteInvalid(
   if (side === 'p1') result.p1Invalid++;
   else result.p2Invalid++;
   return `${side} invalid choice ${JSON.stringify(choice)}; legal=${JSON.stringify(legal)}`;
+}
+
+/** Config opted into unseen-foe placeholders (search param foeUnseen). */
+function wantsPlaceholders(player: BenchPlayer): boolean {
+  return isBotSpec(player) && player.config.search.params.foeUnseen === 'placeholder';
 }
 
 function allowsTera(player: BenchPlayer): boolean {
