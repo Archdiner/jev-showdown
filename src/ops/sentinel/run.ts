@@ -5,6 +5,7 @@ import type { OpsPaths } from '../paths.js';
 import { CHECKS } from './checks.js';
 import { clockGames, splitHits } from './episodes.js';
 import {
+  applyEvents,
   countSeverity,
   incidentStore,
   loadIncidents,
@@ -115,7 +116,13 @@ export async function runSentinel(
   let code = 0;
   for (let index = 0; index < scans; index++) {
     const now = options.now ?? Date.now();
-    const result = scanOnce(layout, { ...options, heartbeat: true, now });
+    let result: ScanResult;
+    try {
+      result = scanOnce(layout, { ...options, heartbeat: true, now });
+    } catch (err) {
+      noteSentinelCrash(layout, err);
+      throw err;
+    }
     if (options.json) {
       const incidents = loadIncidents(incidentStore(layout.opsDir));
       console.log(JSON.stringify({
@@ -140,6 +147,23 @@ export function renderScorecard(layout: Layout, options: LoadOptions & { since?:
   const sinceMs = parseSince(options.since, DEFAULTS.lookbackMs, now);
   const card = buildScorecard(ctx, loadIncidents(store), readEvents(store.eventsPath), sinceMs);
   return formatScorecard(card, options.markdown ? 'md' : 'text');
+}
+
+/** One line for the error heartbeat and stderr. Stack traces stay on the thrown error. */
+export function sentinelCrashDetail(err: unknown): string {
+  const text = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  const oneLine = text.replace(/\s+/g, ' ').trim();
+  return oneLine.length > 400 ? `${oneLine.slice(0, 397)}...` : oneLine;
+}
+
+function noteSentinelCrash(layout: Layout, err: unknown): void {
+  const detail = sentinelCrashDetail(err);
+  try {
+    beat(heartbeatPaths(layout.opsDir), 'sentinel', 'error', detail);
+  } catch {
+    // The stderr line is the record when the ops directory cannot be written.
+  }
+  console.error(`sentinel crashed: ${detail}`);
 }
 
 export function layoutFromEnv(cwd = process.cwd(), env: NodeJS.ProcessEnv = process.env): Layout {

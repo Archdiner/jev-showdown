@@ -46,67 +46,80 @@ export function readEvents(file: string): IncidentEvent[] {
 }
 
 export function foldIncidents(events: IncidentEvent[]): Incident[] {
+  return applyEvents([], events);
+}
+
+/** Fold `events` onto an existing snapshot. Does not re-read the event log. */
+export function applyEvents(prior: Incident[], events: IncidentEvent[]): Incident[] {
   const byId = new Map<string, Incident>();
-  for (const event of events) {
-    if (!event.incidentId || !event.checkId) continue;
-    const current = byId.get(event.incidentId);
-    if (event.type === 'opened') {
-      if (current) continue;
-      byId.set(event.incidentId, incidentFrom(event, event.ts));
-      continue;
-    }
-    if (!current) continue;
-    if (event.type === 'updated') {
-      applyUpdate(current, event);
-      continue;
-    }
-    if (event.type === 'reopened') {
-      current.status = 'open';
-      current.lastSeen = event.ts;
-      current.count = event.count ?? current.count + 1;
-      current.evidence = event.evidence ?? current.evidence;
-      current.detail = event.detail ?? current.detail;
-      current.episodeOpenedAt = event.episodeOpenedAt ?? event.ts;
-      current.clearSince = null;
-      current.resolvedAt = null;
-      current.verifiedAt = null;
-      current.inBaseline = event.inBaseline !== false;
-      current.battles = event.battles ?? current.battles;
-      current.lastFailureTs = event.lastFailureTs ?? current.lastFailureTs;
-      current.gitSha = event.gitSha ?? current.gitSha;
-      current.runId = event.runId ?? current.runId;
-      continue;
-    }
-    if (event.type === 'acknowledged' && current.status === 'open') {
-      current.status = 'acknowledged';
-      if (event.rootCause) current.rootCause = event.rootCause;
-      continue;
-    }
-    if (event.type === 'fixing' && (current.status === 'open' || current.status === 'acknowledged')) {
-      current.status = 'fixing';
-      current.pr = event.pr ?? current.pr;
-      continue;
-    }
-    if (event.type === 'resolved' && actionable(current.status)) {
-      current.status = 'resolved';
-      current.clearSince = event.clearSince ?? event.ts;
-      current.resolvedAt = event.ts;
-      if (event.rootCause) current.rootCause = event.rootCause;
-      continue;
-    }
-    if (event.type === 'verified' && current.status === 'resolved') {
-      current.status = 'verified';
-      current.verifiedAt = event.ts;
-      continue;
-    }
-    if (event.type === 'root-cause') {
-      current.rootCause = event.rootCause ?? current.rootCause;
-    }
-    if (event.type === 'linked') {
-      current.ref = event.ref ?? current.ref;
-    }
-  }
+  for (const incident of prior) byId.set(incident.id, copyIncident(incident));
+  for (const event of events) applyEvent(byId, event);
   return [...byId.values()].sort(compareIncidents);
+}
+
+function copyIncident(incident: Incident): Incident {
+  const evidence = Array.isArray(incident.evidence) ? incident.evidence.map(item => ({ ...item })) : [];
+  return { ...incident, evidence };
+}
+
+function applyEvent(byId: Map<string, Incident>, event: IncidentEvent): void {
+  if (!event.incidentId || !event.checkId) return;
+  const current = byId.get(event.incidentId);
+  if (event.type === 'opened') {
+    if (current) return;
+    byId.set(event.incidentId, incidentFrom(event, event.ts));
+    return;
+  }
+  if (!current) return;
+  if (event.type === 'updated') {
+    applyUpdate(current, event);
+    return;
+  }
+  if (event.type === 'reopened') {
+    current.status = 'open';
+    current.lastSeen = event.ts;
+    current.count = event.count ?? current.count + 1;
+    current.evidence = event.evidence ?? current.evidence;
+    current.detail = event.detail ?? current.detail;
+    current.episodeOpenedAt = event.episodeOpenedAt ?? event.ts;
+    current.clearSince = null;
+    current.resolvedAt = null;
+    current.verifiedAt = null;
+    current.inBaseline = event.inBaseline !== false;
+    current.battles = event.battles ?? current.battles;
+    current.lastFailureTs = event.lastFailureTs ?? current.lastFailureTs;
+    current.gitSha = event.gitSha ?? current.gitSha;
+    current.runId = event.runId ?? current.runId;
+    return;
+  }
+  if (event.type === 'acknowledged' && current.status === 'open') {
+    current.status = 'acknowledged';
+    if (event.rootCause) current.rootCause = event.rootCause;
+    return;
+  }
+  if (event.type === 'fixing' && (current.status === 'open' || current.status === 'acknowledged')) {
+    current.status = 'fixing';
+    current.pr = event.pr ?? current.pr;
+    return;
+  }
+  if (event.type === 'resolved' && actionable(current.status)) {
+    current.status = 'resolved';
+    current.clearSince = event.clearSince ?? event.ts;
+    current.resolvedAt = event.ts;
+    if (event.rootCause) current.rootCause = event.rootCause;
+    return;
+  }
+  if (event.type === 'verified' && current.status === 'resolved') {
+    current.status = 'verified';
+    current.verifiedAt = event.ts;
+    return;
+  }
+  if (event.type === 'root-cause') {
+    current.rootCause = event.rootCause ?? current.rootCause;
+  }
+  if (event.type === 'linked') {
+    current.ref = event.ref ?? current.ref;
+  }
 }
 
 export function reconcile(

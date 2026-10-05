@@ -64,7 +64,7 @@ export function loadContext(layout: Layout, options: LoadOptions = {}): Sentinel
   const processes = snapshot.processes;
   const pidAlive = options.pidAlive
     ?? (options.processes ? (pid: number) => options.processes?.some(proc => proc.pid === pid) ?? false : processAlive);
-  const rows = collectRows(layout);
+  const rows = collectRows(layout, now, lookbackMs);
   const speciesPath = path.join(layout.dataDir, 'gen9-stats.json');
   const species = readSpecies(speciesPath);
   return {
@@ -412,44 +412,178 @@ export function readGit(cwd: string): GitStatus {
   }
 }
 
+/**
+ * A scan keeps at most this many bytes from the end of one JSONL file.
+ * `Array.prototype.push` of a spread stops the process near 123,000 rows
+ * (`RangeError: Maximum call stack size exceeded` on Node 22). The cap is
+ * also the bound when a log has no timestamps.
+ */
+export const LOG_TAIL_MAX_BYTES = 8 * 1024 * 1024;
+
+/** Backward read size. A lookback hit usually returns inside one chunk. */
+export const LOG_TAIL_CHUNK_BYTES = 64 * 1024;
+
+let jsonlBytes = 0;
+
+/** Bytes read from `*.jsonl` inputs since `resetJsonlByteCount`. */
+export function jsonlBytesRead(): number {
+  return jsonlBytes;
+}
+
+export function resetJsonlByteCount(): void {
+  jsonlBytes = 0;
+}
+
+function countJsonl(file: string, bytes: number): void {
+  if (file.endsWith('.jsonl')) jsonlBytes += bytes;
+}
+
+const TS_FIELD = /"ts"\s*:\s*(-?\d+(?:\.\d+)?)/;
+
 export function readLogFile(file: string): LogRow[] {
   if (!fs.existsSync(file)) return [];
   const text = fs.readFileSync(file, 'utf8');
+  countJsonl(file, Buffer.byteLength(text));
   const rows: LogRow[] = [];
   const lines = text.split('\n');
   for (let index = 0; index < lines.length; index++) {
     const raw = lines[index].trim();
     if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        rows.push({ file, line: index + 1, value: null, error: 'JSON value is not an object' });
-      } else {
-        rows.push({ file, line: index + 1, value: parsed as Record<string, unknown> });
-      }
-    } catch (err) {
-      rows.push({
-        file,
-        line: index + 1,
-        value: null,
-        error: err instanceof Error ? err.message : 'invalid JSON',
-      });
-    }
+    rows.push(parseLogLine(file, index + 1, raw));
   }
   return rows;
 }
 
-function collectRows(layout: Layout): LogRow[] {
+/**
+ * Input rows for one scan. The sentinel's own `incidents.jsonl` is output,
+ * not a log to score. Every other JSONL is the lookback tail, not the whole file.
+ */
+function collectRows(layout: Layout, now: number, lookbackMs: number): LogRow[] {
   const files = new Set<string>();
   for (const dir of [layout.ladderLogDir, layout.liveRunsDir, layout.opsDir]) addJsonl(dir, files);
   const decisions = path.join(layout.cwd, 'state', 'decisions.jsonl');
   if (fs.existsSync(decisions)) files.add(decisions);
   const rows: LogRow[] = [];
+  const cutoff = now - lookbackMs;
   for (const file of [...files].sort()) {
-    const fileRows = readLogFile(file);
+    if (isSentinelIncidentLog(file)) continue;
+    const fileRows = readLogWindow(file, cutoff);
     for (const row of fileRows) rows.push(row);
   }
   return rows;
+}
+
+/** `incidents.jsonl` and a rotated `incidents.jsonl.N` are the sentinel's event log. */
+export function isSentinelIncidentLog(file: string): boolean {
+  const base = path.basename(file);
+  return base === 'incidents.jsonl' || base.startsWith('incidents.jsonl.');
+}
+
+function readLogWindow(file: string, cutoff: number): LogRow[] {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(file);
+  } catch {
+    return [];
+  }
+  if (!stat.isFile() || stat.size === 0) return [];
+  if (stat.size <= LOG_TAIL_MAX_BYTES) return readLogFile(file).filter(row => rowInWindow(row, cutoff));
+  const tail = readJsonlTail(file, cutoff, LOG_TAIL_MAX_BYTES);
+  if (tail.reachedStart) return readLogFile(file).filter(row => rowInWindow(row, cutoff));
+  const rows: LogRow[] = [];
+  for (let index = 0; index < tail.lines.length; index++) rows.push(parseLogLine(file, index + 1, tail.lines[index]));
+  return rows;
+}
+
+function rowInWindow(row: LogRow, cutoff: number): boolean {
+  const ts = row.value?.ts;
+  if (typeof ts !== 'number' || !Number.isFinite(ts)) return true;
+  return ts >= cutoff;
+}
+
+function parseLogLine(file: string, line: number, raw: string): LogRow {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { file, line, value: null, error: 'JSON value is not an object' };
+    }
+    return { file, line, value: parsed as Record<string, unknown> };
+  } catch (err) {
+    return {
+      file,
+      line,
+      value: null,
+      error: err instanceof Error ? err.message : 'invalid JSON',
+    };
+  }
+}
+
+function timestampOf(raw: string): number | null {
+  const match = TS_FIELD.exec(raw);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Newest lines of an append-only JSONL, oldest-first, stopping at the first
+ * line whose `ts` is older than `cutoff`. Lines with no `ts` stay in the tail.
+ */
+function readJsonlTail(file: string, cutoff: number, maxBytes: number): { lines: string[]; reachedStart: boolean } {
+  const fd = fs.openSync(file, 'r');
+  let bytesRead = 0;
+  try {
+    const size = fs.fstatSync(fd).size;
+    let pos = size;
+    let carry = new Uint8Array(0);
+    const newestFirst: string[] = [];
+    while (pos > 0 && bytesRead < maxBytes) {
+      const room = maxBytes - bytesRead;
+      const take = Math.min(LOG_TAIL_CHUNK_BYTES, pos, room);
+      if (take <= 0) break;
+      pos -= take;
+      bytesRead += take;
+      const chunk = Buffer.allocUnsafe(take);
+      fs.readSync(fd, chunk, 0, take, pos);
+      const combined = carry.length > 0 ? Buffer.concat([chunk, Buffer.from(carry)]) : chunk;
+      const split = splitChunk(combined, pos === 0);
+      carry = new Uint8Array(split.carry);
+      for (let index = split.complete.length - 1; index >= 0; index--) {
+        const raw = split.complete[index].toString('utf8').trim();
+        if (!raw) continue;
+        const ts = timestampOf(raw);
+        if (ts !== null && ts < cutoff) return { lines: newestFirst.reverse(), reachedStart: pos === 0 };
+        newestFirst.push(raw);
+      }
+    }
+    return { lines: newestFirst.reverse(), reachedStart: pos === 0 };
+  } finally {
+    countJsonl(file, bytesRead);
+    fs.closeSync(fd);
+  }
+}
+
+/** Complete lines in file order. `carry` is the unfinished line at the start of this chunk. */
+function splitChunk(combined: Buffer, atStart: boolean): { complete: Buffer[]; carry: Buffer } {
+  const newlines: number[] = [];
+  for (let index = 0; index < combined.length; index++) {
+    if (combined[index] === 0x0a) newlines.push(index);
+  }
+  if (!atStart && newlines.length === 0) return { complete: [], carry: Buffer.from(combined) };
+  const complete: Buffer[] = [];
+  let start = 0;
+  let first = 0;
+  if (!atStart) {
+    start = newlines[0] + 1;
+    first = 1;
+  }
+  for (let index = first; index < newlines.length; index++) {
+    complete.push(combined.subarray(start, newlines[index]));
+    start = newlines[index] + 1;
+  }
+  if (start < combined.length) complete.push(combined.subarray(start));
+  const carry = (atStart ? Buffer.alloc(0) : Buffer.from(combined.subarray(0, newlines[0]))) as Buffer;
+  return { complete: complete.map(part => Buffer.from(part) as Buffer), carry };
 }
 
 function addJsonl(dir: string, into: Set<string>): void {
