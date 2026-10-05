@@ -294,6 +294,7 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     { pid: 11, cmd: 'node tsx src/ops/cli.ts factory', env: {} },
     { pid: 12, cmd: 'node tsx src/ops/cli.ts factory', env: {} },
     { pid: 13, cmd: 'node tsx src/ops/cli.ts gatekeeper', env: {} },
+    { pid: 15, cmd: 'node tsx src/ops/cli.ts live', env: {} },
   ];
 
   return {
