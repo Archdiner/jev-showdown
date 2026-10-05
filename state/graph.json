@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "exported_at": 1791159980809,
+  "exported_at": 1791161121433,
   "nodes": [
     {
       "id": "hyp-config-layer",
@@ -622,6 +622,20 @@
       "rationale": "Random-battle search scores are often close. A fast evaluation model can score the same top-K actions and either nudge the ranking (prior) or break ties, without replacing search.",
       "expected_effect": "Challenger Elo vs the frozen panel rises by about +10 if the prior corrects systematic mistakes, with p99 turn time still under 2s.",
       "test_plan": "Submit experiment-llm-jev-prior against the champion through the gate. Challenger config is experiments/llm-jev-prior/config.json (blend mode prior, weight 0.15, topK 8). Champion stays useLLMPrior false. Paired games, SPRT elo0=0 elo1=+10 alpha=beta=0.05."
+    },
+    {
+      "id": "task-ops-layer",
+      "type": "Task",
+      "status": "done",
+      "title": "Operations facilities",
+      "description": "factory, gatekeeper, live, and analyst share the graph and the JSONL logs. Only the gatekeeper writes champion and live-approved.",
+      "created_at": 1791161121160,
+      "updated_at": 1791161121160,
+      "acceptance_criteria": [
+        "npm run ops -- factory|gatekeeper|live|analyst|status|report|supervise",
+        "gatekeeper is the only writer of champion and live-approved",
+        "live --local plays one game on the local server and records rating and GXE"
+      ]
     }
   ],
   "edges": [
