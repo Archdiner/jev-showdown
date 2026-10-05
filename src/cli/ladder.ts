@@ -382,6 +382,7 @@ async function playSeries(
     });
 
     const consider = (summary: GameSummary) => {
+      if (summary.phantom) return;
       if (finished.has(summary.battleId)) return;
       finished.set(summary.battleId, summary);
       metrics?.noteGame(summary);
@@ -552,13 +553,14 @@ async function runRemote(
 }
 
 function report(summaries: GameSummary[], opts: LadderOptions, identity: LadderIdentity, drain?: LiveDrain): void {
-  const invalidChoices = summaries.reduce((sum, game) => sum + game.invalidChoices, 0);
-  const crashes = summaries.reduce((sum, game) => sum + game.crashes, 0);
-  const fallbacks = summaries.reduce((sum, game) => sum + game.fallbacks, 0);
-  const mismatches = summaries.reduce((sum, game) => sum + game.mismatches, 0);
-  const wins = summaries.filter(game => game.outcome === 'win').length;
+  const played = summaries.filter(game => !game.phantom);
+  const invalidChoices = played.reduce((sum, game) => sum + game.invalidChoices, 0);
+  const crashes = played.reduce((sum, game) => sum + game.crashes, 0);
+  const fallbacks = played.reduce((sum, game) => sum + game.fallbacks, 0);
+  const mismatches = played.reduce((sum, game) => sum + game.mismatches, 0);
+  const wins = played.filter(game => game.outcome === 'win').length;
   const reportBody = {
-    games: summaries.length,
+    games: played.length,
     requested: opts.games,
     format: opts.format,
     engine: opts.engine,
@@ -578,19 +580,19 @@ function report(summaries: GameSummary[], opts: LadderOptions, identity: LadderI
     fallbacks,
     mismatches,
     wins,
-    results: summaries,
+    results: played,
   };
   fs.mkdirSync(opts.logDir, { recursive: true });
   const out = path.join(opts.logDir, 'summary.json');
   fs.writeFileSync(out, JSON.stringify(reportBody, null, 2));
-  console.log(`[ladder] games=${summaries.length} invalid=${invalidChoices} crashes=${crashes} fallbacks=${fallbacks} mismatches=${mismatches}`);
+  console.log(`[ladder] games=${played.length} invalid=${invalidChoices} crashes=${crashes} fallbacks=${fallbacks} mismatches=${mismatches}`);
   console.log(`[ladder] summary ${out}`);
   if (drain?.isDraining) {
-    console.log(`[ladder] drained (${drain.drainReason}) after ${summaries.length}/${opts.games} games`);
+    console.log(`[ladder] drained (${drain.drainReason}) after ${played.length}/${opts.games} games`);
     if (invalidChoices > 0 || crashes > 0) process.exitCode = 1;
     return;
   }
-  if (invalidChoices > 0 || crashes > 0 || summaries.length < opts.games) {
+  if (invalidChoices > 0 || crashes > 0 || played.length < opts.games) {
     process.exitCode = 1;
   }
 }

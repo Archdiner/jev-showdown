@@ -113,6 +113,14 @@ describe('game feed parsers', () => {
     expect(parsed.games[1].gxe).toBe(62.5);
     expect(parsed.games[2].endReason).toBeNull();
     expect(parsed.games[2].elo).toBe(1073);
+    const hidden = parseLog([
+      '{"type":"result","kind":"ladder-game","battleId":"ghost","turns":0,"outcome":"tie","endReason":"disconnect","winner":null,"eloAfter":1185}',
+      '{"kind":"ladder-game","turns":8,"outcome":"loss","endReason":"ko","eloAfter":1074,"localServer":true,"replayStatus":"local-only"}',
+      '{"kind":"ladder-game","turns":8,"outcome":"win","endReason":"ko","eloAfter":1185}',
+    ].join('\n'), { source: 'games.jsonl', runner: 'ladder' });
+    expect(hidden.games).toHaveLength(2);
+    expect(hidden.games[0].elo).toBeNull();
+    expect(hidden.games[1].elo).toBe(1185);
   });
 
   it('keeps timer and disconnect losses out of the strategy rate', () => {

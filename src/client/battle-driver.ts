@@ -7,7 +7,7 @@ import { Dex } from '@pkmn/dex';
 import { Format } from '../types/format.js';
 import { Action, GameState } from '../types/index.js';
 import { StateMismatch } from '../types/format.js';
-import { ShowdownClient, ReplayNotice, parseRatingLine, parseReplayUrl, replayMatchesRoom } from './showdown-client.js';
+import { ShowdownClient, RatingUpdate, ReplayNotice, parseFormatRating, parseRatingLine, parseReplayUrl, replayMatchesRoom } from './showdown-client.js';
 import { DecisionClient } from './decision-client.js';
 import { OpponentTracker } from './opponent-tracker.js';
 import { GameLog, openGameLog } from './game-log.js';
@@ -25,7 +25,7 @@ import { LivePosition } from './decision-battle.js';
 import { livePositionFromClient } from './live-position.js';
 import { ourClockUpdate } from './inactive-clock.js';
 import { safeError, toID } from './ids.js';
-import { appendGameRecord, buildLadderGameRecord, LadderGameRecord } from './game-record.js';
+import { appendGameRecord, buildLadderGameRecord, isPhantomGame, LadderGameRecord } from './game-record.js';
 import { attributePopup } from './delivery.js';
 
 export type GameSummary = LadderGameRecord & {
@@ -132,6 +132,9 @@ export class BattleDriver extends EventEmitter {
     client.on('replay', (replay: ReplayNotice) => {
       this.onReplay(replay);
     });
+    client.on('rating', (update: RatingUpdate) => {
+      this.noteRating(update);
+    });
     client.on('popup', (message: string) => {
       this.onPopup(message);
     });
@@ -149,6 +152,7 @@ export class BattleDriver extends EventEmitter {
   async stop(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
+    await this.fillMissingRatings();
     for (const room of [...this.rooms.values()]) {
       if (room.requestTimer) clearTimeout(room.requestTimer);
       if (room.finalizeTimer) clearTimeout(room.finalizeTimer);
@@ -172,11 +176,7 @@ export class BattleDriver extends EventEmitter {
 
     const clock = ourClockUpdate(line, this.options.username);
     if (clock !== undefined) room.secondsLeft = clock;
-    if (typeof clock === 'number') {
-      room.minTimerMarginSec = room.minTimerMarginSec === null
-        ? clock
-        : Math.min(room.minTimerMarginSec, clock);
-    }
+    if (typeof clock === 'number') this.noteTimerMargin(room, clock);
 
     room.lines.push(line);
     this.observePlayers(room, line);
@@ -439,11 +439,7 @@ export class BattleDriver extends EventEmitter {
 
     const latencyMs = Date.now() - startedAt;
     room.latencies.push(latencyMs);
-    if (typeof room.secondsLeft === 'number') {
-      room.minTimerMarginSec = room.minTimerMarginSec === null
-        ? room.secondsLeft
-        : Math.min(room.minTimerMarginSec, room.secondsLeft);
-    }
+    if (typeof room.secondsLeft === 'number') this.noteTimerMargin(room, room.secondsLeft);
     if (room.ended || (rqid !== null && room.answered.has(rqid))) {
       this.emit('decision', {
         battleId: room.roomId,
@@ -844,6 +840,10 @@ export class BattleDriver extends EventEmitter {
     }
     const target = open.find(room => room.roomId === attribution.roomId);
     if (!target) return;
+    const rating = parseRatingLine(message);
+    if (rating) this.noteRating(rating, target.roomId);
+    const replay = parseReplayUrl(message);
+    if (replay && replayMatchesRoom(target.roomId, replay.id)) target.replay = replay;
     target.log.write({
       type: 'popup',
       kind: 'popup',
@@ -853,6 +853,61 @@ export class BattleDriver extends EventEmitter {
       attribution: attribution.attribution,
       candidates: [target.roomId],
     });
+  }
+
+  private noteTimerMargin(room: RoomState, seconds: number): void {
+    if (!Number.isFinite(seconds)) return;
+    room.minTimerMarginSec = room.minTimerMarginSec === null
+      ? seconds
+      : Math.min(room.minTimerMarginSec, seconds);
+  }
+
+  /**
+   * A rating popup does not name the battle. Apply it to the room the popup
+   * was attributed to, or to the one ended battle still waiting on Elo.
+   */
+  private noteRating(update: RatingUpdate, roomId?: string): void {
+    if (update.after === null || !Number.isFinite(update.after)) return;
+    if (update.username && toID(update.username) !== toID(this.options.username)) return;
+    const room = roomId ? this.rooms.get(roomId) : this.onlyEndedRoomMissingRating();
+    if (!room || room.finalized) return;
+    room.elo = {
+      before: update.before ?? room.elo?.before ?? null,
+      after: update.after,
+      gxe: update.gxe,
+      gxeSource: update.gxeSource,
+    };
+    if (update.gxe !== null) room.gxe = update.gxe;
+  }
+
+  private onlyEndedRoomMissingRating(): RoomState | undefined {
+    const needy = [...this.rooms.values()].filter(room => !room.finalized && room.ended && room.elo?.after == null);
+    return needy.length === 1 ? needy[0] : undefined;
+  }
+
+  /** `/rank` after a disconnect, when the per-battle rating line never arrived. */
+  private async fillMissingRatings(): Promise<void> {
+    if (this.options.localServer) return;
+    const missing = [...this.rooms.values()].filter(room =>
+      !room.finalized
+      && room.elo?.after == null
+      && !isPhantomGame({
+        turns: room.turns || room.battle.turn || 0,
+        winner: room.winner,
+        lines: room.lines,
+      }),
+    );
+    if (missing.length === 0) return;
+    const rating = await readFormatRank(this.options.client, this.options.format.id);
+    if (rating === null) return;
+    const target = missing.sort((a, b) => a.startedAt - b.startedAt).at(-1);
+    if (!target || target.finalized) return;
+    target.elo = {
+      before: target.elo?.before ?? null,
+      after: rating,
+      gxe: target.elo?.gxe ?? target.gxe,
+      gxeSource: target.elo?.gxeSource ?? 'missing',
+    };
   }
 
   private onReplay(replay: ReplayNotice): void {
@@ -945,4 +1000,30 @@ export class BattleDriver extends EventEmitter {
     this.rooms.delete(room.roomId);
     this.emit('gameEnd', summary);
   }
+}
+
+/** One `/rank` reply. Null when the client cannot ask or the table has no format row. */
+function readFormatRank(client: ShowdownClient, format: string): Promise<number | null> {
+  if (typeof client.queryRank !== 'function' || (typeof client.isReady === 'function' && !client.isReady())) {
+    return Promise.resolve(null);
+  }
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      client.off('line', onLine);
+      resolve(null);
+    }, 1500);
+    const onLine = (_room: string, line: string) => {
+      const parsed = parseFormatRating(line, format);
+      if (parsed === undefined) return;
+      clearTimeout(timer);
+      client.off('line', onLine);
+      resolve(parsed);
+    };
+    client.on('line', onLine);
+    if (!client.queryRank()) {
+      clearTimeout(timer);
+      client.off('line', onLine);
+      resolve(null);
+    }
+  });
 }

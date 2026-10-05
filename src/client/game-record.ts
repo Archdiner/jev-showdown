@@ -78,6 +78,12 @@ export interface LadderGameRecord {
   replayUploaded: boolean;
   replayStatus: 'confirmed' | 'unconfirmed' | 'local-only';
   logPath: string;
+  /**
+   * Opened room that never played a turn and never received `|win|` or `|tie|`.
+   * A drain writes these when a ghost room is still on the socket. Dashboard
+   * and analyst totals skip them.
+   */
+  phantom?: true;
   /** Seat we occupied. Absent when the protocol never named us. */
   ourSide?: 'p1' | 'p2';
   /** Present on `ops live` rows. The ladder client leaves these off. */
@@ -137,6 +143,65 @@ function messageBody(line: string): string {
 
 function ours(name: string, username: string): boolean {
   return toID(name) === toID(username);
+}
+
+/** A room with no turns and no `|win|` or `|tie|` is not a played game. */
+export function isPhantomGame(input: {
+  turns: number;
+  winner: string | null;
+  lines: readonly string[];
+}): boolean {
+  if (input.turns > 0) return false;
+  if (input.winner && input.winner.trim()) return false;
+  for (const line of input.lines) {
+    if (line.startsWith('|win|') || line === '|tie' || line.startsWith('|tie|')) return false;
+  }
+  return true;
+}
+
+/**
+ * Historical `games.jsonl` rows have no protocol lines. A 0-turn tie whose
+ * reason is disconnect or unknown is the same ghost room.
+ */
+export function isPhantomRecord(row: {
+  phantom?: unknown;
+  turns?: unknown;
+  winner?: unknown;
+  outcome?: unknown;
+  endReason?: unknown;
+}): boolean {
+  if (row.phantom === true) return true;
+  const turns = typeof row.turns === 'number' ? row.turns : null;
+  if (turns === null || turns > 0) return false;
+  if (row.outcome === 'win' || row.outcome === 'loss') return false;
+  const winner = typeof row.winner === 'string' ? row.winner.trim() : '';
+  if (winner && winner !== 'tie') return false;
+  return row.outcome === 'tie' && (row.endReason === 'disconnect' || row.endReason === 'unknown');
+}
+
+/** Local server Elo is not a ladder rating. */
+export function isLocalLiveGame(game: { localServer?: boolean; replayStatus?: string | null }): boolean {
+  return game.localServer === true || game.replayStatus === 'local-only';
+}
+
+/**
+ * Smallest turn clock recorded for us: the private `Time left: N sec` line,
+ * or a public line that names us. Opponent clocks are ignored.
+ */
+export function timerMarginSec(lines: readonly string[], username: string): number | null {
+  let margin: number | null = null;
+  for (const line of lines) {
+    const clock = ourClockUpdate(line, username);
+    if (typeof clock !== 'number') continue;
+    margin = margin === null ? clock : Math.min(margin, clock);
+  }
+  return margin;
+}
+
+function tighterMargin(passed: number | null, observed: number | null): number | null {
+  if (passed === null || !Number.isFinite(passed)) return observed;
+  if (observed === null || !Number.isFinite(observed)) return passed;
+  return Math.min(passed, observed);
 }
 
 /**
@@ -241,6 +306,7 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     username: input.username,
     disconnected: input.disconnected,
   });
+  const phantom = isPhantomGame({ turns: input.turns, winner: input.winner, lines: input.lines });
   const replay = replayStatusOf({ replayUrl: input.replayUrl, localServer: input.localServer });
   return {
     schema: LADDER_GAME_SCHEMA,
@@ -259,6 +325,7 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     endReason: classified.endReason,
     winner: input.winner,
     turns: input.turns,
+    ...(phantom ? { phantom: true as const } : {}),
     invalidChoices: input.invalidChoices,
     crashes: input.crashes,
     fallbacks: input.fallbacks,
@@ -362,26 +429,6 @@ export interface TranscriptFacts {
   minTimerMarginSec: number | null;
   replayId: string | null;
   replayUrl: string | null;
-}
-
-/**
- * Smallest turn clock #39 records for us: the private `Time left: N sec`
- * line, or a public line that names us. Opponent clocks are ignored.
- */
-export function timerMarginSec(lines: string[], username: string): number | null {
-  let margin: number | null = null;
-  for (const line of lines) {
-    const clock = ourClockUpdate(line, username);
-    if (typeof clock !== 'number') continue;
-    margin = margin === null ? clock : Math.min(margin, clock);
-  }
-  return margin;
-}
-
-function tighterMargin(passed: number | null, observed: number | null): number | null {
-  if (passed === null || !Number.isFinite(passed)) return observed;
-  if (observed === null || !Number.isFinite(observed)) return passed;
-  return Math.min(passed, observed);
 }
 
 /** Read the shared game fields out of a Showdown transcript. Does not invent Elo or GXE. */

@@ -203,6 +203,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   const started = new Set<string>();
 
   const timeoutMs = opts.timeoutMs ?? 120_000;
+  const bounded = opts.once === true || (typeof opts.games === 'number' && Number.isFinite(opts.games));
   let queue!: LadderQueue;
   const hasOpenConfig = () => allocate(withPulls(approved, circuits), () => 0, exploreRate) !== null;
   queue = new LadderQueue(
@@ -214,11 +215,25 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
     () => finished + queue.activeBattles < target && hasOpenConfig(),
   );
   const summary = await new Promise<LiveSummary>((resolve, reject) => {
-    const timer = setTimeout(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const onTimeout = () => {
+      if (queue.activeBattles > 0) {
+        armTimeout();
+        return;
+      }
       queue.stop();
       client.disconnect();
+      if (!bounded || finished > 0) {
+        finish({ games: finished, rating, gxe, skipped: 'window' });
+        return;
+      }
       reject(new Error(`live timed out after ${finished} games`));
-    }, timeoutMs);
+    };
+    const armTimeout = () => {
+      clearTimeout(timer);
+      timer = setTimeout(onTimeout, timeoutMs);
+    };
+    timer = setTimeout(onTimeout, timeoutMs);
     const finish = (value: LiveSummary) => {
       clearTimeout(timer);
       queue.stop();
@@ -364,11 +379,13 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
         circuits[current.config.configId] = nextCircuit(
           circuits[current.config.configId],
           record.outcome,
-          record.eloAfter,
+          local ? null : record.eloAfter,
           limits,
         );
         writeCircuits(paths, circuits);
-        beat(paths, 'live', 'ok', `${current.config.configId} ${record.outcome} rating ${record.eloAfter ?? 'n/a'}`);
+        beat(paths, 'live', 'ok', local
+          ? `${current.config.configId} ${record.outcome} local`
+          : `${current.config.configId} ${record.outcome} rating ${record.eloAfter ?? 'n/a'}`);
       }
       transcripts.delete(room);
       watches.delete(room);

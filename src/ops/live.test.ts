@@ -80,6 +80,33 @@ describe('live search slots', () => {
       await server.close();
     }
   }, 20_000);
+
+  test('an open-ended local session ends a window instead of throwing', async () => {
+    const paths = tempPaths();
+    judge(paths, {
+      configPath: 'configs/champion.yaml',
+      action: 'champion',
+      wins: 250,
+      losses: 100,
+      invalid: 0,
+      crashes: 0,
+      diagnostics: { passed: 1, failed: 0, total: 1 },
+    });
+    const server = await rejectingServer();
+    try {
+      const summary = await runLive({
+        paths,
+        local: true,
+        server: server.url,
+        username: 'localbot',
+        timeoutMs: 400,
+      });
+      expect(summary.skipped).toBe('window');
+      expect(summary.games).toBe(0);
+    } finally {
+      await server.close();
+    }
+  }, 20_000);
 });
 
 describe('local live target', () => {
