@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { filterGames, reportGames } from './games.js';
+import { configPanels, filterGames, reportGames } from './games.js';
 import { combineCalibrations } from '../client/prediction.js';
 import type { DashboardPaths } from './paths.js';
 import { buildSnapshot, type Snapshot } from './snapshot.js';
@@ -18,7 +18,7 @@ function slices(snapshot: Snapshot, query: URLSearchParams) {
     '/api/status': { ...base, ops: snapshot.ops, sources: snapshot.sources, gaps: snapshot.gaps },
     '/api/runs': { ...base, runs: snapshot.runs },
     '/api/games': { ...base, games: gamesPayload(snapshot, query) },
-    '/api/metrics': { ...base, metrics: { ...snapshot.metrics, variants: snapshot.metrics.variants, report: reportGames(filterGames(snapshot.games.recent, { endReason: query.get('endReason'), band: query.get('band') })) } },
+    '/api/metrics': { ...base, metrics: { ...snapshot.metrics, variants: snapshot.metrics.variants, configs: configPanels(filterGames(snapshot.games.recent, { endReason: query.get('endReason'), band: query.get('band') })), report: reportGames(filterGames(snapshot.games.recent, { endReason: query.get('endReason'), band: query.get('band') })) } },
     '/api/agents': { ...base, agents: snapshot.agents },
   };
 }
@@ -29,6 +29,7 @@ function gamesPayload(snapshot: Snapshot, query: URLSearchParams) {
   const filtered = filterGames(snapshot.games.recent, { endReason, band });
   return {
     ...snapshot.games,
+    configs: configPanels(filtered),
     filter: { endReason: endReason || 'any', band: band || 'any' },
     filtered,
     filteredReport: reportGames(filtered),

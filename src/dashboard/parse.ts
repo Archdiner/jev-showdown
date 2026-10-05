@@ -48,6 +48,8 @@ export interface GameRecord {
   configId: string | null;
   configPath: string | null;
   configHash: string | null;
+  role: 'champion' | 'challenger' | null;
+  share: number | null;
   engine: string | null;
   gitSha: string | null;
   concurrency: number | null;
@@ -94,6 +96,10 @@ function num(value: unknown): number | null {
 
 function str(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function roleOf(value: unknown): 'champion' | 'challenger' | null {
+  return value === 'champion' || value === 'challenger' ? value : null;
 }
 
 export function replayUrl(replayUrlValue: unknown, replayId: unknown): string | null {
@@ -167,6 +173,8 @@ export function parseLadderLine(line: string, hint: { source: string; runner: st
     configId: hint.engine,
     configPath: null,
     configHash: null,
+    role: null,
+    share: null,
     engine: hint.engine,
     gitSha: null,
     concurrency: null,
@@ -230,6 +238,8 @@ export function parseJsonRecord(row: Record<string, unknown>, hint: { source: st
       configId: str(row.configId) || engine,
       configPath: str(row.configPath),
       configHash: str(row.configHash) || str(row.config_hash),
+      role: roleOf(row.role),
+      share: num(row.share),
       engine,
       gitSha: str(row.gitSha) || str(row.git) || str(row.commit),
       concurrency: num(row.concurrency),
@@ -274,6 +284,8 @@ export function parseSummary(value: unknown, source: string): GameRecord[] {
       configId: str(row.configId) || engine,
       configPath: str(row.configPath),
       configHash: str(row.configHash),
+      role: roleOf(row.role),
+      share: num(row.share),
       engine,
       gitSha: str(row.gitSha),
       concurrency: num(row.concurrency),

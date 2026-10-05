@@ -15,6 +15,8 @@ export interface LadderRunMeta {
   gitSha?: string | null;
   configSource?: string;
   configPath?: string | null;
+  /** Arms this one process may play. The account lock still sees a single pid. */
+  ab?: Array<{ configId: string; role: string; share: number }>;
   drainFile?: string;
   globalDrainFile?: string;
 }

@@ -7,6 +7,7 @@ const calibration = document.querySelector('#calibration');
 const calNote = document.querySelector('#calNote');
 const filtered = document.querySelector('#filtered');
 const rows = document.querySelector('#rows');
+const configRows = document.querySelector('#configRows');
 
 function text(value) {
   if (value === null || value === undefined || value === '') return '—';
@@ -75,6 +76,40 @@ function renderCalibration(summary, filtered) {
   calCard(calibration, 'Speed order', countPct(summary.speedOrderErrorRate, summary.speedOrderErrors, summary.speedCompared), 'who acted first');
 }
 
+function score(tally) {
+  if (!tally) return '—';
+  return `${pct(tally.winRate)} ${tally.wins}-${tally.losses}-${tally.ties}`;
+}
+
+function renderConfigs(list) {
+  configRows.replaceChildren();
+  if (!list.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 10;
+    td.textContent = 'No finished games.';
+    tr.append(td);
+    configRows.append(tr);
+    return;
+  }
+  for (const row of list) {
+    const tr = document.createElement('tr');
+    tr.append(
+      cell(row.configId),
+      cell(row.role),
+      cell(row.share),
+      cell(`${row.wins}-${row.losses}-${row.ties}`),
+      cell(row.eloDelta === null || row.eloDelta === undefined ? null : Math.round(row.eloDelta)),
+      cell(row.invalidMoves),
+      cell(score(row.report && row.report.strategy)),
+      cell(score(row.report && row.report.timerDisconnect)),
+      cell(score(row.report && row.report.crash)),
+      cell(score(row.report && row.report.all)),
+    );
+    configRows.append(tr);
+  }
+}
+
 function cell(value) {
   const td = document.createElement('td');
   td.textContent = text(value);
@@ -87,6 +122,7 @@ function render(body, status) {
   const report = games.report;
   meta.textContent = `${body.fixtureMode ? 'Fixture data. ' : ''}${games.record.games} games, rating ${text(games.elo)}. Strategy excludes timer, disconnect, and crash. Ladder lines have no end reason, so they stay in strategy and their losses are also counted as unclassified (${report.unclassifiedLosses}).`;
   rates.replaceChildren();
+  renderConfigs(games.configs || []);
   card(rates, 'Strategy', report.strategy, 'strategy');
   card(rates, 'Timer / disconnect', report.timerDisconnect, 'timer');
   card(rates, 'Crash', report.crash, 'crash');

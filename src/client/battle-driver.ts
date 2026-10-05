@@ -25,6 +25,7 @@ import { LivePosition, buildDecisionBattle } from './decision-battle.js';
 import { livePositionFromClient } from './live-position.js';
 import { ourClockUpdate } from './inactive-clock.js';
 import { safeError, toID } from './ids.js';
+import { EngineName } from './engines.js';
 import { appendGameRecord, buildLadderGameRecord, isPhantomGame, LadderGameRecord } from './game-record.js';
 import { attributePopup } from './delivery.js';
 import { EXACT_1PLY, type ExactConfig } from '../engine/exact/search.js';
@@ -93,6 +94,7 @@ interface RoomState {
   ambiguousPopups: number;
   noLegalRetryLogged: boolean;
   prediction: PredictionLog;
+  assignment: BattleAssignment | null;
   requestTimer?: NodeJS.Timeout;
   finalizeTimer?: NodeJS.Timeout;
   deliveryTimer?: NodeJS.Timeout;
@@ -124,6 +126,22 @@ export interface BattleDriverOptions {
   choiceWatchMs?: number;
   /** How long to wait for a replay popup. Tests use 0. */
   settleMs?: number;
+  /**
+   * Config for this battle. Absent keeps the process config.
+   * The same driver, timer, and choice watchdog serve every config.
+   */
+  routeBattle?: (battleId: string) => BattleAssignment;
+  onBattleFault?: (battleId: string, fault: 'invalid-move' | 'crash') => void;
+  onGame?: (record: LadderGameRecord) => void;
+}
+
+export interface BattleAssignment {
+  configId: string;
+  configHash: string;
+  configPath: string | null;
+  role: 'champion' | 'challenger';
+  share: number;
+  engine: EngineName;
 }
 
 const DELIVERY_ATTEMPTS = 3;
@@ -290,6 +308,7 @@ export class BattleDriver extends EventEmitter {
 
     if (/invalid choice/i.test(line)) {
       room.invalidChoices += 1;
+      this.options.onBattleFault?.(room.roomId, 'invalid-move');
       room.log.write({
         type: 'error',
         battleId: room.roomId,
@@ -353,18 +372,29 @@ export class BattleDriver extends EventEmitter {
       ambiguousPopups: 0,
       noLegalRetryLogged: false,
       prediction: new PredictionLog(),
+      assignment: null,
     };
+    const assignment = this.options.routeBattle?.(roomId) ?? null;
+    room.assignment = assignment;
     this.rooms.set(roomId, room);
     this.options.client.trackRoom(roomId);
-    this.options.decisions.openBattle(roomId);
+    this.options.decisions.openBattle(
+      roomId,
+      assignment ? { configPath: assignment.configPath, engine: assignment.engine } : undefined,
+    );
     log.write({
       type: 'game_start',
       battleId: roomId,
       format: this.options.format.id,
       username: this.options.username,
-      engine: this.options.engineName,
+      engine: assignment?.engine ?? this.options.engineName,
+      ...(assignment ? {
+        configId: assignment.configId,
+        role: assignment.role,
+        share: assignment.share,
+      } : {}),
     });
-    this.emit('battleStart', roomId);
+    this.emit('battleStart', roomId, assignment);
     // Partial test clients implement only the methods that battle uses.
     this.options.client.enableBattleTimer?.(roomId);
     return room;
@@ -412,8 +442,7 @@ export class BattleDriver extends EventEmitter {
     try {
       mismatches = this.reconcile(room, request);
     } catch (err) {
-      room.crashes += 1;
-      room.log.write({ type: 'crash', battleId: room.roomId, message: safeError(err) });
+      this.markCrash(room, safeError(err));
     }
 
     const tracking = room.tracker.tracking();
@@ -447,8 +476,7 @@ export class BattleDriver extends EventEmitter {
         decision = await this.options.decisions.decide(room.roomId, state, legal, budget, position);
       }
     } catch (err) {
-      room.crashes += 1;
-      room.log.write({ type: 'crash', battleId: room.roomId, message: safeError(err) });
+      this.markCrash(room, safeError(err));
       decision = {
         action: pickBestLegal(state, legal),
         score: null as number | null,
@@ -692,9 +720,8 @@ export class BattleDriver extends EventEmitter {
       sent = this.options.client.choose(intendedRoomId, choice);
     } catch (err) {
       if (this.stopped) return;
-      room.crashes += 1;
       const message = `send failed: ${safeError(err)}`;
-      room.log.write({ type: 'crash', kind: 'crash', battleId: room.roomId, message });
+      this.markCrash(room, message);
       this.failDelivery(room, choice, rqid, action, preview, attempt, 'send-threw', message, source, watchdogResends, intendedRoomId);
       return;
     }
@@ -915,6 +942,12 @@ export class BattleDriver extends EventEmitter {
     });
   }
 
+  private markCrash(room: RoomState, message: string): void {
+    room.crashes += 1;
+    room.log.write({ type: 'crash', kind: 'crash', battleId: room.roomId, message });
+    this.options.onBattleFault?.(room.roomId, 'crash');
+  }
+
   private markEnded(room: RoomState, line: string): void {
     if (room.ended) return;
     room.ended = true;
@@ -1098,12 +1131,14 @@ export class BattleDriver extends EventEmitter {
       gxe: room.gxe,
       latencies: room.latencies,
       minTimerMarginSec: room.minTimerMarginSec,
-      engine: this.options.engineName,
+      engine: room.assignment?.engine ?? this.options.engineName,
       ourSide: room.ourSide,
-      configId: this.options.configId ?? null,
-      configHash: this.options.configHash ?? null,
+      configId: room.assignment?.configId ?? this.options.configId ?? null,
+      configHash: room.assignment?.configHash ?? this.options.configHash ?? null,
       gitSha: this.options.gitSha ?? null,
-      configPath: this.options.configPath ?? undefined,
+      configPath: room.assignment?.configPath ?? this.options.configPath ?? undefined,
+      role: room.assignment?.role,
+      share: room.assignment?.share,
       concurrency: this.options.concurrency ?? 1,
       replayId: room.replay?.id ?? null,
       replayUrl: room.replay?.url ?? null,
@@ -1126,6 +1161,7 @@ export class BattleDriver extends EventEmitter {
       gxeSource: room.elo?.gxeSource ?? 'missing',
     });
     appendGameRecord(this.options.logDir, summary);
+    this.options.onGame?.(summary);
     this.options.decisions.closeBattle(room.roomId);
     await room.log.close();
     this.options.client.untrackRoom(room.roomId);

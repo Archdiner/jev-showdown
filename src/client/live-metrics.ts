@@ -25,6 +25,10 @@ interface OpenGame {
   latencies: number[];
   minTimer: number | null;
   throttles: number;
+  configId?: string | null;
+  configHash?: string | null;
+  role?: string | null;
+  share?: number | null;
 }
 
 /**
@@ -48,6 +52,7 @@ export class LiveMetrics {
       configId?: string | null;
       configHash?: string | null;
       gitSha?: string | null;
+      ab?: Array<{ configId: string; role: string; share: number }>;
     },
   ) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -55,8 +60,18 @@ export class LiveMetrics {
   }
 
   attach(driver: EventEmitter): void {
-    driver.on('battleStart', (battleId: string) => {
-      this.games.set(battleId, { latencies: [], minTimer: null, throttles: 0 });
+    driver.on('battleStart', (battleId: string, route?: {
+      configId?: string | null;
+      configHash?: string | null;
+      role?: string | null;
+      share?: number | null;
+    } | null) => {
+      const game = this.open(battleId);
+      if (!route) return;
+      if (route.configId) game.configId = route.configId;
+      if (route.configHash) game.configHash = route.configHash;
+      if (route.role) game.role = route.role;
+      if (typeof route.share === 'number') game.share = route.share;
     });
     driver.on('decision', (sample: DecisionObservation) => {
       this.recordDecision(sample);
@@ -79,7 +94,7 @@ export class LiveMetrics {
       secondsLeft: sample.secondsLeft,
       fallback: sample.fallback,
       concurrency: this.context.concurrency,
-    });
+    }, sample.battleId);
   }
 
   noteThrottle(message: string): void {
@@ -92,9 +107,20 @@ export class LiveMetrics {
     });
   }
 
-  noteGame(game: { battleId: string; turns: number; outcome: string }): void {
-    const stats = this.games.get(game.battleId) ?? { latencies: [], minTimer: null, throttles: 0 };
-    this.games.delete(game.battleId);
+  noteGame(game: {
+    battleId: string;
+    turns: number;
+    outcome: string;
+    configId?: string | null;
+    configHash?: string | null;
+    role?: string | null;
+    share?: number | null;
+  }): void {
+    const stats = this.games.get(game.battleId) ?? this.open(game.battleId);
+    if (game.configId) stats.configId = game.configId;
+    if (game.configHash) stats.configHash = game.configHash;
+    if (game.role) stats.role = game.role;
+    if (typeof game.share === 'number') stats.share = game.share;
     this.write({
       type: 'game',
       battleId: game.battleId,
@@ -106,7 +132,8 @@ export class LiveMetrics {
       latencyP99Ms: percentile(stats.latencies, 99),
       minTimerMarginSec: stats.minTimer,
       throttleEvents: stats.throttles,
-    });
+    }, game.battleId);
+    this.games.delete(game.battleId);
   }
 
   finish(input: { games: number; requested: number }): void {
@@ -121,6 +148,7 @@ export class LiveMetrics {
       minTimerMarginSec: this.minTimer,
       throttleEvents: this.throttles,
       concurrency: this.context.concurrency,
+      ...(this.context.ab ? { ab: this.context.ab } : {}),
     });
   }
 
@@ -133,20 +161,29 @@ export class LiveMetrics {
   }
 
   private open(battleId: string): OpenGame {
-    const game = { latencies: [], minTimer: null, throttles: 0 };
+    const existing = this.games.get(battleId);
+    if (existing) return existing;
+    const game: OpenGame = { latencies: [], minTimer: null, throttles: 0 };
     this.games.set(battleId, game);
     return game;
   }
 
-  private write(event: Record<string, unknown>): void {
+  private write(event: Record<string, unknown>, battleId?: string): void {
+    const route = battleId ? this.games.get(battleId) : undefined;
+    const configId = route?.configId || this.context.configId;
+    const configHash = route?.configHash || this.context.configHash;
+    const role = route?.role;
+    const share = route?.share;
     const line = {
       v: LIVE_METRICS_VERSION,
       ts: Date.now(),
       runId: this.context.runId,
       engine: this.context.engine,
-      ...(this.context.configId ? { configId: this.context.configId } : {}),
-      ...(this.context.configHash ? { configHash: this.context.configHash } : {}),
+      ...(configId ? { configId } : {}),
+      ...(configHash ? { configHash } : {}),
       ...(this.context.gitSha ? { gitSha: this.context.gitSha } : {}),
+      ...(role ? { role } : {}),
+      ...(typeof share === 'number' ? { share } : {}),
       ...event,
     };
     this.stream.write(`${JSON.stringify(line)}\n`);

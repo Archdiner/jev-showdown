@@ -72,6 +72,10 @@ export interface LadderGameRecord {
   configId: string | null;
   configHash: string | null;
   gitSha: string | null;
+  /** Set when the ladder routed this battle. Absent on older rows and on `ops live`. */
+  role?: 'champion' | 'challenger';
+  /** Share of new battles this config was given, as a fraction in (0, 1]. */
+  share?: number;
   concurrency: number;
   replayId: string | null;
   replayUrl: string | null;
@@ -287,6 +291,8 @@ export interface LadderGameInput {
   configId: string | null;
   configHash: string | null;
   gitSha: string | null;
+  role?: 'champion' | 'challenger';
+  share?: number;
   concurrency: number;
   replayId: string | null;
   replayUrl: string | null;
@@ -346,6 +352,8 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     configId: input.configId,
     configHash: input.configHash,
     gitSha: input.gitSha,
+    ...(input.role ? { role: input.role } : {}),
+    ...(typeof input.share === 'number' ? { share: input.share } : {}),
     concurrency: input.concurrency,
     replayId: input.replayId ?? replayIdFromBattle(input.battleId),
     replayUrl: input.replayUrl,
