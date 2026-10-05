@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { filterGames, ratingBand, reportGames } from './games.js';
 import { resolvePaths } from './paths.js';
 import { classifyLoss, normalizeEndReason, parseLadderLine, parseLog, type GameRecord } from './parse.js';
+import { GraphDB } from '../graph/db.js';
 import { startDashboard } from './server.js';
 import { buildSnapshot } from './snapshot.js';
 
@@ -104,7 +105,7 @@ describe('game feed parsers', () => {
     expect(rich.ratingBefore).toBe(1200);
     expect(rich.ratingAfter).toBe(1184);
     expect(rich.replayUrl).toBe('https://replay.pokemonshowdown.com/gen9randombattle-900');
-    expect(rich.latency).toEqual({ p50: 180, p95: 900, max: 1500 });
+    expect(rich.latency).toEqual({ p50: 180, p95: 900, p99: null, max: 1500 });
     expect(rich.configHash).toBe('abc');
     expect(rich.gitSha).toBe('87b268f');
     expect(rich.concurrency).toBe(2);
@@ -138,6 +139,12 @@ describe('game feed parsers', () => {
     expect(ids).toContain('battle-rich-1');
     expect(ids).toContain('battle-gen9randombattle-9');
     expect(ids).toContain('battle-1');
+    const merged = snapshot.games.recent.find(row => row.battleId === 'battle-gen9randombattle-9');
+    expect(merged?.opponent).toBe('ace');
+    expect(merged?.latency).toEqual({ p50: 80, p95: 120, p99: 200, max: null });
+    expect(merged?.minTimerSeconds).toBe(12);
+    expect(snapshot.games.recent.filter(row => row.battleId === 'battle-gen9randombattle-9')).toHaveLength(1);
+    expect(snapshot.ops.reportText).toMatch(/graph\.db/);
     const rich = snapshot.games.recent.find(row => row.battleId === 'battle-rich-1');
     expect(rich?.replayUrl).toContain('gen9randombattle-900');
     expect(rich?.lossClass).toBe('timer-disconnect');
@@ -151,6 +158,31 @@ describe('game feed parsers', () => {
     expect(snapshot.ops.facilities.find(row => row.name === 'live')?.health).toBe('ok');
     expect(snapshot.gaps.some(gap => gap.id === 'malformed')).toBe(true);
     expect(snapshot.runs.logs.some(log => log.openBattles.length > 0)).toBe(false);
+  });
+
+  it('uses ops status and the daily report when graph.db exists', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dash-ops-'));
+    const now = 1_700_000_000_000;
+    const ops = path.join(dir, 'ops');
+    fs.mkdirSync(ops);
+    fs.mkdirSync(path.join(dir, 'ladder'));
+    fs.mkdirSync(path.join(dir, 'search'));
+    fs.writeFileSync(path.join(ops, 'heartbeats.jsonl'), `${JSON.stringify({ facility: 'live', pid: 1, ts: now, status: 'ok', detail: 'up' })}\n`);
+    fs.writeFileSync(path.join(ops, 'live-games.jsonl'), `${JSON.stringify({ kind: 'live-game', id: 'b', ts: now, configId: 'champion', winner: 'win', rating: 1200, gxe: 55 })}\n`);
+    const graph = path.join(dir, 'graph.db');
+    new GraphDB(graph).close();
+    const paths = resolvePaths({
+      OPS_DIR: ops,
+      GRAPH_DB: graph,
+      LADDER_LOG_DIR: path.join(dir, 'ladder'),
+      SEARCH_LOG_DIR: path.join(dir, 'search'),
+    }, dir);
+    const snapshot = buildSnapshot(paths, now);
+    expect(snapshot.ops.statusText).toContain('queue 0');
+    expect(snapshot.ops.statusText).toContain('champion');
+    expect(snapshot.ops.statusText).toContain('open regressions 0');
+    expect(snapshot.ops.reportText).toContain('Rating moved flat from 1200 to 1200 across 1 live games.');
+    expect(snapshot.ops.reportText).toContain('The factory queue is empty.');
   });
 
   it('reports missing sources on an empty directory', () => {

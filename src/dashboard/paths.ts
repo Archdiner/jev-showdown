@@ -10,6 +10,7 @@ export interface DashboardPaths {
   opsDir: string;
   ladderLogDir: string;
   searchLogDir: string;
+  graphDb: string;
 }
 
 interface FileConfig {
@@ -36,6 +37,11 @@ export function resolvePaths(env: NodeJS.ProcessEnv, cwd: string): DashboardPath
     }
   }
   const fixture = env.DASHBOARD_FIXTURE_DIR ? expand(env.DASHBOARD_FIXTURE_DIR, cwd) : '';
+  const graphFor = (opsDir: string) => env.GRAPH_DB
+    ? expand(env.GRAPH_DB, cwd)
+    : path.resolve(opsDir) === path.resolve(cwd, 'state', 'ops')
+      ? path.join(cwd, 'state', 'graph.db')
+      : path.join(opsDir, 'graph.db');
   const searchDefault = env.JEV_SEARCH_DIR
     ? path.join(expand(env.JEV_SEARCH_DIR, cwd), env.JEV_SEARCH_DIR.replace(/\\/g, '/').endsWith('live-runs') ? '' : 'live-runs')
     : expand(env.SEARCH_LOG_DIR || file.searchLogDir || '~/jev-search/live-runs', cwd);
@@ -48,15 +54,18 @@ export function resolvePaths(env: NodeJS.ProcessEnv, cwd: string): DashboardPath
       opsDir: path.join(fixture, 'ops'),
       ladderLogDir: path.join(fixture, 'ladder'),
       searchLogDir: path.join(fixture, 'search'),
+      graphDb: env.GRAPH_DB ? expand(env.GRAPH_DB, cwd) : path.join(fixture, 'graph.db'),
     };
   }
+  const opsDir = expand(env.OPS_DIR || file.opsDir || 'state/ops', cwd);
   return {
     cwd,
     host: env.DASHBOARD_HOST || file.host || '127.0.0.1',
     port: Number(env.DASHBOARD_PORT || file.port || 8787),
     fixtureMode: false,
-    opsDir: expand(env.OPS_DIR || file.opsDir || 'state/ops', cwd),
+    opsDir,
     ladderLogDir: expand(env.LADDER_LOG_DIR || file.ladderLogDir || 'logs/ladder', cwd),
     searchLogDir: searchDefault,
+    graphDb: graphFor(opsDir),
   };
 }

@@ -14,6 +14,7 @@ export type LossClass = 'strategy' | 'timer-disconnect' | 'crash' | 'unclassifie
 export interface LatencySummary {
   p50: number | null;
   p95: number | null;
+  p99: number | null;
   max: number | null;
 }
 
@@ -119,11 +120,12 @@ export function classifyLoss(outcome: GameRecord['outcome'], endReason: EndReaso
 
 function latencyOf(row: Record<string, unknown>): LatencySummary | null {
   const box = (row.latency && typeof row.latency === 'object' ? row.latency : row.decisionLatency) as Record<string, unknown> | null;
-  const p50 = num(box?.p50) ?? num(row.latencyP50);
-  const p95 = num(box?.p95) ?? num(row.latencyP95);
+  const p50 = num(box?.p50) ?? num(row.latencyP50) ?? num(row.latencyP50Ms);
+  const p95 = num(box?.p95) ?? num(row.latencyP95) ?? num(row.latencyP95Ms);
+  const p99 = num(box?.p99) ?? num(row.latencyP99) ?? num(row.latencyP99Ms);
   const max = num(box?.max) ?? num(row.latencyMax);
-  if (p50 === null && p95 === null && max === null) return null;
-  return { p50, p95, max };
+  if (p50 === null && p95 === null && p99 === null && max === null) return null;
+  return { p50, p95, p99, max };
 }
 
 function finishGame(fields: Omit<GameRecord, 'elo' | 'lossClass' | 'ratingAfter'> & { ratingAfter?: number | null; elo?: number | null }): GameRecord {
@@ -205,7 +207,7 @@ export function parseJsonRecord(row: Record<string, unknown>, hint: { source: st
       durationMs: num(row.durationMs) ?? num(row.duration) ?? (durationSec === null ? null : durationSec * 1000),
       turns: num(row.turns),
       latency: latencyOf(row),
-      minTimerSeconds: num(row.minTimerSeconds) ?? num(row.minSecondsLeft) ?? num(row.minTimerLeft),
+      minTimerSeconds: num(row.minTimerSeconds) ?? num(row.minSecondsLeft) ?? num(row.minTimerLeft) ?? num(row.minTimerMarginSec),
       configId: str(row.configId) || engine,
       configPath: str(row.configPath),
       configHash: str(row.configHash) || str(row.config_hash),

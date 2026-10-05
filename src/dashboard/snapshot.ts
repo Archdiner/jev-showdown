@@ -1,7 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import type { OpsPaths } from '../ops/paths.js';
+import { dailyReport } from '../ops/report.js';
+import { statusReport } from '../ops/status.js';
 import type { DashboardPaths } from './paths.js';
-import { parseLog, parseSummary, runnerFromName, type GameRecord, type Heartbeat } from './parse.js';
+import { classifyLoss, parseLog, parseSummary, runnerFromName, type GameRecord, type Heartbeat, type LatencySummary } from './parse.js';
 import { reportGames, type GameReport } from './games.js';
 import { sprt, wilson } from './stats.js';
 
@@ -45,6 +48,7 @@ export interface Snapshot {
   ops: {
     available: boolean;
     statusText: string;
+    reportText: string;
     facilities: Array<{ name: string; health: string; ageMs: number | null; pid: number | null; detail: string }>;
   };
   runs: {
@@ -52,7 +56,7 @@ export interface Snapshot {
   };
   metrics: {
     variants: VariantRow[];
-    regressions: { available: false; note: string };
+    regressions: { available: boolean; note: string };
   };
   agents: { available: false; path: string; note: string };
 }
@@ -88,16 +92,97 @@ function listFiles(dir: string): string[] {
   return out.sort();
 }
 
+function pick<T>(left: T | null, right: T | null): T | null {
+  return left !== null ? left : right;
+}
+
+function richness(game: GameRecord): number {
+  return (game.opponent ? 4 : 0)
+    + (game.replayUrl ? 2 : 0)
+    + (game.ratingAfter !== null ? 2 : 0)
+    + (game.endReason ? 2 : 0)
+    + (game.latency ? 1 : 0)
+    + (game.minTimerSeconds !== null ? 1 : 0);
+}
+
+function mergeLatency(left: LatencySummary | null, right: LatencySummary | null): LatencySummary | null {
+  if (!left) return right;
+  if (!right) return left;
+  return {
+    p50: pick(left.p50, right.p50),
+    p95: pick(left.p95, right.p95),
+    p99: pick(left.p99, right.p99),
+    max: pick(left.max, right.max),
+  };
+}
+
+/** One row per battle. A metrics.jsonl `game` line fills latency onto the ladder result with the same id. */
 function dedupe(games: GameRecord[]): GameRecord[] {
-  const seen = new Set<string>();
-  return games.filter(game => {
-    const key = game.battleId
-      ? `id:${game.battleId}`
-      : `line:${game.source}:${game.progress ?? ''}:${game.opponent ?? ''}:${game.outcome}:${game.turns ?? ''}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const byId = new Map<string, GameRecord>();
+  const lines: GameRecord[] = [];
+  const seenLines = new Set<string>();
+  for (const game of games) {
+    if (game.battleId) {
+      const prev = byId.get(game.battleId);
+      byId.set(game.battleId, prev ? combine(prev, game) : game);
+      continue;
+    }
+    const key = `${game.source}:${game.progress ?? ''}:${game.opponent ?? ''}:${game.outcome}:${game.turns ?? ''}`;
+    if (seenLines.has(key)) continue;
+    seenLines.add(key);
+    lines.push(game);
+  }
+  return [...byId.values(), ...lines];
+}
+
+function combine(a: GameRecord, b: GameRecord): GameRecord {
+  const primary = richness(a) >= richness(b) ? a : b;
+  const other = primary === a ? b : a;
+  const endReason = pick(primary.endReason, other.endReason);
+  const outcome = primary.outcome;
+  return {
+    ...primary,
+    ts: Math.max(a.ts, b.ts),
+    outcome,
+    opponent: pick(primary.opponent, other.opponent),
+    opponentRating: pick(primary.opponentRating, other.opponentRating),
+    ratingBefore: pick(primary.ratingBefore, other.ratingBefore),
+    ratingAfter: pick(primary.ratingAfter, other.ratingAfter),
+    elo: pick(primary.elo, other.elo),
+    gxe: pick(primary.gxe, other.gxe),
+    replayUrl: pick(primary.replayUrl, other.replayUrl),
+    endReason,
+    lossClass: classifyLoss(outcome, endReason),
+    durationMs: pick(primary.durationMs, other.durationMs),
+    turns: pick(primary.turns, other.turns),
+    latency: mergeLatency(primary.latency, other.latency),
+    minTimerSeconds: pick(primary.minTimerSeconds, other.minTimerSeconds),
+    configId: pick(primary.configId, other.configId),
+    configPath: pick(primary.configPath, other.configPath),
+    configHash: pick(primary.configHash, other.configHash),
+    engine: pick(primary.engine, other.engine),
+    gitSha: pick(primary.gitSha, other.gitSha),
+    concurrency: pick(primary.concurrency, other.concurrency),
+    invalid: pick(primary.invalid, other.invalid),
+    crashes: pick(primary.crashes, other.crashes),
+    fallbacks: pick(primary.fallbacks, other.fallbacks),
+  };
+}
+
+function opsBundle(root: string, graph: string): OpsPaths {
+  return {
+    root,
+    graph,
+    heartbeats: path.join(root, 'heartbeats.jsonl'),
+    liveGames: path.join(root, 'live-games.jsonl'),
+    circuits: path.join(root, 'circuits.json'),
+    analystOffset: path.join(root, 'analyst.offset'),
+    seenGames: path.join(root, 'analyst-seen.json'),
+    regressionSuite: path.join(root, 'regression-suite.jsonl'),
+    priors: path.join(root, 'behavior.json'),
+    pool: path.join(root, 'mined-pool.json'),
+    variants: path.join(root, 'variants.json'),
+  };
 }
 
 function variantsOf(games: GameRecord[]): VariantRow[] {
@@ -262,12 +347,23 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
   };
   const latestElo = orderedAll.find(game => game.elo !== null)?.elo ?? null;
   const latestGxe = orderedAll.find(game => game.gxe !== null)?.gxe ?? null;
-  const statusText = [
+  let statusText = [
     'ops status',
     ...facilities.map(facility => `  ${facility.name.padEnd(12)} ${facility.health.padEnd(14)} ${facility.ageMs === null ? 'never' : `${Math.round(facility.ageMs / 1000)}s`}`),
     `games ${record.wins}-${record.losses}-${record.ties}`,
     `rating ${latestElo ?? 'n/a'}`,
   ].join('\n');
+  let reportText = 'Daily ops report needs state/graph.db, the same database npm run ops -- report reads. Heartbeats and live-games.jsonl are still shown above.';
+  const graphReady = fs.existsSync(paths.graphDb);
+  if (graphReady) {
+    try {
+      const bundle = opsBundle(paths.opsDir, paths.graphDb);
+      statusText = statusReport(bundle, now);
+      reportText = dailyReport(bundle, now);
+    } catch (error) {
+      reportText = `ops status failed: ${error instanceof Error ? error.message : 'unknown error'}`;
+    }
+  }
 
   const ordered = orderedAll.slice(0, 200);
   const gameView = {
@@ -286,13 +382,15 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
     sources,
     gaps,
     games: gameView,
-    ops: { available: fs.existsSync(heartbeatsPath) || fs.existsSync(liveGamesPath), statusText, facilities },
+    ops: { available: fs.existsSync(heartbeatsPath) || fs.existsSync(liveGamesPath) || graphReady, statusText, reportText, facilities },
     runs: { logs },
     metrics: {
       variants,
       regressions: {
-        available: false,
-        note: 'Per-situation regressions are not loaded yet. Expected later: graph Regression nodes or state/ops/regression-suite.jsonl.',
+        available: graphReady,
+        note: graphReady
+          ? 'Open regressions are the count in ops status, from Learning nodes with opsKind regression.'
+          : 'Per-situation regressions need state/graph.db. ops status counts Learning nodes with opsKind regression.',
       },
     },
     agents: {

@@ -1,6 +1,7 @@
 const endReason = document.querySelector('#endReason');
 const band = document.querySelector('#band');
 const meta = document.querySelector('#meta');
+const ops = document.querySelector('#ops');
 const rates = document.querySelector('#rates');
 const filtered = document.querySelector('#filtered');
 const rows = document.querySelector('#rows');
@@ -39,7 +40,8 @@ function cell(value) {
   return td;
 }
 
-function render(body) {
+function render(body, status) {
+  if (status && status.ops) ops.textContent = `${status.ops.statusText}\n\n${status.ops.reportText}`;
   const games = body.games;
   const report = games.report;
   meta.textContent = `${body.fixtureMode ? 'Fixture data. ' : ''}${games.record.games} games, rating ${text(games.elo)}. Strategy excludes timer, disconnect, and crash. Ladder lines have no end reason, so they stay in strategy and their losses are also counted as unclassified (${report.unclassifiedLosses}).`;
@@ -55,7 +57,7 @@ function render(body) {
   if (games.filtered.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 18;
+    td.colSpan = 19;
     td.textContent = 'No games in this filter. Per-game JSONL is used when present; otherwise [ladder] N/M lines are shown without an end reason.';
     tr.append(td);
     rows.append(tr);
@@ -87,6 +89,7 @@ function render(body) {
       cell(duration(game.durationMs)),
       cell(game.latency && game.latency.p50),
       cell(game.latency && game.latency.p95),
+      cell(game.latency && game.latency.p99),
       cell(game.latency && game.latency.max),
       cell(game.minTimerSeconds),
       cell(game.engine),
@@ -101,12 +104,15 @@ function render(body) {
 
 async function load() {
   const params = new URLSearchParams({ endReason: endReason.value, band: band.value });
-  const response = await fetch(`/api/games?${params}`);
-  if (!response.ok) {
-    meta.textContent = `Games API returned ${response.status}.`;
+  const [gamesResponse, statusResponse] = await Promise.all([
+    fetch(`/api/games?${params}`),
+    fetch('/api/status'),
+  ]);
+  if (!gamesResponse.ok) {
+    meta.textContent = `Games API returned ${gamesResponse.status}.`;
     return;
   }
-  render(await response.json());
+  render(await gamesResponse.json(), statusResponse.ok ? await statusResponse.json() : null);
 }
 
 endReason.addEventListener('change', load);
