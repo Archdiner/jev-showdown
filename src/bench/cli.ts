@@ -1,3 +1,4 @@
+import { informationMode, type InformationMode } from '../client/hidden-info.js';
 import { specForAlias } from '../config/aliases.js';
 import { BenchPlayer, GameJob, GameResult, playerId } from './game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
@@ -31,7 +32,20 @@ function policy(name: string): BenchPlayer {
   return specForAlias(name, 'selfplay');
 }
 
-function pairedJobs(pairs: number, a: BenchPlayer, b: BenchPlayer, seedStart: number): GameJob[] {
+function informationArg(): InformationMode {
+  const raw = arg('information', '');
+  if (!raw) return informationMode();
+  if (raw !== 'hidden' && raw !== 'full') throw new Error('--information must be hidden or full');
+  return raw;
+}
+
+function pairedJobs(
+  pairs: number,
+  a: BenchPlayer,
+  b: BenchPlayer,
+  seedStart: number,
+  information: InformationMode,
+): GameJob[] {
   const jobs: GameJob[] = [];
   for (let i = 0; i < pairs; i++) {
     const seed = seedStart + i;
@@ -43,6 +57,7 @@ function pairedJobs(pairs: number, a: BenchPlayer, b: BenchPlayer, seedStart: nu
       p2Team: teams.p2,
       p1: a,
       p2: b,
+      information,
     });
     jobs.push({
       index: jobs.length,
@@ -51,6 +66,7 @@ function pairedJobs(pairs: number, a: BenchPlayer, b: BenchPlayer, seedStart: nu
       p2Team: teams.p2,
       p1: b,
       p2: a,
+      information,
     });
   }
   return jobs;
@@ -146,17 +162,19 @@ async function main() {
   const a = policy(arg('a', 'exact'));
   const b = policy(arg('b', 'random'));
   const seed = Number(arg('seed', '1'));
-  console.log(`Paired benchmark: ${pairs} seeds x 2 sides`);
+  const information = informationArg();
+  console.log(`Paired benchmark: ${pairs} seeds x 2 sides, information=${information}`);
   console.log(`A: ${JSON.stringify(a)}`);
   console.log(`B: ${JSON.stringify(b)}`);
-  const jobs = pairedJobs(pairs, a, b, seed);
+  const jobs = pairedJobs(pairs, a, b, seed, information);
   const started = Date.now();
   const results = await runGamesParallel(jobs);
   const summary = scoreCandidate(results, jobs, a);
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   console.log('\n=== Result ===');
   console.log(`A win rate: ${(summary.winRate * 100).toFixed(1)}% (${summary.wins}W-${summary.losses}L-${summary.ties}T / ${summary.games})`);
-  console.log(`invalid=${summary.invalid} crashes=${summary.crashes} p99=${summary.p99ms.toFixed(0)}ms max=${summary.maxMs.toFixed(0)}ms`);
+  const viewMiss = results.reduce((sum, game) => sum + game.p1ViewMiss + game.p2ViewMiss, 0);
+  console.log(`invalid=${summary.invalid} crashes=${summary.crashes} viewMiss=${viewMiss} p99=${summary.p99ms.toFixed(0)}ms max=${summary.maxMs.toFixed(0)}ms`);
   const play = playRate(results, jobs, a);
   console.log(`switch rate ${(play.switchRate * 100).toFixed(1)}% (${play.switches}/${play.decisions}) predicted-switch punish ${(play.punishRate * 100).toFixed(1)}% (${play.answered}/${play.predicted})`);
   console.log(`elapsed ${seconds}s`);

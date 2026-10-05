@@ -10,6 +10,7 @@ import {
   startRandomBattle,
   type SideId,
 } from '../engine/exact/battle-utils.js';
+import { informationMode, ladderDecisionBattle, type InformationMode } from '../client/hidden-info.js';
 import { decide, type PolicySpec } from '../engine/exact/policies.js';
 
 /** A config bot (buildBot) or an engine policy (exact / switch / random). */
@@ -24,6 +25,12 @@ export interface GameJob {
   p2: BenchPlayer;
   logDecisions?: boolean;
   logProtocol?: boolean;
+  /**
+   * `hidden` (the default) is the ladder client: each side searches only what
+   * a Showdown request and the public protocol would show. `full` is the old
+   * omniscient battle. `JEV_INFORMATION` sets the default when this is omitted.
+   */
+  information?: InformationMode;
 }
 
 export interface SideSituations {
@@ -45,6 +52,10 @@ export interface GameResult {
   turns: number;
   p1Invalid: number;
   p2Invalid: number;
+  /** Hidden-info rebuilds that failed, so the side played its first legal choice. */
+  p1ViewMiss: number;
+  p2ViewMiss: number;
+  information: InformationMode;
   crashed: boolean;
   error?: string;
   p1TurnTimes: number[];
@@ -125,6 +136,9 @@ export async function runGame(job: GameJob): Promise<GameResult> {
     turns: 0,
     p1Invalid: 0,
     p2Invalid: 0,
+    p1ViewMiss: 0,
+    p2ViewMiss: 0,
+    information: informationMode(job.information),
     crashed: false,
     p1TurnTimes: [],
     p2TurnTimes: [],
@@ -162,7 +176,8 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         break;
       }
       if (p1Legal.length) {
-        const decision = await choose(p1, battle, 'p1', rng, gameId, job.seed);
+        const decision = await chooseSeen(p1, battle, 'p1', rng, gameId, job.seed, result.information, p1Legal);
+        if (decision.viewMiss) result.p1ViewMiss++;
         result.p1TurnTimes.push(decision.ms);
         notePlay(result, 'p1', p1Legal, decision);
         if (!p1Legal.includes(decision.choice) && decision.choice !== 'default') result.p1Invalid++;
@@ -177,7 +192,8 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         });
       }
       if (!battle.ended && p2Legal.length) {
-        const decision = await choose(p2, battle, 'p2', rng, gameId, job.seed);
+        const decision = await chooseSeen(p2, battle, 'p2', rng, gameId, job.seed, result.information, p2Legal);
+        if (decision.viewMiss) result.p2ViewMiss++;
         result.p2TurnTimes.push(decision.ms);
         notePlay(result, 'p2', p2Legal, decision);
         if (!p2Legal.includes(decision.choice) && decision.choice !== 'default') result.p2Invalid++;
@@ -214,6 +230,25 @@ export async function runGame(job: GameJob): Promise<GameResult> {
     situations: { ...result.p2Situations },
   });
   return result;
+}
+
+async function chooseSeen(
+  player: Opened,
+  battle: Parameters<typeof legalChoices>[0],
+  side: SideId,
+  rng: PRNG,
+  gameId: string,
+  seed: number,
+  information: InformationMode,
+  legal: string[],
+): Promise<Awaited<ReturnType<typeof choose>> & { viewMiss?: boolean }> {
+  if (information === 'full') return choose(player, battle, side, rng, gameId, seed);
+  if (legal.length === 1 && legal[0] === 'default') {
+    return { choice: 'default', ms: 0, configId: player.id };
+  }
+  const viewed = ladderDecisionBattle(battle, side);
+  if (!viewed) return { choice: legal[0] || 'default', ms: 0, configId: player.id, viewMiss: true };
+  return choose(player, viewed, 'p1', rng, gameId, seed);
 }
 
 async function choose(
