@@ -3,7 +3,8 @@ import { dataLoader } from '../data/data-loader.js';
 
 export class BeliefTracker {
   private beliefs: Map<string, PokemonBelief> = new Map();
-  private stats: RandbatsStats;
+  /** Randbats table this tracker conditions on. Injected in tests so they never touch data/gen9-stats.json. */
+  readonly stats: RandbatsStats;
 
   constructor(stats?: RandbatsStats) {
     this.stats = stats ?? dataLoader.getStats();

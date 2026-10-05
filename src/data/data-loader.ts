@@ -11,7 +11,7 @@ export class DataLoader {
   private loaded = false;
   private format?: Format;
 
-  constructor(private readonly dataDir?: string) {}
+  private constructor() {}
 
   static getInstance(): DataLoader {
     if (!DataLoader.instance) {
@@ -21,20 +21,34 @@ export class DataLoader {
   }
 
   /**
+   * Drop the singleton cache. Tests use this with a temp directory so they
+   * never write `data/gen9-stats.json`.
+   */
+  static resetForTests(): void {
+    const current = DataLoader.instance;
+    if (!current) return;
+    current.sets = {};
+    current.stats = {};
+    current.loaded = false;
+    current.format = undefined;
+  }
+
+  /**
    * Load data with freshness checking.
    * Automatically refreshes if data is stale.
+   * `dataDir` skips the refresh and reads that directory instead of `data/`.
    */
-  async load(format?: Format): Promise<void> {
+  async load(format?: Format, options?: { dataDir?: string }): Promise<void> {
     if (this.loaded) return;
 
     this.format = format;
     
-    const dataDir = this.dataDir ?? path.join(process.cwd(), 'data');
+    const dataDir = options?.dataDir ?? path.join(process.cwd(), 'data');
     const setsPath = path.join(dataDir, 'gen9-sets.json');
     const statsPath = path.join(dataDir, 'gen9-stats.json');
 
-    // Check freshness if format provided
-    if (format) {
+    // Check freshness if format provided. A test directory is read as-is.
+    if (format && !options?.dataDir) {
       try {
         const freshnessResult = await freshnessChecker.checkAndRefresh({
           setsUrl: format.dataSources.setsUrl,

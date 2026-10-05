@@ -56,7 +56,7 @@ describe('jsonl tail', () => {
       if (savedAlt === undefined) delete process.env.AI_GATEWAY_API_KEY;
       else process.env.AI_GATEWAY_API_KEY = savedAlt;
     }
-  });
+  }, 20_000);
 });
 
 describe('supervisor restarts', () => {

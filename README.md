@@ -651,8 +651,10 @@ npm run calibration -- --log-dir logs/ladder
 
 Ladder Elo and GXE come from the server line, or they stay null.
 
-- The HTML popup `rating: N → M` plus `(GXE: …)` is the public-ladder form. GXE is omitted on some lines; the record then has `gxe: null` and `gxeSource: "missing"`.
-- A local `|rating|elo` or `|rating|elo|gxe` line is the other form. A missing number stays null.
+- The HTML line `rating: N → M` plus `(GXE: …)` is the public-ladder form. It counts only when it is in that battle's room, or when a popup names that battle id. A popup that does not name a battle is not copied onto whichever room just ended. `/rank` is not written onto a game. GXE is omitted on some lines; the record then has `gxe: null` and `gxeSource: "missing"`.
+- A local `|rating|elo` or `|rating|elo|gxe` line is the other form. It has no `before`, so `eloAfter` stays null. The `|player|` rating is still stored as `eloBefore`.
+- `eloAfter` is kept only when the same update has `before` and `after`, and a win rose or a loss fell. Otherwise `eloAfter` is null. `eloDeltaConsistent` is the check an incident loop can run on a row: null on either side is unknown, not a failure.
+- An A/B-routed battle stores that assignment's `configId`, `role`, and `share` on the same row. A rating from another concurrent arm is not copied onto it.
 - Nothing in this client writes Elo `1000` or GXE `50` as a stand-in. The per-battle JSONL (`logs/ladder/{user}-{room}.jsonl`) gets a `rating` event when a line parses, and the `result` event copies `eloBefore`, `eloAfter`, `gxe`, and `gxeSource`. `fabricated` is always `false`. `ops live` stores the same nulls on its live-game row. A missing Elo is left out of the circuit-breaker window.
 
 ## Choice delivery and timers
