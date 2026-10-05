@@ -11,6 +11,7 @@ import {
   hpEval,
   isTeraChoice,
   legalChoices,
+  moveSlotIndex,
   otherSide,
   playChoices,
   snapshot,
@@ -124,7 +125,7 @@ async function hybridSearch(
 
   const rootLegal = appendTeraChoices(viewed, side, legalChoices(viewed, side));
   let scores = [...totals.entries()]
-    .filter(([choice]) => rootLegal.includes(choice) || rootLegal.length === 0)
+    .filter(([choice]) => rootLegal.includes(choice))
     .map(([choice, slot]) => ({
       choice,
       score: slot.weight > 0 ? slot.score / slot.weight : slot.score,
@@ -153,7 +154,7 @@ async function hybridSearch(
       ledger.costUsd += judged.costUsd;
       if (judged.timeout) ledger.timeouts += 1;
       if (judged.failed) ledger.cooldownUntil = Date.now() + 8000;
-      if (judged.choice && (rootLegal.includes(judged.choice) || rootLegal.length === 0)) choice = judged.choice;
+      if (judged.choice && rootLegal.includes(judged.choice)) choice = judged.choice;
     } finally {
       client.endTurn();
     }
@@ -258,7 +259,7 @@ function capReplies(battle: Battle, side: SideId, cap: number, style: OpponentSt
   const attacks: string[] = [];
   const active = battle.getSide(side).active[0];
   for (const choice of moves) {
-    const index = Number(choice.slice(5)) - 1;
+    const index = moveSlotIndex(choice);
     const id = active?.moveSlots[index]?.id || '';
     const category = Dex.moves.get(id).category;
     if (category === 'Status') status.push(choice);
