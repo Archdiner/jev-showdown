@@ -2,7 +2,7 @@
 
 ## A sent choice is resent until the turn moves
 
-`/choose` returning true is not the server applying the move. While that choice is still the current request, a `|inactive|` or `Time left:` line for us with no new `|turn|` sends the same choice and the same rqid again, to that battle's room. A choice whose rqid is no longer the room's request is not sent. One websocket frame can carry several battles; each `>roomid` switches the room, so a later battle's `|request|` is not answered in the earlier room. A replay popup names the battle in its URL, including the password after the id, and is not written onto a different open battle. A finished battle ignores later lines, so it does not log a second `game_start`.
+`/choose` returning true is not the server applying the move. While that choice is still the current request, a `|inactive|` or `Time left:` line for us with no new `|turn|` sends the same choice and the same rqid again, to that battle's room. A choice whose rqid is no longer the room's request is not sent. One websocket frame can carry several battles; each `>roomid` switches the room, so a later battle's `|request|` is not answered in the earlier room. A replay popup names the battle in its URL, including the password after the id, and is not written onto a different open battle or onto whichever room was active most recently. A popup line that names another battle is dropped instead of being stored on the room that happened to receive it. A finished battle ignores later lines, so it does not log a second `game_start`.
 
 ## Self-play uses the ladder's hidden information
 
