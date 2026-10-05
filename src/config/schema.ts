@@ -61,6 +61,9 @@ export const SearchParamsSchema = z.object({
   variancePenalty: z.number().nonnegative().default(0),
   opponentModel: z.enum(['max-damage', 'uniform']).default('max-damage'),
   evalMode: z.enum(['hp', 'full']).default('hp'),
+  tera: z.boolean().default(false),
+  progress: z.boolean().default(false),
+  foePrior: z.boolean().default(false),
 }).strict();
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
 

@@ -1,4 +1,4 @@
-name: stacked-quickwins-fitted
+name: quickwins-only
 extends: ./champion.yaml
 search:
   id: greedy-1ply
@@ -7,5 +7,3 @@ search:
     tera: true
     progress: true
     foePrior: true
-evaluator:
-  id: fitted-team

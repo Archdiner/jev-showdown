@@ -166,9 +166,9 @@ export function exactConfig(
     errorAsLoss: false, 
     samples: params.samples, 
     deadlineMs,
-    tera: true,
-    progress: true,
-    foePrior: true,
+    tera: params.tera,
+    progress: params.progress,
+    foePrior: params.foePrior,
   };
 }
 
