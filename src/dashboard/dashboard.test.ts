@@ -41,6 +41,7 @@ function game(partial: Partial<GameRecord> & Pick<GameRecord, 'outcome'>): GameR
     fallbacks: null,
     source: 'test',
     progress: null,
+    calibration: null,
     ...partial,
     lossClass: partial.lossClass ?? classifyLoss(partial.outcome, partial.endReason ?? null),
   };
@@ -162,6 +163,21 @@ describe('game feed parsers', () => {
     expect(snapshot.games.elo).toBe(1190);
     expect(snapshot.games.report.timerDisconnectLosses).toBe(1);
     expect(snapshot.games.report.strategyLosses).toBe(1);
+    expect(snapshot.calibration).toMatchObject({
+      turns: 3,
+      compared: 3,
+      foeActions: 3,
+      foeActionCorrect: 2,
+      foeActionAccuracy: 0.6667,
+      damageDealtMae: 0.15,
+      damageTakenMae: 0.1667,
+      koErrors: 1,
+      speedOrderErrors: 1,
+    });
+    const withTurns = snapshot.games.recent.find(row => row.battleId === 'battle-gen9randombattle-9');
+    expect(withTurns?.calibration?.foeActionCorrect).toBe(0);
+    const withSummary = snapshot.games.recent.find(row => row.battleId === 'battle-rich-2');
+    expect(withSummary?.calibration?.foeActionCorrect).toBe(2);
     expect(snapshot.ops.facilities.find(row => row.name === 'supervisor')?.health).toBe('down');
     expect(snapshot.ops.facilities.find(row => row.name === 'live')?.health).toBe('ok');
     expect(snapshot.gaps.some(gap => gap.id === 'malformed')).toBe(true);
@@ -199,6 +215,7 @@ describe('game feed parsers', () => {
     const snapshot = buildSnapshot(paths, 10_000);
     expect(snapshot.gaps.map(gap => gap.id)).toEqual(expect.arrayContaining(['heartbeats', 'live-games', 'ladder-logs', 'search-logs']));
     expect(snapshot.games.recent).toEqual([]);
+    expect(snapshot.calibration).toBeNull();
   });
 
   it('serves the feed and the filtered games API', async () => {
@@ -212,6 +229,7 @@ describe('game feed parsers', () => {
       const page = await get(`${server.url}/`);
       expect(page.status).toBe(200);
       expect(page.body).toContain('End reason');
+      expect(page.body).toContain('Sim calibration');
       const games = await get(`${server.url}/api/games?endReason=timer-ours&band=1400-1599`);
       expect(games.status).toBe(200);
       const payload = JSON.parse(games.body);

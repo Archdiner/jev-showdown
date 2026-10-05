@@ -21,18 +21,37 @@ import {
   teamPreviewChoice,
 } from './choice.js';
 import { alignToRequest, cloneGameState, mismatchData, overlayProtocol } from './tracked-state.js';
-import { LivePosition } from './decision-battle.js';
+import { LivePosition, buildDecisionBattle } from './decision-battle.js';
 import { livePositionFromClient } from './live-position.js';
 import { ourClockUpdate } from './inactive-clock.js';
 import { safeError, toID } from './ids.js';
 import { appendGameRecord, buildLadderGameRecord, isPhantomGame, LadderGameRecord } from './game-record.js';
 import { attributePopup } from './delivery.js';
+import { EXACT_1PLY, type ExactConfig } from '../engine/exact/search.js';
+import { ladderPolicy } from './ladder-engine.js';
+import { parseEngine } from './engines.js';
+import { PredictionLog, PredictionScore } from './prediction.js';
+import { TurnForecast, forecastLine, hpFraction, hpFractionText } from './turn-forecast.js';
 
 export type GameSummary = LadderGameRecord & {
   choiceDeliveryFailures: number;
   noLegalRetries: number;
   ambiguousPopups: number;
 };
+
+function ourHpFromRequest(request: any): number | null {
+  const slots: any[] = request?.side?.pokemon || [];
+  const active = slots.find(mon => mon?.active) || slots[0];
+  const fraction = hpFractionText(typeof active?.condition === 'string' ? active.condition : null);
+  return fraction === null ? null : Math.round(fraction * 10000) / 10000;
+}
+
+function foeHpFrom(position: LivePosition): number | null {
+  const foe = position.foeActive;
+  if (!foe) return null;
+  const fraction = hpFraction(foe.hp, foe.maxhp, foe.fainted);
+  return fraction === null ? null : Math.round(fraction * 10000) / 10000;
+}
 
 interface RoomState {
   roomId: string;
@@ -73,6 +92,7 @@ interface RoomState {
   noLegalRetries: number;
   ambiguousPopups: number;
   noLegalRetryLogged: boolean;
+  prediction: PredictionLog;
   requestTimer?: NodeJS.Timeout;
   finalizeTimer?: NodeJS.Timeout;
   deliveryTimer?: NodeJS.Timeout;
@@ -177,7 +197,7 @@ export class BattleDriver extends EventEmitter {
     const clock = ourClockUpdate(line, this.options.username);
     if (clock !== undefined) room.secondsLeft = clock;
     if (typeof clock === 'number') this.noteTimerMargin(room, clock);
-
+    this.noteProtocol(room, line);
     room.lines.push(line);
     this.observePlayers(room, line);
     room.tracker.applyLine(line);
@@ -332,6 +352,7 @@ export class BattleDriver extends EventEmitter {
       noLegalRetries: 0,
       ambiguousPopups: 0,
       noLegalRetryLogged: false,
+      prediction: new PredictionLog(),
     };
     this.rooms.set(roomId, room);
     this.options.client.trackRoom(roomId);
@@ -453,36 +474,9 @@ export class BattleDriver extends EventEmitter {
 
     const safe = sanitizeAction(decision.action, request, legal) ?? pickBestLegal(state, legal);
     const adjusted = !sameAction(safe, decision.action);
-    if (decision.fallback || adjusted) {
-      room.fallbacks += 1;
-      room.log.write({
-        type: 'fallback',
-        battleId: room.roomId,
-        turn: state.turn,
-        rqid,
-        reason: decision.reason || (adjusted ? 'removed an illegal modifier from the engine choice' : 'fallback'),
-        action: safe,
-      });
-    }
+    if (decision.fallback || adjusted) room.fallbacks += 1;
 
     const choice = formatChoice(safe, rqid ?? undefined);
-    room.log.write({
-      type: 'turn',
-      kind: 'turn',
-      battleId: room.roomId,
-      turn: state.turn,
-      rqid,
-      decision: safe,
-      choice,
-      score: decision.score,
-      searchMs: decision.timeMs,
-      latencyMs,
-      fallback: decision.fallback || adjusted,
-      mismatches: mismatchData(mismatches),
-      opponentRoles: roles,
-      legalCount: legal.length,
-      secondsLeft: room.secondsLeft,
-    });
     room.mismatchCount += mismatches.length;
     this.emit('decision', {
       battleId: room.roomId,
@@ -491,7 +485,136 @@ export class BattleDriver extends EventEmitter {
       secondsLeft: room.secondsLeft,
       fallback: decision.fallback || adjusted,
     });
+    // Send before any prediction or log write. A logging failure must not skip the choice.
     this.sendChoice(room, choice, rqid, safe, false);
+    this.recordTurn(room, {
+      request,
+      position,
+      stateTurn: state.turn,
+      rqid,
+      safe,
+      choice,
+      simChoice: formatChoice(safe),
+      score: decision.score,
+      searchMs: decision.timeMs,
+      latencyMs,
+      fallback: Boolean(decision.fallback || adjusted),
+      fallbackReason: decision.reason || (adjusted ? 'removed an illegal modifier from the engine choice' : 'fallback'),
+      adjusted: Boolean(decision.fallback || adjusted),
+      mismatches: mismatchData(mismatches),
+      roles,
+      legalCount: legal.length,
+    });
+  }
+
+  private noteProtocol(room: RoomState, line: string): void {
+    try {
+      const score = room.prediction.observe(line);
+      if (score) this.writeScore(room, score);
+    } catch {
+      // Protocol parsing must not drop the line or the choice.
+    }
+  }
+
+  private writeScore(room: RoomState, score: PredictionScore): void {
+    try {
+      room.log.write({
+        type: 'prediction_error',
+        battleId: room.roomId,
+        engine: this.options.engineName,
+        ...score,
+      });
+    } catch {
+      // The choice is already in, or this line is only a record.
+    }
+  }
+
+  private recordTurn(room: RoomState, input: {
+    request: any;
+    position: LivePosition;
+    stateTurn: number;
+    rqid: number | null;
+    safe: Action;
+    choice: string;
+    simChoice: string;
+    score: number | null;
+    searchMs: number;
+    latencyMs: number;
+    fallback: boolean;
+    fallbackReason: string;
+    adjusted: boolean;
+    mismatches: ReturnType<typeof mismatchData>;
+    roles: Array<{ role: string; probability: number }>;
+    legalCount: number;
+  }): void {
+    try {
+      if (input.adjusted) {
+        room.log.write({
+          type: 'fallback',
+          battleId: room.roomId,
+          turn: input.stateTurn,
+          rqid: input.rqid,
+          reason: input.fallbackReason,
+          action: input.safe,
+        });
+      }
+      const prediction = this.forecastSafe(input.position, input.simChoice);
+      const baseline = prediction && (room.ourSide === 'p1' || room.ourSide === 'p2')
+        ? {
+          ourSide: room.ourSide,
+          ourHpBefore: ourHpFromRequest(input.request),
+          foeHpBefore: foeHpFrom(input.position),
+        }
+        : null;
+      room.log.write({
+        type: 'turn',
+        kind: 'turn',
+        battleId: room.roomId,
+        turn: input.stateTurn,
+        rqid: input.rqid,
+        decision: input.safe,
+        choice: input.choice,
+        score: input.score,
+        searchMs: input.searchMs,
+        latencyMs: input.latencyMs,
+        fallback: input.fallback,
+        mismatches: input.mismatches,
+        opponentRoles: input.roles,
+        legalCount: input.legalCount,
+        secondsLeft: room.secondsLeft,
+        engine: this.options.engineName,
+        prediction,
+        predictionBaseline: baseline,
+      });
+      if (prediction && baseline) {
+        const previous = room.prediction.start({
+          forecast: prediction,
+          baseline,
+          turn: input.stateTurn,
+          rqid: input.rqid,
+        });
+        if (previous) this.writeScore(room, previous);
+      }
+    } catch {
+      // Already sent. A forecast or disk failure stays off the turn.
+    }
+  }
+
+  private forecastSafe(position: LivePosition, choice: string): TurnForecast | null {
+    try {
+      const battle = buildDecisionBattle(position);
+      if (!battle) return null;
+      let config: ExactConfig = { ...EXACT_1PLY, samples: 1 };
+      try {
+        const spec = ladderPolicy(parseEngine(this.options.engineName));
+        if (spec.kind === 'exact') config = spec.config;
+      } catch {
+        // An unknown engine name still gets the champion's foe model, one draw.
+      }
+      return forecastLine(battle, 'p1', choice, config);
+    } catch {
+      return null;
+    }
   }
 
   private livePosition(room: RoomState, request: any): LivePosition {
@@ -947,6 +1070,15 @@ export class BattleDriver extends EventEmitter {
     fs.writeFileSync(localReplayPath, room.lines.join('\n'));
     this.replayFromLines(room);
 
+    let calibration = null;
+    try {
+      const pending = room.prediction.close();
+      if (pending) this.writeScore(room, pending);
+      calibration = room.prediction.summary();
+    } catch {
+      calibration = null;
+    }
+
     const record = buildLadderGameRecord({
       startedAt: room.startedAt,
       battleId: room.roomId,
@@ -979,6 +1111,7 @@ export class BattleDriver extends EventEmitter {
       localServer: this.options.localServer ?? false,
       disconnected: room.disconnected,
       logPath: room.log.filePath,
+      calibration,
     });
     const summary: GameSummary = {
       ...record,

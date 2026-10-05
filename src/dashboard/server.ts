@@ -3,6 +3,7 @@ import * as http from 'http';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { filterGames, reportGames } from './games.js';
+import { combineCalibrations } from '../client/prediction.js';
 import type { DashboardPaths } from './paths.js';
 import { buildSnapshot, type Snapshot } from './snapshot.js';
 
@@ -31,6 +32,8 @@ function gamesPayload(snapshot: Snapshot, query: URLSearchParams) {
     filter: { endReason: endReason || 'any', band: band || 'any' },
     filtered,
     filteredReport: reportGames(filtered),
+    calibration: snapshot.calibration,
+    filteredCalibration: combineCalibrations(filtered.map(game => game.calibration)),
   };
 }
 

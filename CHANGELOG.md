@@ -45,6 +45,14 @@ If `POSTHOG_API_KEY` is set, each finished ladder game is also sent to PostHog a
 
 A turn no longer reuses the previous `|inactive|` clock: `secondsLeft` is cleared when the next request arrives. If `/choose` returns false, the client writes a `choice-delivery` row and retries. When the server rejects the last legal move, one `no-legal-retry` row is written. Popups name a battle when the text contains its room id; with several battles and no id, each open battle logs the popup as ambiguous instead of attaching it to whichever room ended last. Finished battles are dropped from memory. The game result counts delivery failures, exhausted retries, and ambiguous popups. `createLogger` keeps the last 2000 decisions and 500 games in memory. The JSONL files still receive every row.
 
+## Sim prediction error
+
+Each live turn now records what the search assumed and, once the protocol catches up, how that assumption compared with the turn that actually happened. The choice is sent before any of this is written. A failure in the forecast or the log does not change the move.
+
+The per-battle JSONL `turn` row gains `prediction` (`jev.turn-forecast.v1`): the foe's modal reply, both actions as move ids or `switch:<species>`, HP fractions before and after, damage dealt and taken, whether each active was expected to faint, and who was expected to move first. Damage and KOs are the mean of that reply across the search's sample count, capped at eight draws (eight for the champion, one draw for max-damage). That rollout happens after `/choose`.
+
+When the next request or the battle result arrives, a `prediction_error` row (`jev.prediction-error.v1`) records the actual action, damage, KOs, and speed order, plus match flags and absolute damage error. The finished game's `jev.ladder-game.v1` row gains `calibration` when at least one turn was compared: foe-action accuracy, damage MAE both ways, KO misses, and speed-order misses. The dashboard shows those totals as a Sim calibration panel. `npm run calibration -- --log-dir logs/ladder` prints the same report from the JSONL, and fills a missing error row from `prediction` plus the replay log when the two still line up.
+
 ## Rating and GXE stay null when the server omits them
 
 The ladder rating parser now reads GXE from the HTML popup `(GXE: …)` and from a `|rating|elo|gxe` line. If that number is not there, `gxe` is null. A missing rating stays null. The client does not fill in 1000 or 50. Each parsed update is a `rating` event in the per-battle JSONL, and the game `result` copies Elo before/after, GXE, and `gxeSource`. `ops live` writes the same nulls on its live-game row and does not feed a stand-in Elo into the circuit breaker.
