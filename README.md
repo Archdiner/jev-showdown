@@ -584,6 +584,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). One feature per pull request, rebase on 
 
 Unit tests do not call the network. Provider keys are cleared and `fetch` throws. A recorded attempt fails the test.
 
+`scripts/stack.sh` starts and stops the live processes as process groups. `OPERATIONS.md` describes the commands, the pidfiles, and the stop signals.
+
 ## Ladder game records
 
 Every finished battle appends one JSON object. The ladder client writes `logs/ladder/games.jsonl` (or `--log-dir`). `ops live` writes the same fields to `state/ops/live-games.jsonl` (`source` is `ops`, plus `configPath`, `inputLog`, `log`, and `variantId` when a Thompson arm was drawn). The ladder per-battle file also stores this object as its `result` row, with `type: "result"` added by the battle log. `logs/` is gitignored. The stdout line is unchanged (`turns`, `invalid`, `crashes`, `fallbacks`, `elo`).
