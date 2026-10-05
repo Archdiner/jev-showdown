@@ -280,6 +280,7 @@ export async function reviewProposals(paths: OpsPaths, opts: ReviewOptions = {})
 export interface RecordedScreen {
   policyId: string;
   searchId?: string;
+  evaluatorId?: string;
   configPath: string;
   action: 'live-approved';
   opponent: string;
@@ -293,6 +294,8 @@ export interface RecordedScreen {
   invalid: number;
   crashes: number;
   viewMiss: number;
+  p50ms?: number;
+  p95ms?: number;
   p99ms?: number;
   maxMs?: number;
   wilson95: [number, number];
@@ -356,12 +359,15 @@ function recordScreen(
   const guardrailsPass = screen.invalid === 0 && screen.crashes === 0 && (screen.viewMiss ?? 0) === 0;
   const counted = screen.wins + screen.losses + screen.ties === screen.games;
   const searchOk = !screen.searchId || loaded.config.search.id === screen.searchId;
-  const labeled = diagnosticsPass && guardrailsPass && counted && searchOk && screen.games > 0;
+  const evaluatorOk = !screen.evaluatorId || loaded.config.evaluator.id === screen.evaluatorId;
+  const labeled = diagnosticsPass && guardrailsPass && counted && searchOk && evaluatorOk && screen.games > 0;
   const reason = labeled
     ? `recorded screen ${screen.wins}-${screen.losses}-${screen.ties} accepted for live A/B; SPRT ${sprtVerdict}; diagnostics ${report.passed}/${report.total}`
     : !searchOk
       ? `search id ${loaded.config.search.id} does not match recorded ${screen.searchId}`
-      : !counted
+      : !evaluatorOk
+        ? `evaluator ${loaded.config.evaluator.id} does not match recorded ${screen.evaluatorId}`
+        : !counted
         ? `recorded games ${screen.games} do not equal ${screen.wins}-${screen.losses}-${screen.ties}`
         : !diagnosticsPass
           ? `diagnostics ${report.passed}/${report.total}, need 100%`
@@ -387,7 +393,7 @@ function recordScreen(
       description: reason,
       created_at: now,
       updated_at: now,
-      rationale: 'Owner-accepted hidden-info screen of the quick-win 1-ply against the champion 1-ply.',
+      rationale: 'Owner-accepted hidden-info screen of this challenger against exact 1-ply.',
       expected_effect: 'A live A/B share, not a champion promotion.',
       test_plan: `${screen.games} ${screen.information} games, seed ${screen.seed}, ${screen.samples} samples, opponent ${screen.opponent}.`,
     });
@@ -411,8 +417,11 @@ function recordScreen(
         invalid: screen.invalid,
         crashes: screen.crashes,
         viewMiss: screen.viewMiss,
+        p50ms: screen.p50ms ?? null,
+        p95ms: screen.p95ms ?? null,
         p99ms: screen.p99ms ?? null,
         maxMs: screen.maxMs ?? null,
+        evaluatorId: screen.evaluatorId ?? null,
         wilson95: screen.wilson95,
         information: screen.information,
         seed: screen.seed,
@@ -532,6 +541,7 @@ function readRecordedScreen(file: string): RecordedScreen | null {
   return {
     policyId: row.policyId,
     searchId: typeof row.searchId === 'string' ? row.searchId : undefined,
+    evaluatorId: typeof row.evaluatorId === 'string' ? row.evaluatorId : undefined,
     configPath: row.configPath,
     action: 'live-approved',
     opponent: typeof row.opponent === 'string' ? row.opponent : 'EXACT_1PLY',
@@ -545,6 +555,8 @@ function readRecordedScreen(file: string): RecordedScreen | null {
     invalid: row.invalid,
     crashes: row.crashes,
     viewMiss: typeof row.viewMiss === 'number' ? row.viewMiss : 0,
+    p50ms: typeof row.p50ms === 'number' ? row.p50ms : undefined,
+    p95ms: typeof row.p95ms === 'number' ? row.p95ms : undefined,
     p99ms: typeof row.p99ms === 'number' ? row.p99ms : undefined,
     maxMs: typeof row.maxMs === 'number' ? row.maxMs : undefined,
     wilson95: [low, high],
