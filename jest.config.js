@@ -14,5 +14,8 @@ export default {
     ],
   },
   testMatch: ['**/*.test.ts'],
+  setupFiles: ['<rootDir>/scripts/jest-env.cjs'],
+  setupFilesAfterEnv: ['<rootDir>/scripts/jest-after-env.cjs'],
+  reporters: ['default', '<rootDir>/scripts/data-guard-reporter.cjs'],
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.test.ts'],
 };

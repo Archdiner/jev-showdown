@@ -3,6 +3,7 @@
 import { SelfPlayHarness } from '../learning/self-play.js';
 import { BattleLogger } from '../learning/battle-logger.js';
 import { dataLoader } from '../data/data-loader.js';
+import { publishDataResult } from '../data/publish.js';
 
 async function main() {
   console.log('=== Pokemon Showdown Bot Benchmark ===\n');
@@ -53,6 +54,15 @@ async function main() {
   console.log(`MCTS vs Max-Damage (>=${passThreshold * 100}%): ${mctsVsMaxDamage ? '✓ PASS' : '✗ FAIL'}`);
 
   logger.close();
+  const scored = <T extends { lastLog?: string }>(result: T) => {
+    const { lastLog: _lastLog, ...rest } = result;
+    return rest;
+  };
+  publishDataResult('logs/benchmark.json', {
+    mctsVsRandom: scored(result1),
+    mctsVsMaxDamage: scored(result2),
+    maxDamageVsRandom: scored(result3),
+  });
 
   if (mctsVsRandom && mctsVsMaxDamage) {
     console.log('\n✓ All benchmarks passed!');
