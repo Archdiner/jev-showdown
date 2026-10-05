@@ -1,5 +1,11 @@
 # Changelog
 
+## Cosmetic formes and Revival Blessing switches
+
+`@smogon/calc` has no entry for a cosmetic forme such as Gastrodon-East, so damage for that Pokémon came back as zero. `speciesForCalc` maps a cosmetic forme to the base species and leaves a forme the calc already lists, such as Ogerpon-Wellspring, unchanged. `calcMon` uses that name.
+
+A Revival Blessing follow-up is a forced switch onto a fainted teammate. `legalChoices` used to offer a healthy Pokémon, which the sim rejects (`INC-007`). It now offers the fainted teammates when the active slot has `revivalblessing`. The hidden-info battle copies the request's `reviving` flag onto that slot, so the search and the real battle list the same switches.
+
 ## Ladder game rows stay one per battle, with a replay link and a timer
 
 A second process on the same account could append another `games.jsonl` row for a room the first process already owned. A disconnect tie with turns already played was counted next to the real result. The recorder now claims the room when it opens and appends one row per battle id. A different pid does not append; the attempt is flagged in `games.contamination.jsonl`. `npm run ops -- repair-games` writes those flags for rows already on disk and does not delete or rewrite the log. Ladder totals, the dashboard, the analyst, the circuit-breaker window, and `ladderGamesForGate` skip a flagged or conflicting row and keep a single decisive result. The reliability sentinel reports `duplicate-battle-id`, `null-replay-url`, and `null-required-field`. The scorecard drops a duplicate disconnect tie.
