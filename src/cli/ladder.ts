@@ -10,7 +10,13 @@ import { BattleDriver, GameSummary } from '../client/battle-driver.js';
 import { DecisionClient } from '../client/decision-client.js';
 import { startLocalServer } from '../client/local-server.js';
 import { safeError, toID } from '../client/ids.js';
-import { clampConcurrency, EngineName, MAX_LADDER_CONCURRENCY, parseEngine } from '../client/engines.js';
+import { EngineName, MAX_LADDER_CONCURRENCY, parseEngine } from '../client/engines.js';
+import {
+  loadConcurrencyFile,
+  loadDefaultConcurrencyFile,
+  resolveConcurrencyLimit,
+  selectLiveEngine,
+} from '../client/concurrency-config.js';
 import { LadderQueue } from '../client/ladder-queue.js';
 import {
   drainWatchPaths,
@@ -35,8 +41,14 @@ interface LadderOptions {
   decisionMs: number | null;
   logDir: string;
   engine: EngineName;
+  profile: string;
   opponentEngine: EngineName | null;
   concurrency: number;
+  concurrencyFlag: number | null;
+  runners: number | null;
+  useEngineProfile: boolean;
+  concurrencyConfig: string;
+  useLLMPrior: boolean;
   check: boolean;
   help: boolean;
 }
@@ -55,8 +67,14 @@ function parseArgs(argv: string[]): LadderOptions {
     decisionMs: null,
     logDir: 'logs/ladder',
     engine: 'max-damage',
+    profile: 'max-damage',
     opponentEngine: null,
     concurrency: 1,
+    concurrencyFlag: null,
+    runners: null,
+    useEngineProfile: false,
+    concurrencyConfig: '',
+    useLLMPrior: false,
     check: false,
     help: false,
   };
@@ -80,9 +98,17 @@ function parseArgs(argv: string[]): LadderOptions {
     else if (arg === '--search-ms') opts.searchMs = Number(next());
     else if (arg === '--decision-ms') opts.decisionMs = Number(next());
     else if (arg === '--log-dir') opts.logDir = next();
-    else if (arg === '--engine') opts.engine = parseEngine(next());
+    else if (arg === '--engine') {
+      const selected = selectLiveEngine(next());
+      opts.engine = selected.engine;
+      opts.profile = selected.profile;
+      opts.useLLMPrior = selected.useLLMPrior;
+    }
     else if (arg === '--opponent-engine') opts.opponentEngine = parseEngine(next());
-    else if (arg === '--concurrency') opts.concurrency = clampConcurrency(Number(next()));
+    else if (arg === '--concurrency') opts.concurrencyFlag = Number(next());
+    else if (arg === '--runners') opts.runners = Number(next());
+    else if (arg === '--use-engine-profile') opts.useEngineProfile = true;
+    else if (arg === '--concurrency-config') opts.concurrencyConfig = next();
     else if (arg === '--check') opts.check = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -90,7 +116,28 @@ function parseArgs(argv: string[]): LadderOptions {
   if (!Number.isFinite(opts.games) || opts.games < 1) {
     throw new Error('--games must be a positive number');
   }
+  if (opts.runners !== null && (!Number.isFinite(opts.runners) || opts.runners < 1)) {
+    throw new Error('--runners must be a positive number');
+  }
+  if (opts.concurrencyFlag !== null && (!Number.isFinite(opts.concurrencyFlag) || opts.concurrencyFlag < 1)) {
+    throw new Error('--concurrency must be a positive number');
+  }
   return opts;
+}
+
+function applyLiveConcurrency(opts: LadderOptions): void {
+  const file = opts.concurrencyConfig
+    ? loadConcurrencyFile(opts.concurrencyConfig)
+    : (opts.useEngineProfile ? loadDefaultConcurrencyFile() : null);
+  const resolved = resolveConcurrencyLimit({
+    engine: opts.profile,
+    useEngineProfile: opts.useEngineProfile,
+    concurrency: opts.concurrencyFlag,
+    runners: opts.runners,
+    file,
+  });
+  opts.concurrency = resolved.limit;
+  console.log(`[ladder] concurrency=${resolved.limit} profile=${resolved.profile}`);
 }
 
 function printHelp(): void {
@@ -105,8 +152,10 @@ Preflight (log in, print named/locked and the current rating, exit):
 Real ladder, from a residential or university network (this process never stores the password):
   SHOWDOWN_USERNAME=bot SHOWDOWN_PASSWORD=secret npm run ladder -- --games 10 --format gen9randombattle --engine max-damage --concurrency 1
 
-Engines: max-damage (default; won a local head-to-head) or search (Bot.selectAction).
---concurrency K keeps up to K battles on one login (default 1, max ${MAX_LADDER_CONCURRENCY}).
+Engines: max-damage (default; won a local head-to-head), search (Bot.selectAction), or grok (search + LLM prior, concurrency 1).
+--concurrency K keeps up to K battles on one login (default 1, absolute max ${MAX_LADDER_CONCURRENCY}).
+--use-engine-profile reads configs/live/concurrency.json (search 3, max-damage 4, grok 1).
+--concurrency-config FILE overrides those numbers. --runners N multiplies the limit. An explicit --concurrency wins.
 A proxy lock, ban, or ‽/! name exits immediately and does not reconnect.
 
 Graceful drain (finish in-progress games, never /forfeit, then exit):
@@ -133,7 +182,7 @@ function engineConfig(opts: LadderOptions): BotConfig {
     explorationConstant: 1.4,
     sampledWorlds: local ? 1 : 4,
     useTeraHeuristic: true,
-    useLLMPrior: false,
+    useLLMPrior: opts.useLLMPrior,
   };
 }
 
@@ -545,6 +594,7 @@ async function main(): Promise<void> {
     return;
   }
 
+  applyLiveConcurrency(opts);
   console.log('[ladder] loading randbats data');
   await dataLoader.load(gen9RandomBattle);
 

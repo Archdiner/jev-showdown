@@ -3,10 +3,11 @@ import { isAlreadySearching, isSearchRejection, LadderQueue, parseUpdateSearch }
 import type { ShowdownClient } from './showdown-client.js';
 
 describe('ladder concurrency', () => {
-  it('caps concurrency at the server limit', () => {
+  it('clamps concurrency to the absolute max', () => {
     expect(clampConcurrency(1)).toBe(1);
     expect(clampConcurrency(4)).toBe(4);
-    expect(clampConcurrency(9)).toBe(MAX_LADDER_CONCURRENCY);
+    expect(clampConcurrency(9)).toBe(9);
+    expect(clampConcurrency(99)).toBe(MAX_LADDER_CONCURRENCY);
     expect(() => clampConcurrency(0)).toThrow(/concurrency/);
   });
 
