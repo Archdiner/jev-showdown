@@ -3,6 +3,7 @@
 import { SelfPlayHarness } from '../learning/self-play.js';
 import { BattleLogger } from '../learning/battle-logger.js';
 import { dataLoader } from '../data/data-loader.js';
+import { publishDataResult } from '../data/publish.js';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -27,6 +28,8 @@ async function main() {
   });
 
   logger.close();
+  const { lastLog: _lastLog, ...scored } = result;
+  publishDataResult('logs/selfplay.json', { bot1Type, bot2Type, numGames, ...scored });
 
   process.exit(0);
 }

@@ -1,4 +1,7 @@
 import { informationMode, type InformationMode } from '../client/hidden-info.js';
+import { dataLoader } from '../data/data-loader.js';
+import { publishDataResult } from '../data/publish.js';
+import { gen9RandomBattle } from '../formats/gen9-randombattle.js';
 import { specForAlias } from '../config/aliases.js';
 import { BenchPlayer, GameJob, GameResult, playerId } from './game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
@@ -190,6 +193,7 @@ async function main() {
     process.exit(result.failed === 0 ? 0 : 1);
   }
 
+  await dataLoader.load(gen9RandomBattle);
   const pairs = Number(arg('pairs', '10'));
   const a = policy(arg('a', 'exact'));
   const b = policy(arg('b', 'random'));
@@ -220,6 +224,14 @@ async function main() {
   console.log(`elapsed ${seconds}s`);
   const errors = results.filter(r => r.crashed).slice(0, 3);
   for (const error of errors) console.log(`crash seed=${error.seed}: ${error.error}`);
+  publishDataResult('logs/bench.json', {
+    pairs,
+    information,
+    summary,
+    viewMiss,
+    play,
+    seconds: Number(seconds),
+  });
 }
 
 main().catch(error => {

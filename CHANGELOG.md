@@ -1,5 +1,17 @@
 # Changelog
 
+## Development constraints
+
+Unit tests write sets and stats under `JEV_DATA_DIR` (a temp directory) and set `JEV_ALLOW_SMALL_DATA=1`. The data guard fails the run if anything under `data/` changes. The loader throws when it sees fewer than 500 species unless that test-only flag is set. Live preflight ignores the flag. Benchmarks and self-play print `data species=N hash=H` and write those fields on the results file.
+
+`games.jsonl` rows are checked as `jev.ladder-game.v1`. A public game that chose a move needs `minTimerMarginSec`. `replayUrl` is null unless the replay is confirmed. `eloAfter` is required when `eloBefore` or `gxe` is a number. A 0-turn record is only allowed for a disconnect, crash, or unknown end with no decisions.
+
+`npm run test:soak` starts the ops local server and the real ladder client at concurrency 3. It requires zero invalid choices, zero timer losses, every server line in the room that owns it, every forwarded choice acknowledged within 12 seconds, no phantom records, and a drain that finishes inside its bound and stops searching. `--ci` plays one clean game plus the fault and drain phases. The fault phase drops the first choice and duplicates the room join; the choice watchdog must log `cause: "unconfirmed"`.
+
+`npm run live:preflight` runs before `run-live.sh` logs in. It requires a clean tree on a commit that is contained in `origin/main`, at least 500 species, no other public ladder process for the account, and a 2-game local canary with the same engine flags.
+
+Unit tests clear `VERCEL_AI_GATEWAY_KEY`, `AI_GATEWAY_API_KEY`, `XAI_API_KEY`, `OPENAI_API_KEY`, `CEREBRAS_API_KEY`, and `POSTHOG_API_KEY`, and replace `fetch` with a stub that throws. A test fails if any attempt was recorded, including when the caller catches the error.
+
 ## A ladder batch no longer dies on a wall-clock deadline
 
 `./run-live.sh --games 30 --engine search --concurrency 3` used to set a timer of 3 minutes per wave of games (30 minutes for that batch). When the timer fired it rejected the batch, printed `Timed out after N/M games`, and exited. Games still on the ladder were left without a client. Showdown's disconnect timer then forfeited them about a minute later. Real games plus queue time are longer than 3 minutes each, so a 30-game batch at concurrency 3 hit this on essentially every run.

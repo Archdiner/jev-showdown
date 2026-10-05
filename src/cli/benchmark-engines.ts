@@ -8,6 +8,7 @@
 import { SelfPlayHarness } from '../learning/self-play.js';
 import { BattleLogger } from '../learning/battle-logger.js';
 import { dataLoader } from '../data/data-loader.js';
+import { publishDataResult } from '../data/publish.js';
 
 async function main() {
   console.log('=== Engine Benchmark ===\n');
@@ -94,6 +95,17 @@ async function main() {
   console.log(`RobustSearch: ${rPass ? '✓ PASS' : '✗ FAIL'} (${(robustRandom.winRate * 100).toFixed(1)}% vs random, ${(robustMaxDamage.winRate * 100).toFixed(1)}% vs max-damage)`);
 
   logger.close();
+  const scored = <T extends { lastLog?: string }>(result: T) => {
+    const { lastLog: _lastLog, ...rest } = result;
+    return rest;
+  };
+  publishDataResult('logs/benchmark-engines.json', {
+    simple1Random: scored(simple1Random),
+    simple1MaxDamage: scored(simple1MaxDamage),
+    robustRandom: scored(robustRandom),
+    robustMaxDamage: scored(robustMaxDamage),
+    maxDamageRandom: scored(maxDamageRandom),
+  });
   process.exit(s1Pass || rPass ? 0 : 1);
 }
 
