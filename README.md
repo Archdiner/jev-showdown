@@ -590,6 +590,10 @@ Per-battle JSONL (`logs/ladder/{user}-{room}.jsonl`) records these events in add
 
 `createLogger` keeps the last 2000 decisions and the last 500 games in memory. When the env log sink is a file, every row is still appended to `decisions.jsonl` and `games.jsonl`.
 
+## Optional PostHog
+
+Set `POSTHOG_API_KEY` to mirror each finished ladder game to PostHog as a `ladder_game` event. `POSTHOG_HOST` defaults to `https://us.i.posthog.com`. The send is queued and is not awaited on a turn. `POSTHOG_LLM_TRACES=1` also sends `$ai_generation` metrics (model, latency, tokens, cost) and does not send prompt text. With the key unset, nothing is sent. `logs/ladder/games.jsonl` stays the source of truth.
+
 ## License
 
 MIT
