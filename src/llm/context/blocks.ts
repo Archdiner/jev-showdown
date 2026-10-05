@@ -1,5 +1,5 @@
 import type { BoardInput, BoardMon, ContextBlock, RollLine } from './types.js';
-import { loadGuidance, loadReplayStats, switchPhase, switchPriorPercent } from './meta.js';
+import { loadGuidance, loadHypotheses, loadReplayStats, switchPhase, switchPriorPercent } from './meta.js';
 import { deriveSituation, formatPrinciple, selectPrinciples } from './situation.js';
 
 function monLine(mon: BoardMon, tag: string): string {
@@ -150,6 +150,24 @@ export const contextBlocks: ContextBlock[] = [
       const picked = selectPrinciples(principles, situation, budget);
       if (picked.length === 0) return '';
       return picked.map(formatPrinciple).join('\n');
+    },
+  },
+  {
+    id: 'situation-brief',
+    version: '1',
+    defaultMaxChars: 8000,
+    render(board) {
+      return board.situationBrief?.trim() || '';
+    },
+  },
+  {
+    id: 'hypotheses',
+    version: '1',
+    defaultMaxChars: 5000,
+    render() {
+      const rows = loadHypotheses() as Array<{ id?: string; change?: string }>;
+      if (rows.length === 0) return '';
+      return rows.map(row => `${row.id ?? '?'}: ${row.change ?? ''}`).join('\n');
     },
   },
 ];

@@ -1,11 +1,13 @@
 import { GatewayClient } from '../gateway-client.js';
-import { assembleBrief } from '../context/index.js';
+import { renderContextBrief } from '../context-brief.js';
+import { assembleBrief, boardFromSim } from '../context/index.js';
+import { CONTEXT_BLOCK_IDS } from '../context/types.js';
 import { loadHypotheses } from '../context/meta.js';
 import { emptyLog } from '../context/log.js';
 import { choiceAllowed, safeChoose, startRandomBattle, teamsForSeed } from '../../engine/exact/battle-utils.js';
 import { withTeraChoices } from '../context/board.js';
 import { decideBoard } from './engine.js';
-import { loadJevSoloConfig, withBlock } from './config.js';
+import { contextConfigOf, loadJevSoloConfig, withBlock } from './config.js';
 import { PLAIN_INSTRUCTION, PLANNER_INSTRUCTION } from './questions.js';
 import type { BoardInput } from '../context/types.js';
 
@@ -59,17 +61,32 @@ test('the default config keeps planner wording free of fixture species', () => {
   expect(PLAIN_INSTRUCTION + PLANNER_INSTRUCTION).not.toMatch(/Garchomp|Rotom/);
 });
 
-test('the brief includes the switch prior and a principle, not a hypothesis', () => {
+test('every block is on by default and can be ablated', () => {
   const config = loadJevSoloConfig();
-  const brief = assembleBrief(board(), { version: 1, blocks: config.blocks });
-  const odds = brief.blocks.find(block => block.id === 'switch-odds')?.text ?? '';
-  expect(odds).toContain('32.3%');
-  const guidance = brief.blocks.find(block => block.id === 'meta-guidance')?.text ?? '';
-  expect(guidance).toMatch(/G\d+/);
-  const hidden = loadHypotheses() as Array<{ change?: string }>;
-  expect(brief.text).not.toContain(hidden[0]?.change ?? 'H01-missing');
-  const off = assembleBrief(board(), { version: 1, blocks: withBlock(config, 'meta-guidance', false).blocks });
-  expect(off.blocks.some(block => block.id === 'meta-guidance')).toBe(false);
+  for (const id of CONTEXT_BLOCK_IDS) {
+    expect(config.blocks?.[id]?.enabled).toBe(true);
+  }
+  const hidden = loadHypotheses() as Array<{ id?: string; change?: string }>;
+  const teams = teamsForSeed(50000);
+  const battle = startRandomBattle(teams.p1, teams.p2, 50000);
+  const fullBoard = boardFromSim(battle, 'p1', {});
+  fullBoard.situationBrief = renderContextBrief(battle, 'p1', 2000).text;
+  const brief = assembleBrief(fullBoard, contextConfigOf(config));
+  expect(brief.blocks.map(block => block.id).sort()).toEqual([...CONTEXT_BLOCK_IDS].sort());
+  expect(brief.text).toContain('32.3%');
+  expect(brief.text).toMatch(/G\d+/);
+  expect(brief.text).toContain('koNow=');
+  expect(brief.text).toContain('## sides');
+  expect(brief.text).toContain(hidden[0]?.change ?? 'H01-missing');
+  const hazards = brief.blocks.find(block => block.id === 'field')?.text ?? '';
+  expect(hazards).toContain('hazards');
+  const sets = brief.blocks.find(block => block.id === 'set-inference')?.text ?? '';
+  expect(sets.length).toBeGreaterThan(0);
+
+  for (const id of CONTEXT_BLOCK_IDS) {
+    const ablated = assembleBrief(fullBoard, contextConfigOf(withBlock(config, id, false)));
+    expect(ablated.blocks.some(block => block.id === id)).toBe(false);
+  }
 });
 
 test('Jev is followed, and a failed call plays the first legal action', async () => {

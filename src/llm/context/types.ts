@@ -18,6 +18,8 @@ export const CONTEXT_BLOCK_IDS = [
   'switch-odds',
   'win-conditions',
   'meta-guidance',
+  'situation-brief',
+  'hypotheses',
 ] as const;
 
 export type ContextBlockId = (typeof CONTEXT_BLOCK_IDS)[number];
@@ -121,6 +123,8 @@ export interface BoardInput {
   legal: LegalOption[];
   pools: RandbatsStats;
   facts?: FactCache;
+  /** Public situation brief from `renderContextBrief` (PR #11), when the caller has a sim battle. */
+  situationBrief?: string;
 }
 
 export interface RollLine {

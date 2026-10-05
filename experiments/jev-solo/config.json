@@ -12,6 +12,8 @@
     "history": { "enabled": true },
     "switch-odds": { "enabled": true },
     "win-conditions": { "enabled": true },
-    "meta-guidance": { "enabled": true }
+    "meta-guidance": { "enabled": true },
+    "situation-brief": { "enabled": true },
+    "hypotheses": { "enabled": true }
   }
 }

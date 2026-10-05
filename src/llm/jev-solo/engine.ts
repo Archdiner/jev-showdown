@@ -5,6 +5,7 @@ import type { Action, GameState, RandbatsStats } from '../../types/index.js';
 import type { SideId } from '../../engine/exact/battle-utils.js';
 import { GatewayClient, type EvaluateQuestion } from '../gateway-client.js';
 import { JEV_MODEL_ID } from '../models.js';
+import { renderContextBrief } from '../context-brief.js';
 import { assembleBrief, boardFromGameState, boardFromSim, withTeraChoices } from '../context/index.js';
 import type { BoardInput, LegalOption } from '../context/types.js';
 import { contextConfigOf, type JevSoloConfig } from './config.js';
@@ -56,6 +57,7 @@ export async function jevSoloOnBattle(args: {
 }): Promise<JevDecision> {
   const choices = withTeraChoices(args.battle, args.side);
   const board = boardFromSim(args.battle, args.side, args.pools ?? loadPools());
+  board.situationBrief = renderContextBrief(args.battle, args.side, 2000).text;
   board.legal = board.legal.filter(option => choices.includes(option.choice));
   return decideBoard(board, args.config, args.client ?? sharedJevClient());
 }
