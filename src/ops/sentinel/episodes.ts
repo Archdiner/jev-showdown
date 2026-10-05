@@ -5,6 +5,7 @@ export const EPISODE_CHECK_IDS = new Set([
   'phantom-games',
   'choice-sent-not-applied',
   'invalid-choices',
+  'duplicate-choose-per-rqid',
   'crash-or-fallback',
   'replay-unconfirmed',
   'timer-margin-null',

@@ -107,10 +107,13 @@ interface RoomState {
   lastLegal: Action[];
   lastChoice: Action | null;
   lastChoiceText: string | null;
+  /** Last successfully delivered /choose, kept across a successor |request|. */
+  lastSent: { choice: string; rqid: number | null } | null;
   /**
-   * Choice the server has not confirmed with a new turn or request.
-   * Silence is the opponent still choosing. A later clock line for us is
-   * what shows the server still has this choice open.
+   * Choice sent for an rqid that the server has not yet confirmed with a
+   * later turn or a new request. Silence is the opponent deciding. A clock
+   * tick alone must not resend this (INC-041): only a fresh `|request|` for
+   * the same rqid or an explicit retry-needed error may send again.
    */
   unconfirmed: { choice: string; rqid: number | null; turn: number; resends: number } | null;
   pendingDelivery: number | null;
@@ -177,7 +180,6 @@ export interface BattleAssignment {
 
 const DELIVERY_ATTEMPTS = 3;
 /** Clock ticks that still show our choice is open. A 150s turn can tick several times. */
-const WATCHDOG_RESENDS = 20;
 
 /**
  * The first `/choose` already stands, or the turn moved on. A second choose
@@ -300,7 +302,9 @@ export class BattleDriver extends EventEmitter {
         raw: line,
         tight: aboutUs && room.secondsLeft !== null && room.secondsLeft <= 4,
       });
-      if (typeof clock === 'number') this.resendUnconfirmed(room);
+      // INC-041: do not resend on |inactive| / Time left. Timer-ON and clock
+      // lines can arrive after /choose already stood; a second /choose is
+      // "too late". Recovery is a fresh |request| (same rqid) or socket retry.
     }
 
     const rating = parseRatingLine(line);
@@ -334,6 +338,10 @@ export class BattleDriver extends EventEmitter {
         room.log.write({ type: 'error', battleId: room.roomId, message: `bad request json: ${safeError(err)}` });
         return;
       }
+      // A fresh |request| is the server asking again. Clear the answered mark
+      // for this rqid so onRequest may /choose once more (lost first send).
+      const asked = typeof room.lastRequest?.rqid === 'number' ? room.lastRequest.rqid : null;
+      if (asked !== null) room.answered.delete(asked);
       if (room.requestTimer) clearTimeout(room.requestTimer);
       room.requestTimer = setTimeout(() => {
         void this.onRequest(room!, room!.lastRequest);
@@ -343,7 +351,10 @@ export class BattleDriver extends EventEmitter {
 
     const rejected = invalidChoiceReason(line);
     if (rejected) {
-      this.options.onBattleFault?.(room.roomId, 'invalid-move');
+      // "too late" means the prior /choose already stood; do not fault A/B.
+      if (!choiceAlreadyLocked(rejected) || !/too late/i.test(rejected)) {
+        this.options.onBattleFault?.(room.roomId, 'invalid-move');
+      }
       this.noteInvalidChoice(room, rejected, line);
       return;
     }
@@ -424,6 +435,7 @@ export class BattleDriver extends EventEmitter {
       lastLegal: [],
       lastChoice: null,
       lastChoiceText: null,
+      lastSent: null,
       unconfirmed: null,
       pendingDelivery: null,
       choiceDeliveryFailures: 0,
@@ -814,6 +826,7 @@ export class BattleDriver extends EventEmitter {
     room.pendingDelivery = null;
     room.lastChoice = action;
     room.lastChoiceText = choice;
+    room.lastSent = { choice, rqid };
     room.unconfirmed = {
       choice,
       rqid,
@@ -881,9 +894,10 @@ export class BattleDriver extends EventEmitter {
   }
 
   /**
-   * A clock line for us arrived after `/choose`. The server only sends that
-   * while this player is still choosing, so the same choice and rqid go out
-   * again. Silence is not this case: the opponent may simply be deciding.
+   * Formerly resent on |inactive| clock ticks (INC-041). Kept as a hard no-op
+   * so a clock line can never /choose again for a pending rqid. Recovery is:
+   * socket-level failDelivery retries, a fresh `|request|` for the same rqid,
+   * or retryChoice after a non-locked server rejection.
    */
   private resendUnconfirmed(room: RoomState): void {
     const pending = room.unconfirmed;
@@ -892,11 +906,20 @@ export class BattleDriver extends EventEmitter {
       this.dropUnconfirmed(room);
       return;
     }
-    if (room.pendingDelivery !== null || room.deliveryTimer) return;
-    if (pending.resends >= WATCHDOG_RESENDS) return;
-    const resends = pending.resends + 1;
-    pending.resends = resends;
-    this.deliver(room, pending.choice, pending.rqid, room.lastChoice, false, 0, 'watchdog', resends);
+    room.log.write({
+      type: 'choice-delivery',
+      kind: 'choice-delivery',
+      battleId: room.roomId,
+      intendedRoomId: room.roomId,
+      sentRoomId: null,
+      rqid: pending.rqid,
+      choice: pending.choice,
+      sent: false,
+      cause: 'watchdog-suppressed',
+      serverLine: null,
+      retry: pending.resends,
+      replacement: null,
+    });
   }
 
   /**
@@ -919,28 +942,39 @@ export class BattleDriver extends EventEmitter {
   }
 
   private noteInvalidChoice(room: RoomState, reason: string, line: string): void {
-    room.invalidChoices += 1;
-    room.invalidChoiceReasons = cappedInvalidChoiceReasons([...room.invalidChoiceReasons, reason]);
+    const pending = room.unconfirmed;
+    const tooLate = /too late/i.test(reason);
+    // INC-041: "too late" rejects a stale resend (or a late echo). The first
+    // /choose already stood, so do not count it as an invalid engine choice
+    // and do not attribute it to a newer lastRequest rqid.
+    if (!tooLate) {
+      room.invalidChoices += 1;
+      room.invalidChoiceReasons = cappedInvalidChoiceReasons([...room.invalidChoiceReasons, reason]);
+    }
     room.log.write({
       type: 'error',
       battleId: room.roomId,
-      invalidChoice: true,
+      invalidChoice: !tooLate,
       message: line,
       reason,
+      ...(tooLate ? { locked: true, staleResend: true } : {}),
     });
+    const lockedRqid = pending?.rqid
+      ?? room.lastSent?.rqid
+      ?? (typeof room.lastRequest?.rqid === 'number' ? room.lastRequest.rqid : null);
+    const lockedChoice = pending?.choice ?? room.lastSent?.choice ?? room.lastChoiceText;
     this.dropUnconfirmed(room);
     if (choiceAlreadyLocked(reason)) {
-      const rqid = typeof room.lastRequest?.rqid === 'number' ? room.lastRequest.rqid : null;
       room.log.write({
         type: 'choice-delivery',
         kind: 'choice-delivery',
         battleId: room.roomId,
         intendedRoomId: room.roomId,
         sentRoomId: null,
-        rqid,
-        choice: room.lastChoiceText,
+        rqid: lockedRqid,
+        choice: lockedChoice,
         sent: false,
-        cause: /not your turn/i.test(reason) ? 'not-your-turn' : 'server-rejected',
+        cause: tooLate ? 'too-late' : /not your turn/i.test(reason) ? 'not-your-turn' : 'server-rejected',
         serverLine: line,
         retry: room.retries,
         replacement: null,
