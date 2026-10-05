@@ -277,6 +277,7 @@ async function chooseSeen(
   const viewed = ladderDecisionBattle(battle, side, {
     quickWins: allowsTera(playerSpec),
     foePlaceholders: wantsPlaceholders(playerSpec),
+    foeBelief: wantsBelief(playerSpec),
   });
   if (!viewed) return { choice: legal[0] || 'default', ms: 0, configId: player.id, viewMiss: true };
   return choose(player, viewed, 'p1', rng, gameId, seed);
@@ -321,6 +322,11 @@ function noteInvalid(
 /** Config opted into unseen-foe placeholders (search param foeUnseen). */
 function wantsPlaceholders(player: BenchPlayer): boolean {
   return isBotSpec(player) && player.config.search.params.foeUnseen === 'placeholder';
+}
+
+/** Config opted into the SetInference foe fill (search param foeBelief). */
+function wantsBelief(player: BenchPlayer): boolean {
+  return isBotSpec(player) && player.config.search.params.foeBelief === true;
 }
 
 function allowsTera(player: BenchPlayer): boolean {

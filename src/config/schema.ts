@@ -98,6 +98,13 @@ export const SearchParamsSchema = z.object({
    */
   replyModel: z.enum(['switch']).optional(),
   replySwitchMax: z.number().int().min(1).max(6).optional(),
+  /**
+   * Opt-in belief tightening for exact-1ply-qw (client/foe-belief.ts): the
+   * decision battle's revealed foes get moves, hidden item and hidden ability
+   * from the SetInference posterior (speed order, damage rolls, hard filters,
+   * weather duration). Unset keeps the revealed-only foe and every config id.
+   */
+  foeBelief: z.boolean().optional(),
 }).strict();
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
 
