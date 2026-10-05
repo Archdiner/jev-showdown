@@ -169,10 +169,21 @@ export function pickBestLegal(state: GameState, legal: Action[]): Action {
   return legal.find(action => action.type === 'move') ?? legal[0];
 }
 
-/** Strip tera if the request no longer allows it, without changing the move. */
-export function sanitizeAction(action: Action, request: any, legal: Action[]): Action | null {
+/**
+ * Strip tera if the request no longer allows it, without changing the move.
+ * An unlisted tera line is kept only for the hybrid engine, and only when the
+ * plain move is already legal.
+ */
+export function sanitizeAction(
+  action: Action,
+  request: any,
+  legal: Action[],
+  options?: { enrich?: boolean },
+): Action | null {
   const listed = legal.some(candidate => sameAction(candidate, action));
-  const teraOfListed = action.type === 'move' && action.terastallize
+  const teraOfListed = options?.enrich === true
+    && action.type === 'move'
+    && !!action.terastallize
     && legal.some(candidate => sameAction(candidate, { type: 'move', moveIndex: action.moveIndex }));
   if (isActionLegal(action, request) && (listed || teraOfListed)) {
     return action;

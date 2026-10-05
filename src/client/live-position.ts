@@ -14,10 +14,10 @@ function boostsOf(mon: ClientPokemon): StatBoosts {
   };
 }
 
-function snap(mon: ClientPokemon): FoeMon | null {
+function snap(mon: ClientPokemon, enrich: boolean): FoeMon | null {
   const species = mon.speciesForme || '';
   if (!species) return null;
-  return {
+  const row: FoeMon = {
     species,
     level: mon.level || 80,
     hp: mon.hp,
@@ -28,8 +28,9 @@ function snap(mon: ClientPokemon): FoeMon | null {
     moves: [...(mon.moves || [])],
     boosts: boostsOf(mon),
     fainted: mon.fainted || mon.hp <= 0,
-    terastallized: mon.terastallized || undefined,
   };
+  if (enrich && mon.terastallized) row.terastallized = mon.terastallized;
+  return row;
 }
 
 /**
@@ -42,14 +43,16 @@ export function livePositionFromClient(
   request: unknown,
   ourSide: ViewerSide,
   lines?: readonly string[],
+  options?: { enrich?: boolean },
 ): LivePosition {
+  const enrich = options?.enrich === true;
   const foeSide = ourSide === 'p2' ? battle.p1 : battle.p2;
   const ours = ourSide === 'p2' ? battle.p2 : battle.p1;
   const active = foeSide?.active?.[0] ?? null;
-  const foeActive = active ? snap(active) : null;
+  const foeActive = active ? snap(active, enrich) : null;
   const foeBench = (foeSide?.team || [])
     .filter(mon => mon && mon !== active)
-    .map(mon => snap(mon))
+    .map(mon => snap(mon, enrich))
     .filter((mon): mon is FoeMon => !!mon);
   const weather = battle.currentWeather();
   const position: LivePosition = {
@@ -58,8 +61,9 @@ export function livePositionFromClient(
     foeBench,
     ourBoosts: ours?.active?.[0] ? boostsOf(ours.active[0]) : undefined,
     weather: weather ? String(weather) : undefined,
-    turn: typeof battle.turn === 'number' ? battle.turn : undefined,
   };
+  if (!enrich) return position;
+  if (typeof battle.turn === 'number') position.turn = battle.turn;
   if (lines && lines.length) {
     const notes = parsePublic(lines, ourSide);
     position.myHazards = notes.myHazards;

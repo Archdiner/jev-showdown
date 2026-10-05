@@ -262,7 +262,7 @@ async function chooseSeen(
   if (legal.length === 1 && legal[0] === 'default') {
     return { choice: 'default', ms: 0, configId: player.id };
   }
-  const viewed = ladderDecisionBattle(battle, side);
+  const viewed = ladderDecisionBattle(battle, side, { enrich: enriches(player) });
   if (!viewed) return { choice: legal[0] || 'default', ms: 0, configId: player.id, viewMiss: true };
   return choose(player, viewed, 'p1', rng, gameId, seed);
 }
@@ -288,6 +288,12 @@ async function choose(
   }
   const decision = await player.bot!.decide({ battle, side, rng, gameId, seed });
   return decision;
+}
+
+function enriches(player: Opened): boolean {
+  const config = player.bot?.config;
+  if (!config) return false;
+  return config.search.id === 'hybrid' || config.hybrid?.params.enrichDecisionState === true;
 }
 
 function allowsTera(player: BenchPlayer): boolean {

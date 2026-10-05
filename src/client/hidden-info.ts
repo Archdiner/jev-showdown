@@ -80,13 +80,13 @@ function replayClient(log: readonly string[], side: ViewerSide, request: unknown
 export function ladderDecisionBattle(
   battle: SimBattle,
   side: SideId,
-  options?: { quickWins?: boolean },
+  options?: { quickWins?: boolean; enrich?: boolean },
 ): SimBattle | null {
   const request = battle.getSide(side).activeRequest;
   if (!request || request.wait || request.teamPreview) return null;
   return decisionBattleFromViewerLog(battle.log.join('\n'), side, request, {
     ...options,
-    turn: battle.turn,
+    turn: options?.enrich ? battle.turn : undefined,
   });
 }
 
@@ -95,16 +95,17 @@ export function decisionBattleFromViewerLog(
   log: string,
   side: ViewerSide,
   request: unknown,
-  options?: { quickWins?: boolean; turn?: number },
+  options?: { quickWins?: boolean; turn?: number; enrich?: boolean },
 ): SimBattle | null {
   if (!request || typeof request !== 'object') return null;
   const raw = log.split('\n');
-  const lines = viewerLines(raw, side);
+  const enrich = options?.enrich === true;
+  const lines = enrich ? viewerLines(raw, side) : undefined;
   const client = replayClient(raw, side, request);
   try {
-    const position = livePositionFromClient(client, request, side, lines);
-    if (typeof options?.turn === 'number') position.turn = options.turn;
-    return buildDecisionBattle(position, options);
+    const position = livePositionFromClient(client, request, side, lines, { enrich });
+    if (enrich && typeof options?.turn === 'number') position.turn = options.turn;
+    return buildDecisionBattle(position, { quickWins: options?.quickWins, enrich });
   } catch {
     return null;
   } finally {

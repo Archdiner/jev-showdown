@@ -22,7 +22,7 @@ import {
   teamPreviewChoice,
 } from './choice.js';
 import { alignToRequest, cloneGameState, mismatchData, overlayProtocol } from './tracked-state.js';
-import { LivePosition, buildDecisionBattle } from './decision-battle.js';
+import { LivePosition, buildDecisionBattle, usesDecisionEnrichment } from './decision-battle.js';
 import { livePositionFromClient } from './live-position.js';
 import { ourClockUpdate } from './inactive-clock.js';
 import { safeError, toID } from './ids.js';
@@ -184,6 +184,7 @@ function choiceAlreadyLocked(reason: string): boolean {
 export class BattleDriver extends EventEmitter {
   private readonly rooms = new Map<string, RoomState>();
   private readonly quickWinPaths = new Map<string, boolean>();
+  private readonly enrichPaths = new Map<string, boolean>();
   /** Room ids that already wrote a result. Later lines must not open them again. */
   private readonly closedRooms = new Set<string>();
   /** `setInference.id` for a config file. Null means the legacy tracker. */
@@ -465,7 +466,10 @@ export class BattleDriver extends EventEmitter {
       return;
     }
 
-    const legal = legalActionsForRequest(request, this.options.format, { tera: this.usesQuickWins(room) });
+    const enrich = this.usesEnrichment(room);
+    const legal = legalActionsForRequest(request, this.options.format, {
+      tera: this.usesQuickWins(room) || enrich,
+    });
     if (legal.length === 0) {
       room.log.write({
         type: 'turn',
@@ -541,7 +545,7 @@ export class BattleDriver extends EventEmitter {
       return;
     }
 
-    const safe = sanitizeAction(decision.action, request, legal) ?? pickBestLegal(state, legal);
+    const safe = sanitizeAction(decision.action, request, legal, { enrich }) ?? pickBestLegal(state, legal);
     const adjusted = !sameAction(safe, decision.action);
     if (decision.fallback || adjusted) room.fallbacks += 1;
 
@@ -684,10 +688,30 @@ export class BattleDriver extends EventEmitter {
     return quickWins;
   }
 
+  private usesEnrichment(room: RoomState): boolean {
+    if (usesDecisionEnrichment({ engine: this.options.engineName })) return true;
+    const file = room.assignment?.configPath;
+    if (!file) return false;
+    const cached = this.enrichPaths.get(file);
+    if (cached !== undefined) return cached;
+    let enrich = false;
+    try {
+      const config = loadConfig(file).config;
+      enrich = usesDecisionEnrichment({
+        searchId: config.search.id,
+        enrichDecisionState: config.hybrid?.params.enrichDecisionState,
+      });
+    } catch {
+      enrich = false;
+    }
+    this.enrichPaths.set(file, enrich);
+    return enrich;
+  }
+
   private forecastSafe(room: RoomState, position: LivePosition, choice: string): TurnForecast | null {
     try {
       const quickWins = this.usesQuickWins(room);
-      const battle = buildDecisionBattle(position, { quickWins });
+      const battle = buildDecisionBattle(position, { quickWins, enrich: this.usesEnrichment(room) });
       if (!battle) return null;
       let config: ExactConfig = quickWins ? { ...EXACT_1PLY_QW, samples: 1 } : { ...EXACT_1PLY, samples: 1 };
       if (!quickWins) {
@@ -705,7 +729,14 @@ export class BattleDriver extends EventEmitter {
   }
 
   private livePosition(room: RoomState, request: any): LivePosition {
-    return livePositionFromClient(room.battle, request, room.ourSide === 'p2' ? 'p2' : 'p1', room.lines);
+    const enrich = this.usesEnrichment(room);
+    return livePositionFromClient(
+      room.battle,
+      request,
+      room.ourSide === 'p2' ? 'p2' : 'p1',
+      enrich ? room.lines : undefined,
+      { enrich },
+    );
   }
 
   private reconcile(room: RoomState, request: any): StateMismatch[] {

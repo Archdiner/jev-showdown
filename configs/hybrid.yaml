@@ -12,6 +12,7 @@ hybrid:
     worlds: 4
     samples: 1
     tera: true
+    enrichDecisionState: true
     maxActions: 8
     maxReplies: 3
     regretIterations: 24

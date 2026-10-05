@@ -173,7 +173,8 @@ function applyRevealedTera(side: Battle['p1'], used: string[]): void {
 
 function addHazard(side: Battle['p1'], id: string): void {
   try {
-    side.addSideCondition(id as never);
+    // 'debug' supplies the active pokemon as the source. A bare id throws.
+    side.addSideCondition(id as never, 'debug' as never);
   } catch {
     // A missing hazard changes damage later. It must not reject the decision.
   }
@@ -219,12 +220,19 @@ function knownFoes(position: LivePosition): FoeMon[] {
   return [position.foeActive, ...position.foeBench].filter((mon): mon is FoeMon => !!mon?.species);
 }
 
-function foeSets(foes: FoeMon[]): { sets: PokemonSet[]; kept: FoeMon[] } {
+function foeSets(foes: FoeMon[], enrich: boolean): { sets: PokemonSet[]; kept: FoeMon[] } {
   const sets: PokemonSet[] = [];
   const kept: FoeMon[] = [];
   for (const mon of foes) {
     if (sets.length >= 6) break;
-    const set = toSet(mon.species, mon.moves || [], mon.level || 80, mon.ability, mon.item, mon.terastallized);
+    const set = toSet(
+      mon.species,
+      mon.moves || [],
+      mon.level || 80,
+      mon.ability,
+      mon.item,
+      enrich ? mon.terastallized : undefined,
+    );
     if (!set) continue;
     sets.push(set);
     kept.push(mon);
@@ -239,16 +247,34 @@ function foeSets(foes: FoeMon[]): { sets: PokemonSet[]; kept: FoeMon[] } {
   return { sets, kept };
 }
 
+/** Hazards, revealed Tera, the real turn, and public notes. Hybrid configs only. */
+export function usesDecisionEnrichment(input: {
+  engine?: string | null;
+  searchId?: string | null;
+  enrichDecisionState?: boolean | null;
+}): boolean {
+  return input.engine === 'hybrid'
+    || input.searchId === 'hybrid'
+    || input.enrichDecisionState === true;
+}
+
+export interface DecisionBuildOptions {
+  quickWins?: boolean;
+  /** Hybrid only. Default engines leave hazards, revealed Tera, and turn off the clone. */
+  enrich?: boolean;
+}
+
 /**
  * A @pkmn/sim battle whose `move N` / `switch N` indexes match the live request.
  * Slot 0 is the active pokemon. That is the same indexing the server uses.
  */
-export function buildDecisionBattle(position: LivePosition, options?: { quickWins?: boolean }): Battle | null {
+export function buildDecisionBattle(position: LivePosition, options?: DecisionBuildOptions): Battle | null {
   const request = position.request;
   if (!request || request.wait || request.teamPreview) return null;
   const quickWins = options?.quickWins === true;
+  const enrich = options?.enrich === true;
   const ours = ourSets(request, quickWins);
-  const foe = foeSets(knownFoes(position));
+  const foe = foeSets(knownFoes(position), enrich);
   if (!ours || foe.sets.length === 0) return null;
 
   try {
@@ -325,22 +351,24 @@ export function buildDecisionBattle(position: LivePosition, options?: { quickWin
 
     const force = isForceSwitch(request) || !!active.fainted;
     if (force) active.switchFlag = true;
-    if (!request.active?.[0]?.canTerastallize) {
-      for (const mon of battle.p1.pokemon) mon.canTerastallize = null as never;
+    if (enrich) {
+      if (!request.active?.[0]?.canTerastallize) {
+        for (const mon of battle.p1.pokemon) mon.canTerastallize = null as never;
+      }
+      for (const id of position.myHazards || []) addHazard(battle.p1, id);
+      for (const id of position.foeHazards || []) addHazard(battle.p2, id);
+      applyRevealedTera(battle.p1, slots.map(slot => String(slot?.terastallized || '')));
+      applyRevealedTera(battle.p2, foe.kept.map(mon => mon.terastallized || ''));
     }
-    for (const id of position.myHazards || []) addHazard(battle.p1, id);
-    for (const id of position.foeHazards || []) addHazard(battle.p2, id);
-    applyRevealedTera(battle.p1, slots.map(slot => String(slot?.terastallized || '')));
-    applyRevealedTera(battle.p2, foe.kept.map(mon => mon.terastallized || ''));
     battle.makeRequest(force ? 'switch' : 'move');
-    if (typeof position.turn === 'number' && Number.isFinite(position.turn)) battle.turn = position.turn;
+    if (enrich && typeof position.turn === 'number' && Number.isFinite(position.turn)) battle.turn = position.turn;
     const reviving = (request.side?.pokemon || []).some((mon: { reviving?: boolean }) => mon?.reviving);
     if (reviving) {
       const slot = battle.p1.slotConditions[active.position] as Record<string, unknown>;
       if (slot) slot.revivalblessing = { id: 'revivalblessing' };
     }
     if (legalChoices(battle, 'p1').length === 0) return null;
-    attachBattleEvidence(battle, position);
+    if (enrich) attachBattleEvidence(battle, position);
     return battle;
   } catch {
     return null;
@@ -356,6 +384,8 @@ export interface LiveConfigPlayer {
   }): Promise<{ choice: string; scores?: Array<{ choice: string; score: number }> }>;
   /** Exact 1-ply quick wins. The champion player leaves this unset. */
   quickWins?: boolean;
+  /** Sampled-world search. Copies hazards, revealed Tera, and the real turn. */
+  enrich?: boolean;
 }
 
 /**
@@ -371,22 +401,23 @@ export async function chooseLive(
   budgetMs?: number,
 ): Promise<{ action: Action; score: number | null }> {
   if (!position) throw new Error('missing live position');
-  const battle = buildDecisionBattle(position, { quickWins: player?.quickWins === true });
+  const enrich = player?.enrich === true || engine === 'hybrid';
+  const battle = buildDecisionBattle(position, { quickWins: player?.quickWins === true, enrich });
   if (!battle) throw new Error('could not build a sim battle');
   const decision = player
     ? await player.decide({ battle, side: 'p1', budgetMs })
     : await decide(ladderPolicy(engine), battle, 'p1', new PRNG([1, 2, 3, 4] as any));
   const action = actionFromChoice(decision.choice);
-  if (!action || !actionAllowed(legal, action)) {
+  if (!action || !actionAllowed(legal, action, enrich)) {
     throw new Error(`engine returned a choice that is not legal (${decision.choice})`);
   }
   const score = decision.scores?.find(row => row.choice === decision.choice)?.score ?? null;
   return { action, score };
 }
 
-function actionAllowed(legal: Action[], action: Action): boolean {
+function actionAllowed(legal: Action[], action: Action, enrich: boolean): boolean {
   if (legal.some(candidate => sameAction(candidate, action))) return true;
-  if (action.type !== 'move' || !action.terastallize) return false;
+  if (!enrich || action.type !== 'move' || !action.terastallize) return false;
   const plain: Action = { type: 'move', moveIndex: action.moveIndex };
   return legal.some(candidate => sameAction(candidate, plain));
 }

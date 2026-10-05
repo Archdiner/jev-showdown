@@ -72,6 +72,11 @@ export const HybridParamsSchema = z.object({
   /** Grok 4.7 uses `none`. Opus uses `low`. Qwen on Cerebras uses `medium`. */
   effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh']).default('medium'),
   maxTokens: z.number().int().positive().default(10000),
+  /**
+   * Copy hazards, revealed Tera, the real turn, and public speed notes onto
+   * the decision battle. Off for every engine that has no hybrid block.
+   */
+  enrichDecisionState: z.boolean().default(true),
 }).strict();
 export type HybridParams = z.infer<typeof HybridParamsSchema>;
 
