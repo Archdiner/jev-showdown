@@ -3,6 +3,7 @@
 import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { accountLockRefusal, readHeldAccountLock } from '../client/account-lock.js';
 import {
   defaultLadderRunDirs,
   pidAlive,
@@ -42,18 +43,20 @@ export function checkWorktree(facts: WorktreeFacts): string | null {
 }
 
 /**
- * The per-account lock is acquired in src/cli/ladder.ts before login.
- * It records pid and username on the live-runs row. A live pid for this
- * account, or a public ladder process that forgot the username, blocks login.
+ * The account lock is `state/ladder-<userid>.lock`, taken by ladder.ts before login.
+ * A live holder blocks preflight. A public live-runs row for this account does too.
  */
 export function accountLockReason(
   username: string,
   runs: LadderRunMeta[],
   alive: (pid: number) => boolean = pidAlive,
+  stateDir = path.resolve('state'),
 ): string | null {
   if (!username.trim()) {
     return 'Set SHOWDOWN_USERNAME or pass --username. Refusing to log in without an account.';
   }
+  const held = readHeldAccountLock(username, { stateDir, alive });
+  if (held) return accountLockRefusal(held);
   return publicAccountConflict(username, runs, alive)?.message ?? null;
 }
 

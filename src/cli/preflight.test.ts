@@ -34,6 +34,18 @@ describe('live preflight', () => {
     })).toMatch(/could not verify origin\/main/);
   });
 
+  it('refuses a live account lock file and ignores a stale one', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-preflight-lock-'));
+    fs.writeFileSync(path.join(dir, 'ladder-bot.lock'), JSON.stringify({
+      pid: 4242,
+      startedAt: '2026-10-05T03:07:00.000Z',
+      host: os.hostname(),
+      username: 'Bot',
+    }));
+    expect(accountLockReason('Bot', [], pid => pid === 4242, dir)).toMatch(/another runner already holds Bot/);
+    expect(accountLockReason('Bot', [], () => false, dir)).toBeNull();
+  });
+
   it('blocks an empty username and any other public ladder process', () => {
     expect(accountLockReason('', [])).toMatch(/SHOWDOWN_USERNAME/);
     const live: LadderRunMeta = { runId: 'a', pid: 42, username: 'Bot', local: false };
