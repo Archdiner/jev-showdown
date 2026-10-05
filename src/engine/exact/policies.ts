@@ -101,6 +101,9 @@ export function specFromId(id: string): PolicySpec {
     case 'champion-exact-1ply':
       return { kind: 'exact', config: EXACT_1PLY };
     case QUICK_WIN_POLICY_ID:
+    case 'exact-1ply-qw':
+    case 'qw':
+    case 'exact-qw':
       return { kind: 'exact', config: EXACT_1PLY_QW };
     case 'switch-depth2':
     case 'challenger-switch-depth2':

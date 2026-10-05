@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import type { EnvName } from './env.js';
 import type { BotSpec } from './interfaces.js';
 import { loadConfig, resolveRaw, toSpec } from './load.js';
@@ -12,6 +13,10 @@ const FILES: Record<string, string> = {
   'exact-1ply': 'configs/champion.yaml',
   'challenger-exact-1ply': 'configs/champion.yaml',
   champion: 'configs/champion.yaml',
+  'exact-1ply-qw': 'configs/exact-1ply-qw.yaml',
+  qw: 'configs/exact-1ply-qw.yaml',
+  'fitted-1ply': 'configs/fitted-1ply.yaml',
+  fitted: 'configs/fitted-1ply.yaml',
   legacy: 'configs/examples/search-legacy.yaml',
   'champion-v0': 'configs/examples/search-legacy.yaml',
   mcts: 'configs/examples/search-mcts-stub.yaml',
@@ -26,9 +31,22 @@ export function specForAlias(id: string, env: EnvName = 'selfplay'): BotSpec {
   if (id.startsWith('exact:') || id.startsWith('exact,')) {
     return toSpec(resolveRaw(exactRaw(id), id), env);
   }
-  const file = FILES[id];
+  const file = FILES[id] ?? guessConfigFile(id);
   if (!file) throw new Error(`Unknown bot id "${id}". Pass a config path under configs/.`);
   return toSpec(loadConfig(file), env);
+}
+
+function guessConfigFile(id: string): string | null {
+  const candidates = [
+    `configs/${id}.yaml`,
+    `configs/${id}.yml`,
+    `configs/panel/${id}.yaml`,
+    `configs/examples/${id}.yaml`,
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 function exactRaw(id: string): RawConfig {

@@ -5,8 +5,9 @@ import { gen9RandomBattle } from '../formats/gen9-randombattle.js';
 import { specForAlias } from '../config/aliases.js';
 import { BenchPlayer, GameJob, GameResult, playerId } from './game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
-import { EXACT_1PLY, EXACT_1PLY_QW, ExactConfig, FITTED_1PLY, FITTED_DEPTH2, SWITCH_DEPTH2 } from '../engine/exact/search.js';
-import { assertRandbatsSpecies, randbatsSpeciesCount, statsFileSpeciesCount } from '../engine/exact/team-features.js';
+import { EXACT_1PLY, ExactConfig, FITTED_DEPTH2, SWITCH_DEPTH2 } from '../engine/exact/search.js';
+import { assertRandbatsSpecies, MIN_RANDBATS_SPECIES, randbatsSpeciesCount, statsFileSpeciesCount } from '../engine/exact/team-features.js';
+import { isBotSpec, layerIdsOf } from '../config/load.js';
 import { wilson } from '../dashboard/stats.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
 import { p99, runGamesParallel } from './pool.js';
@@ -18,15 +19,27 @@ function arg(name: string, fallback: string): string {
 
 /** Engine names play the policy directly. Config aliases and file paths play through buildBot. */
 function policy(name: string): BenchPlayer {
+  if (!name || !name.trim()) throw new Error('Empty policy/config name');
   if (name === 'random') return { kind: 'random' };
   if (name === 'maxdamage') return { kind: 'maxdamage' };
   if (name === 'legacy') return { kind: 'legacy' };
   if (name === 'exact') return { kind: 'exact', config: EXACT_1PLY };
-  if (name === 'fitted' || name === 'fitted-1ply') return { kind: 'exact', config: FITTED_1PLY };
   if (name === 'fitted-depth2' || name === 'fitted-d2') return { kind: 'exact', config: FITTED_DEPTH2 };
-  if (name === 'qw' || name === 'exact-qw') return { kind: 'exact', config: EXACT_1PLY_QW };
   if (name === 'switch') return { kind: 'exact', config: SWITCH_DEPTH2 };
-  if (name.startsWith('exact')) {
+  // Prefer config files for qw / fitted / champion aliases so the resolved
+  // search id, evaluator, and config hash are recorded on the bench result.
+  if (
+    name === 'qw'
+    || name === 'exact-qw'
+    || name === 'exact-1ply-qw'
+    || name === 'fitted'
+    || name === 'fitted-1ply'
+    || name === 'exact-1ply'
+    || name === 'champion'
+  ) {
+    return specForAlias(name, 'selfplay');
+  }
+  if (name.startsWith('exact:') || name.startsWith('exact,')) {
     const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',');
     const config: ExactConfig = {
       depth: Number(depth) || EXACT_1PLY.depth,
@@ -41,6 +54,7 @@ function policy(name: string): BenchPlayer {
 }
 
 function usesFitted(player: BenchPlayer): boolean {
+  if (isBotSpec(player)) return player.config.evaluator.id === 'fitted-team';
   if (!('kind' in player) || player.kind !== 'exact') return false;
   return player.config.evalMode === 'fitted';
 }
@@ -187,6 +201,35 @@ function playRate(results: GameResult[], jobs: GameJob[], candidate: BenchPlayer
   };
 }
 
+
+function describePlayer(player: BenchPlayer): Record<string, unknown> {
+  if (isBotSpec(player)) {
+    return {
+      kind: 'config',
+      configId: player.configId,
+      name: player.config.name,
+      search: player.config.search,
+      evaluator: player.config.evaluator,
+      layers: layerIdsOf(player.config),
+    };
+  }
+  if (player.kind === 'exact') {
+    return { kind: 'exact', config: player.config };
+  }
+  return { kind: player.kind };
+}
+
+function assertStatsFloor(min = MIN_RANDBATS_SPECIES): number {
+  const count = statsFileSpeciesCount();
+  if (count == null) {
+    throw new Error(`data/gen9-stats.json is missing (need >= ${min} species)`);
+  }
+  if (count < min) {
+    throw new Error(`data/gen9-stats.json has ${count} species (need >= ${min})`);
+  }
+  return count;
+}
+
 async function main() {
   if (process.argv.includes('--diagnostics')) {
     const result = runDiagnosticSuite(EXACT_1PLY);
@@ -200,12 +243,14 @@ async function main() {
   const seed = Number(arg('seed', '1'));
   const information = informationArg();
   const species = randbatsSpeciesCount();
-  const statsSpecies = statsFileSpeciesCount();
-  console.log(`randbats generator species=${species} statsFile=${statsSpecies ?? 'missing'}`);
+  const statsSpecies = assertStatsFloor();
+  console.log(`randbats generator species=${species} statsFile=${statsSpecies}`);
   if (usesFitted(a) || usesFitted(b)) assertRandbatsSpecies();
+  const resolvedA = describePlayer(a);
+  const resolvedB = describePlayer(b);
   console.log(`Paired benchmark: ${pairs} seeds x 2 sides, information=${information}`);
-  console.log(`A: ${JSON.stringify(a)}`);
-  console.log(`B: ${JSON.stringify(b)}`);
+  console.log(`A resolved: ${JSON.stringify(resolvedA)}`);
+  console.log(`B resolved: ${JSON.stringify(resolvedB)}`);
   const jobs = pairedJobs(pairs, a, b, seed, information);
   const started = Date.now();
   const results = await runGamesParallel(jobs);
@@ -227,11 +272,20 @@ async function main() {
   publishDataResult('logs/bench.json', {
     pairs,
     information,
+    resolved: { a: resolvedA, b: resolvedB },
     summary,
     viewMiss,
     play,
     seconds: Number(seconds),
   });
+  if (summary.invalid > 0) {
+    console.error(`aborting: ${summary.invalid} invalid engine choices`);
+    process.exit(1);
+  }
+  if (summary.crashes > 0) {
+    console.error(`aborting: ${summary.crashes} crashed games`);
+    process.exit(1);
+  }
 }
 
 main().catch(error => {
