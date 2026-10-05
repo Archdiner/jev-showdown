@@ -17,6 +17,7 @@ const FILES: Record<string, string> = {
   qw: 'configs/exact-1ply-qw.yaml',
   'fitted-1ply': 'configs/fitted-1ply.yaml',
   fitted: 'configs/fitted-1ply.yaml',
+  'stacked-qw-fitted': 'configs/stacked-qw-fitted.yaml',
   legacy: 'configs/examples/search-legacy.yaml',
   'champion-v0': 'configs/examples/search-legacy.yaml',
   mcts: 'configs/examples/search-mcts-stub.yaml',
