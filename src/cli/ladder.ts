@@ -197,11 +197,11 @@ Each finished game records configId, configHash, and the commit. The startup lin
 Backpressure always pauses new searches when p95 latency degrades, the turn timer drops under the safety margin, or Showdown throttles a search. Games already running are left in place.
 A proxy lock, ban, or ‽/! name exits immediately and does not reconnect.
 
-Graceful drain (finish in-progress games, never /forfeit, then exit):
+Graceful drain (finish in-progress games, then exit):
   kill -USR1 <pid>    or    kill -TERM <pid>
   touch state/DRAIN
   touch live-runs/<runId>.drain
-The runner prints <pid> and <runId> at startup. A second SIGTERM or SIGUSR1 exits immediately.
+The runner prints <pid> and <runId> at startup. The first SIGTERM or SIGUSR1 stops new searches and, once nothing is in progress, exits. A second one exits immediately. A room whose newest |t:| is more than 70 minutes old is forfeited on sight and does not count toward drain or concurrency. Live games are not forfeited.
 SIGINT still disconnects right away and does not send /forfeit.
 
 Local server, two clients, N games:
@@ -290,6 +290,10 @@ async function makePlayer(input: {
   });
   client.on('lobby', (line: string) => queue.noteLobby(line));
   driver.on('battleStart', (roomId: string) => queue.noteBattle(roomId));
+  client.on('staleRoom', (roomId: string) => {
+    console.warn(`[${input.label}] stale battle ${roomId} forfeited; it does not count`);
+    queue.noteEnd(roomId);
+  });
   input.metrics?.attach(driver);
   input.admission?.watch({ queue, driver });
   driver.on('gameEnd', summary => posthog?.captureGame(summary));
@@ -679,6 +683,7 @@ function readFormatRating(client: ShowdownClient, format: string): Promise<numbe
 
 async function main(): Promise<void> {
   const posthog = installPosthogSink();
+  let drained = false;
   try {
     const opts = parseArgs(process.argv.slice(2));
     if (opts.help) {
@@ -725,6 +730,7 @@ async function main(): Promise<void> {
         : await runRemote(opts, session.drain, metrics, admission, identity);
       metrics.finish({ games: summaries.length, requested: opts.games });
       report(summaries, opts, identity, session.drain);
+      drained = session.drain.isDraining;
     } finally {
       admission.stop();
       session.close();
@@ -732,6 +738,10 @@ async function main(): Promise<void> {
     }
   } finally {
     await posthog?.shutdown();
+  }
+  if (drained) {
+    const code = typeof process.exitCode === 'number' ? process.exitCode : 0;
+    process.exit(code);
   }
 }
 

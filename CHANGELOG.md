@@ -1,5 +1,9 @@
 # Changelog
 
+## Stale battle rooms do not block the drain
+
+A room left over from an earlier session is rejoined when the runner logs in. If its newest `|t:|` is more than 70 minutes old, the client forfeits it and does not deliver its lines, so it is not an in-progress game and does not use a concurrency slot. A room with no `|t:|` (a local battle) stays live. The first SIGTERM or SIGUSR1 still drains real games; when nothing is left in progress the process exits.
+
 ## A sent choice is resent until the turn moves
 
 `/choose` returning true is not the server applying the move. If no new `|request|` and no later `|turn|` follows that send within 8 seconds, the same choice and the same rqid are sent again, including on turn 1. A `|turn|1` that arrives after the move was sent does not count: that line starts the turn. A clock line for us with no new turn also resends. Each `choice-delivery` row has `intendedRoomId` (the battle the request belonged to) and `sentRoomId` (the room id written on `/choose`). A choice whose rqid is no longer the room's request is not sent. One websocket frame can carry several battles; each `>roomid` switches the room, so a later battle's `|request|` is not answered in the earlier room. A replay popup names the battle in its URL, including the password after the id, and is not written onto a different open battle or onto whichever room was active most recently. A popup line that names another battle is dropped instead of being stored on the room that happened to receive it. A finished battle ignores later lines, so it does not log a second `game_start`.

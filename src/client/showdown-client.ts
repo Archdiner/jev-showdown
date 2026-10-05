@@ -9,6 +9,7 @@ import {
 } from './account-block.js';
 import { redactSecrets, safeError, toID } from './ids.js';
 import { roomLines } from './protocol-frames.js';
+import { battleTimestamp, isStaleBattle } from './stale-room.js';
 
 export {
   AccountBlockedError,
@@ -53,6 +54,13 @@ export class ShowdownClient extends EventEmitter {
   private backoffMs = 1000;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private readonly rooms = new Set<string>();
+  /** Battles already judged live. Later lines are delivered immediately. */
+  private readonly admitted = new Set<string>();
+  /** Ghost rooms. They are not rejoined and their lines are not delivered. */
+  private readonly ignored = new Set<string>();
+  private readonly held = new Map<string, string[]>();
+  private readonly heldUnix = new Map<string, number | null>();
+  private readonly holdTimers = new Map<string, NodeJS.Immediate>();
   private intentionalClose = false;
   private nonRetriable = false;
   private blockError: AccountBlockedError | null = null;
@@ -85,12 +93,24 @@ export class ShowdownClient extends EventEmitter {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    for (const timer of this.holdTimers.values()) clearImmediate(timer);
+    this.holdTimers.clear();
+    this.held.clear();
     this.ws?.close();
     this.ws = null;
   }
 
   trackRoom(roomId: string): void {
-    if (roomId) this.rooms.add(roomId);
+    if (!roomId || this.ignored.has(roomId)) return;
+    this.rooms.add(roomId);
+  }
+
+  /**
+   * Drop a ghost battle. The next reconnect will not `/join` it.
+   * A stale room is the only path that sends `/forfeit`.
+   */
+  forfeit(roomId: string): boolean {
+    return this.send(`${roomId}|/forfeit`);
   }
 
   untrackRoom(roomId: string): void {
@@ -254,7 +274,54 @@ export class ShowdownClient extends EventEmitter {
 
   private handlePayload(payload: string): void {
     for (const { roomid, line } of roomLines(payload)) {
+      if (!line) continue;
+      if (this.ignored.has(roomid)) continue;
+      if (roomid.startsWith('battle-') && !this.admitted.has(roomid)) {
+        this.holdBattleLine(roomid, line);
+        continue;
+      }
       if (roomid.startsWith('battle-')) this.rooms.add(roomid);
+      this.emit('line', roomid, line);
+      this.handleLine(roomid, line);
+    }
+  }
+
+  /**
+   * The joined history arrives in one synchronous payload. Judge it on the
+   * next turn, after every `|t:|` in that payload has been seen. A ghost is
+   * forfeited and never handed to the battle driver, so it cannot count as
+   * in progress.
+   */
+  private holdBattleLine(roomid: string, line: string): void {
+    const bucket = this.held.get(roomid) ?? [];
+    bucket.push(line);
+    this.held.set(roomid, bucket);
+    const unix = battleTimestamp(line);
+    if (unix !== null) {
+      const prev = this.heldUnix.get(roomid) ?? null;
+      this.heldUnix.set(roomid, prev === null ? unix : Math.max(prev, unix));
+    }
+    if (this.holdTimers.has(roomid)) return;
+    this.holdTimers.set(roomid, setImmediate(() => this.releaseHold(roomid)));
+  }
+
+  private releaseHold(roomid: string): void {
+    this.holdTimers.delete(roomid);
+    const lines = this.held.get(roomid) ?? [];
+    const newest = this.heldUnix.get(roomid) ?? null;
+    this.held.delete(roomid);
+    this.heldUnix.delete(roomid);
+    if (this.intentionalClose || this.ignored.has(roomid)) return;
+    if (isStaleBattle(newest, Date.now())) {
+      this.ignored.add(roomid);
+      this.rooms.delete(roomid);
+      this.forfeit(roomid);
+      this.emit('staleRoom', roomid);
+      return;
+    }
+    this.admitted.add(roomid);
+    this.rooms.add(roomid);
+    for (const line of lines) {
       this.emit('line', roomid, line);
       this.handleLine(roomid, line);
     }
