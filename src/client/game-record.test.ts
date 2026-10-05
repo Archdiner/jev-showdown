@@ -141,6 +141,8 @@ describe('ladder game records', () => {
     expect(record.minTimerMarginSec).toBe(12);
     expect(record).not.toHaveProperty('decisionLatencyMs');
     expect(record.replayStatus).toBe('unconfirmed');
+    expect(record.beliefErrors).toBe(0);
+    expect(buildLadderGameRecord(input({ beliefErrors: 3 })).beliefErrors).toBe(3);
     const ops = toOpsLiveGame(record);
     expect(ops.rating).toBeNull();
     expect(ops.gxe).toBeNull();
@@ -419,6 +421,7 @@ describe('BattleDriver game record', () => {
       invalidChoices: 0,
       crashes: 0,
       fallbacks: 0,
+      beliefErrors: 0,
       replayStatus: 'unconfirmed',
     });
     expect(summary.durationMs).toBeGreaterThanOrEqual(0);

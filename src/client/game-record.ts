@@ -92,6 +92,11 @@ export interface LadderGameRecord {
   crashes: number;
   fallbacks: number;
   mismatches: number;
+  /**
+   * Posterior updates that threw in this game. The battle then used BeliefTracker.
+   * 0 when set inference is not calibrated.
+   */
+  beliefErrors: number;
   eloBefore: number | null;
   eloAfter: number | null;
   /** Null when the server line had no GXE. Never defaulted. */
@@ -322,6 +327,8 @@ export interface LadderGameInput {
   crashes: number;
   fallbacks: number;
   mismatches: number;
+  /** Posterior throws. Omitted by older callers; the record stores 0. */
+  beliefErrors?: number;
   /** `before` on the rating update for this battle. Null when that update has no before. */
   eloBefore: number | null;
   eloAfter: number | null;
@@ -402,6 +409,7 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     crashes: input.crashes,
     fallbacks: input.fallbacks,
     mismatches: input.mismatches,
+    beliefErrors: input.beliefErrors ?? 0,
     eloBefore: rated.eloBefore,
     eloAfter: rated.eloAfter,
     gxe,
