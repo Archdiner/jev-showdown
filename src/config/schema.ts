@@ -66,7 +66,7 @@ export const HybridParamsSchema = z.object({
   margin: z.number().nonnegative().default(0.75),
   planEvery: z.number().int().min(1).max(20).default(4),
   model: z.string().min(1).default('alibaba/qwen3.8-27b'),
-  plannerModel: z.string().min(1).default('anthropic/claude-opus-5.5'),
+  plannerModel: z.string().min(1).default('alibaba/qwen3.8-27b'),
   maxTokens: z.number().int().positive().default(10000),
 }).strict();
 export type HybridParams = z.infer<typeof HybridParamsSchema>;
