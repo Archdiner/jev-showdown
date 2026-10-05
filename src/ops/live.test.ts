@@ -22,6 +22,35 @@ function tempPaths() {
   return paths;
 }
 
+async function serverWithoutSim() {
+  const wss = new WebSocketServer({ port: 0 });
+  await new Promise<void>(resolve => wss.once('listening', () => resolve()));
+  const address = wss.address();
+  if (!address || typeof address === 'string') throw new Error('no port');
+  const request = {
+    active: [{ moves: [{ id: 'tackle', disabled: false }] }],
+    side: { id: 'p1', pokemon: [{ ident: 'p1: Mon', active: true, condition: '100/100' }] },
+  };
+  wss.on('connection', socket => {
+    socket.send('|challstr|local\n');
+    socket.on('message', data => {
+      const text = data.toString();
+      const trn = text.match(/\/trn ([^,|]+)/);
+      if (trn) socket.send(`|updateuser| ${trn[1].trim()}|1|1\n`);
+      if (text.includes('/search')) {
+        socket.send(`>battle-local-1\n|init|battle\n|player|p1|localbot\n|player|p2|Foe\n|request|${JSON.stringify(request)}\n`);
+      }
+      if (text.includes('/choose')) {
+        socket.send('>battle-local-1\n|turn|1\n|win|localbot\n');
+      }
+    });
+  });
+  return {
+    url: `ws://127.0.0.1:${address.port}/showdown/websocket`,
+    close: () => new Promise<void>(resolve => wss.close(() => resolve())),
+  };
+}
+
 async function rejectingServer() {
   const wss = new WebSocketServer({ port: 0 });
   await new Promise<void>(resolve => wss.once('listening', () => resolve()));
@@ -103,6 +132,47 @@ describe('live search slots', () => {
       });
       expect(summary.skipped).toBe('window');
       expect(summary.games).toBe(0);
+    } finally {
+      await server.close();
+    }
+  }, 20_000);
+});
+
+describe('local live fallback record', () => {
+  test('a choice the sim cannot rebuild is counted on the game row', async () => {
+    const paths = tempPaths();
+    judge(paths, {
+      configPath: 'configs/champion.yaml',
+      action: 'champion',
+      wins: 250,
+      losses: 100,
+      invalid: 0,
+      crashes: 0,
+      diagnostics: { passed: 1, failed: 0, total: 1 },
+    });
+    const server = await serverWithoutSim();
+    try {
+      const summary = await runLive({
+        paths,
+        local: true,
+        server: server.url,
+        games: 1,
+        runners: 1,
+        concurrency: 1,
+        username: 'localbot',
+        once: true,
+        timeoutMs: 15_000,
+      });
+      expect(summary.games).toBe(1);
+      const games = fs.readFileSync(paths.liveGames, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      const beats = fs.readFileSync(paths.heartbeats, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      const fallbackBeats = beats.filter((row: { detail?: string }) => row.detail === 'choice-fallback battle-local-1');
+      expect(fallbackBeats.length).toBeGreaterThan(0);
+      expect(games).toHaveLength(1);
+      expect(games[0].battleId).toBe('battle-local-1');
+      expect(games[0].fallbacks).toBe(fallbackBeats.length);
+      expect(games[0].fallbacks).toBe(1);
+      expect(games[0].mismatches).toBe(0);
     } finally {
       await server.close();
     }

@@ -1,5 +1,9 @@
 # Changelog
 
+## Local ops live was grading fallback moves as the config
+
+`exact-1ply-qw` chooses `move N terastallize` when the request allows it. The ops live session treated that string as illegal, sent the first plain move, and logged `choice-fallback`. Because Terastallize never landed, the next turn asked for it again, so one local battle produced a run of fallback heartbeats. The finished row still stored `fallbacks: 0`, so the gatekeeper read those games as clean. The session now sends a Terastallize choice the request allows and writes the fallback count it actually observed. The sentinel raises P1 when those heartbeats pass 2 in one battle, or when the row's count does not match them. The check reads the JSONL files only.
+
 ## Fitted 1-ply is a live A/B challenger
 
 `configs/fitted-1ply.yaml` plays the fitted-team evaluator through greedy 1-ply (depth 1, 8 samples, max-damage opponent). Config id `b010a726fd447898`. Champion exact 1-ply is unchanged.

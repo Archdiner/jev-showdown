@@ -211,6 +211,70 @@ describe('pulled-config invariant', () => {
   });
 });
 
+describe('ops live fallback heartbeats', () => {
+  function opsGame(battleId: string, fallbacks: number, ts: number): string {
+    return JSON.stringify({
+      schema: 'jev.ladder-game.v1',
+      kind: 'ladder-game',
+      source: 'ops',
+      localServer: true,
+      battleId,
+      ts,
+      outcome: 'win',
+      endReason: 'ko',
+      turns: 12,
+      username: 'localbot',
+      format: 'gen9randombattle',
+      fallbacks,
+      crashes: 0,
+      invalidChoices: 0,
+    });
+  }
+
+  function beats(battleId: string, count: number, ts: number): string {
+    return Array.from({ length: count }, (_, index) => JSON.stringify({
+      facility: 'live',
+      pid: 15,
+      ts: ts + index,
+      status: 'error',
+      detail: `choice-fallback ${battleId}`,
+    })).join('\n');
+  }
+
+  test('a flood or a row that hides fallbacks is P1 without /proc', () => {
+    const missing = path.join(os.tmpdir(), `jev-noproc-fallback-${process.pid}`);
+    expect(scanProcesses({ procRoot: missing })).toEqual([]);
+
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    fs.writeFileSync(path.join(layout.opsDir, 'live-games.jsonl'), [
+      opsGame('battle-local-27', 0, now - 5000),
+      opsGame('battle-local-88', 1, now - 4000),
+      opsGame('battle-local-3', 2, now - 3000),
+    ].join('\n') + '\n');
+    fs.writeFileSync(path.join(layout.opsDir, 'heartbeats.jsonl'), [
+      beats('battle-local-27', 4, now - 4900),
+      beats('battle-local-88', 1, now - 3900),
+      beats('battle-local-3', 2, now - 2900),
+    ].join('\n') + '\n');
+
+    const result = scanOnce(layout, { now, scanProcesses: false, git: quietGit });
+    const hits = result.hits.filter(hit => hit.id === 'live-fallback-flood');
+    expect(hits.every(hit => hit.severity === 'P1')).toBe(true);
+    expect(hits.map(hit => hit.key).sort()).toEqual([
+      'disagree:battle-local-27',
+      'flood:battle-local-27',
+    ]);
+    expect(hits.find(hit => hit.key === 'disagree:battle-local-27')?.detail).toContain('fallbacks=0');
+    expect(hits.find(hit => hit.key === 'disagree:battle-local-27')?.detail).toContain('heartbeats=4');
+    expect(hits.find(hit => hit.key === 'flood:battle-local-27')?.detail).toContain('threshold 2');
+    expect(result.openP1).toBeGreaterThan(0);
+
+    const quiet = scanOnce(emptyRoot().layout, { now, scanProcesses: false, git: quietGit });
+    expect(quiet.hits.map(hit => hit.id)).not.toContain('live-fallback-flood');
+  });
+});
+
 describe('runner exit without a drain', () => {
   test('a runner that timed out without a drain is a P1', () => {
     const { layout } = emptyRoot();

@@ -37,6 +37,45 @@ describe('ladder choice fallback', () => {
     expect(delivered).toEqual({ choice: 'move 1', fallback: true });
   });
 
+  test('a terastallize choice the request allows is sent as the config decision', async () => {
+    const teraRequest = {
+      active: [{
+        canTerastallize: 'Fire',
+        moves: [{ disabled: false }, { disabled: false }],
+      }],
+      side: { pokemon: [{ active: true, condition: '100/100' }] },
+    };
+    const session = new LadderSession(bot(async () => ({
+      choice: 'move 2 terastallize',
+      configId: 'cfg',
+      layerIds: {} as never,
+      activeLayerIds: {} as never,
+      scores: [],
+      ms: 1,
+      advisorCalled: false,
+      overBudget: false,
+      gamePlan: null,
+    })), { reconstruct: () => ({}) as Battle });
+    const delivered = await session.onRequest('battle-local-1', teraRequest, '', 'p1');
+    expect(delivered).toEqual({ choice: 'move 2 terastallize', fallback: false });
+  });
+
+  test('a terastallize choice is a fallback when the request cannot tera', async () => {
+    const session = new LadderSession(bot(async () => ({
+      choice: 'move 1 terastallize',
+      configId: 'cfg',
+      layerIds: {} as never,
+      activeLayerIds: {} as never,
+      scores: [],
+      ms: 1,
+      advisorCalled: false,
+      overBudget: false,
+      gamePlan: null,
+    })), { reconstruct: () => ({}) as Battle });
+    const delivered = await session.onRequest('battle-1', request, '', 'p1');
+    expect(delivered).toEqual({ choice: 'move 1', fallback: true });
+  });
+
   test('a legal decide result is sent as itself', async () => {
     const session = new LadderSession(bot(async () => ({
       choice: 'move 1',

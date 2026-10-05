@@ -83,7 +83,10 @@ function requestAllows(choice: string, request: unknown): boolean {
     const preview = teamPreviewChoice(request);
     return Boolean(preview) && bare === preview!.split('|')[0];
   }
-  return strictLegalActions(request).some(action => formatChoice(action) === bare);
+  // Include Terastallize when this request says the active Pokémon can tera.
+  // A plain-move list rejects `move N terastallize`, the session sends the first
+  // move instead, and the next turn asks for tera again because it was never used.
+  return strictLegalActions(request, { tera: true }).some(action => formatChoice(action) === bare);
 }
 
 /** Ladder / local-server session. A missing sim still yields a legal choice. */
