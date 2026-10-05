@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { DecisionClient } from './decision-client.js';
@@ -41,6 +42,36 @@ describe('inactive clock', () => {
 
 describe('ladder timer request', () => {
   beforeAll(async () => {
+    // data/*.json is gitignored. Other suites write these files, but this
+    // file can run first on a clean CI checkout.
+    const dataDir = path.join(process.cwd(), 'data');
+    fs.mkdirSync(dataDir, { recursive: true });
+    const setsPath = path.join(dataDir, 'gen9-sets.json');
+    const statsPath = path.join(dataDir, 'gen9-stats.json');
+    if (!fs.existsSync(setsPath)) {
+      fs.writeFileSync(setsPath, JSON.stringify({ Pikachu: { level: 88 } }));
+    }
+    if (!fs.existsSync(statsPath)) {
+      fs.writeFileSync(statsPath, JSON.stringify({
+        Pikachu: {
+          level: 88,
+          abilities: { Static: 0.9, 'Lightning Rod': 0.1 },
+          items: { 'Light Ball': 1.0 },
+          roles: {
+            'Fast Attacker': {
+              weight: 0.8,
+              moves: { Thunderbolt: 1.0, 'Volt Switch': 0.8 },
+              items: { 'Light Ball': 1.0 },
+            },
+            Wallbreaker: {
+              weight: 0.2,
+              moves: { Thunderbolt: 1.0, Surf: 0.5 },
+              items: { 'Light Ball': 1.0 },
+            },
+          },
+        },
+      }));
+    }
     await dataLoader.load();
   });
 
