@@ -13,7 +13,7 @@ import { liveProposalAllowed, tallySide } from './sprt.js';
 import { completeJob, claimNext, enqueue, listJobs } from './queue.js';
 import { readLabels } from './labels-read.js';
 import { startLocalServer } from './local-server.js';
-import { liveSlotLimit, recordedRating, rememberRating, runLive } from './live.js';
+import { liveSlotLimit, recordedRating, rememberRating, runLive, seatForChoice } from './live.js';
 import { appendJsonl, opsPaths, readJsonl } from './paths.js';
 import { observeLog, emptyCounts, countsToPriors } from './priors.js';
 import { dailyReport } from './report.js';
@@ -315,6 +315,15 @@ describe('factory proposals', () => {
       p2Invalid: 4,
       crashed: true,
     }], 'a')).toEqual({ wins: 0.5, losses: 0.5, invalid: 0, crashes: 1 });
+  });
+});
+
+describe('live seat', () => {
+  test('an unknown seat chooses p1 and does not record that guess', () => {
+    expect(seatForChoice(undefined, undefined)).toEqual({ choice: 'p1', persist: null });
+    expect(seatForChoice('p2', undefined)).toEqual({ choice: 'p2', persist: 'p2' });
+    expect(seatForChoice(undefined, 'p2')).toEqual({ choice: 'p2', persist: 'p2' });
+    expect(seatForChoice('nope', 'p1')).toEqual({ choice: 'p1', persist: 'p1' });
   });
 });
 
