@@ -28,6 +28,7 @@ import {
   watchDrainFiles,
 } from '../client/drain.js';
 import { LiveMetrics } from '../client/live-metrics.js';
+import { SearchAdmission, admissionSettings, ConcurrencyGovernor } from '../client/concurrency-governor.js';
 
 interface LadderOptions {
   games: number;
@@ -50,6 +51,9 @@ interface LadderOptions {
   useEngineProfile: boolean;
   concurrencyConfig: string;
   useLLMPrior: boolean;
+  ramp: boolean;
+  rampFrom: number | null;
+  rampTarget: number | null;
   check: boolean;
   help: boolean;
 }
@@ -76,6 +80,9 @@ function parseArgs(argv: string[]): LadderOptions {
     useEngineProfile: false,
     concurrencyConfig: '',
     useLLMPrior: false,
+    ramp: false,
+    rampFrom: null,
+    rampTarget: null,
     check: false,
     help: false,
   };
@@ -110,6 +117,10 @@ function parseArgs(argv: string[]): LadderOptions {
     else if (arg === '--runners') opts.runners = Number(next());
     else if (arg === '--use-engine-profile') opts.useEngineProfile = true;
     else if (arg === '--concurrency-config') opts.concurrencyConfig = next();
+    else if (arg === '--ramp') opts.ramp = true;
+    else if (arg === '--no-ramp') opts.ramp = false;
+    else if (arg === '--ramp-from') opts.rampFrom = Number(next());
+    else if (arg === '--ramp-target') opts.rampTarget = Number(next());
     else if (arg === '--check') opts.check = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -122,6 +133,12 @@ function parseArgs(argv: string[]): LadderOptions {
   }
   if (opts.concurrencyFlag !== null && (!Number.isFinite(opts.concurrencyFlag) || opts.concurrencyFlag < 1)) {
     throw new Error('--concurrency must be a positive number');
+  }
+  if (opts.rampFrom !== null && (!Number.isFinite(opts.rampFrom) || opts.rampFrom < 1)) {
+    throw new Error('--ramp-from must be a positive number');
+  }
+  if (opts.rampTarget !== null && (!Number.isFinite(opts.rampTarget) || opts.rampTarget < 1)) {
+    throw new Error('--ramp-target must be a positive number');
   }
   return opts;
 }
@@ -157,6 +174,8 @@ Engines: max-damage (default; @smogon/calc maxDamageChoice), search (exact 1-ply
 --concurrency K keeps up to K battles on one login (default 1, absolute max ${MAX_LADDER_CONCURRENCY}).
 --use-engine-profile reads configs/live/concurrency.json (search 3, max-damage 4, grok 1).
 --concurrency-config FILE overrides those numbers. --runners N multiplies the limit. An explicit --concurrency wins.
+--ramp steps from 3 (search) or 4 (max-damage) up to K while p95 latency and the turn timer stay healthy, and steps back when they do not.
+Backpressure always pauses new searches when p95 latency degrades, the turn timer drops under the safety margin, or Showdown throttles a search. Games already running are left in place.
 A proxy lock, ban, or ‽/! name exits immediately and does not reconnect.
 
 Graceful drain (finish in-progress games, never /forfeit, then exit):
@@ -198,6 +217,7 @@ async function makePlayer(input: {
   engine: EngineName;
   autoSearch?: boolean;
   metrics?: LiveMetrics;
+  admission?: SearchAdmission;
 }): Promise<{ client: ShowdownClient; driver: BattleDriver; decisions: DecisionClient; queue: LadderQueue }> {
   fs.mkdirSync(input.opts.logDir, { recursive: true });
   const config = engineConfig(input.opts);
@@ -233,12 +253,16 @@ async function makePlayer(input: {
     process.exit(1);
   });
   client.on('popup', (message: string) => {
+    if (isSearchRejection(message) && !isAlreadySearching(message)) {
+      input.admission?.noteThrottle(message);
+      input.metrics?.noteThrottle(message);
+    }
     queue.notePopup(message);
-    if (isSearchRejection(message) && !isAlreadySearching(message)) input.metrics?.noteThrottle(message);
   });
   client.on('lobby', (line: string) => queue.noteLobby(line));
   driver.on('battleStart', (roomId: string) => queue.noteBattle(roomId));
   input.metrics?.attach(driver);
+  input.admission?.watch({ queue, driver });
   await decisions.start();
   await client.connect();
   console.log(`[${input.label}] logged in as ${input.username} engine=${input.engine} concurrency=${input.opts.concurrency}`);
@@ -362,7 +386,12 @@ async function playSeries(
   });
 }
 
-async function runLocalSeries(opts: LadderOptions, drain: LiveDrain, metrics: LiveMetrics): Promise<GameSummary[]> {
+async function runLocalSeries(
+  opts: LadderOptions,
+  drain: LiveDrain,
+  metrics: LiveMetrics,
+  admission: SearchAdmission,
+): Promise<GameSummary[]> {
   console.log(`[ladder] starting local pokemon-showdown on port ${opts.port}`);
   const server = await startLocalServer(opts.port);
   const shutdown = async () => {
@@ -384,6 +413,7 @@ async function runLocalSeries(opts: LadderOptions, drain: LiveDrain, metrics: Li
       label: 'alpha',
       engine: opts.engine,
       metrics,
+      admission,
     });
     const bravo = await makePlayer({
       username: 'BotBravo',
@@ -395,6 +425,7 @@ async function runLocalSeries(opts: LadderOptions, drain: LiveDrain, metrics: Li
       label: 'bravo',
       engine: opts.opponentEngine ?? opts.engine,
       metrics,
+      admission,
     });
 
     const summaries = await playSeries(
@@ -418,7 +449,12 @@ async function runLocalSeries(opts: LadderOptions, drain: LiveDrain, metrics: Li
   }
 }
 
-async function runRemote(opts: LadderOptions, drain: LiveDrain, metrics: LiveMetrics): Promise<GameSummary[]> {
+async function runRemote(
+  opts: LadderOptions,
+  drain: LiveDrain,
+  metrics: LiveMetrics,
+  admission: SearchAdmission,
+): Promise<GameSummary[]> {
   const local = opts.local;
   const username = opts.username || (local ? 'BotAlpha' : process.env.SHOWDOWN_USERNAME || '');
   const password = local ? '' : (process.env.SHOWDOWN_PASSWORD || '');
@@ -441,6 +477,7 @@ async function runRemote(opts: LadderOptions, drain: LiveDrain, metrics: LiveMet
     engine: opts.engine,
     autoSearch: !opts.accept && !opts.challenge,
     metrics,
+    admission,
   });
 
   if (opts.accept) watchChallenges(player.client, player.queue, opts.challenge);
@@ -613,13 +650,15 @@ async function main(): Promise<void> {
 
   const session = openDrain(opts.engine);
   const metrics = openLiveMetrics(opts);
+  const admission = openAdmission(opts);
   try {
     const summaries = opts.local && !opts.server && !opts.accept && !opts.challenge
-      ? await runLocalSeries(opts, session.drain, metrics)
-      : await runRemote(opts, session.drain, metrics);
+      ? await runLocalSeries(opts, session.drain, metrics, admission)
+      : await runRemote(opts, session.drain, metrics, admission);
     metrics.finish({ games: summaries.length, requested: opts.games });
     report(summaries, opts, session.drain);
   } finally {
+    admission.stop();
     session.close();
     await metrics.close();
   }
@@ -661,6 +700,18 @@ function openLiveMetrics(opts: LadderOptions): LiveMetrics {
   const filePath = path.join(opts.logDir, 'metrics.jsonl');
   console.log(`[ladder] metrics ${filePath}`);
   return new LiveMetrics(filePath, { runId, engine: opts.engine, concurrency: opts.concurrency });
+}
+
+function openAdmission(opts: LadderOptions): SearchAdmission {
+  const settings = admissionSettings({
+    engine: opts.profile,
+    concurrency: opts.concurrency,
+    ramp: opts.ramp,
+    rampFrom: opts.rampFrom,
+    rampTarget: opts.rampTarget,
+  });
+  console.log(`[ladder] admission initial=${settings.initial} target=${settings.target} ramp=${settings.ramp}`);
+  return new SearchAdmission(new ConcurrencyGovernor(settings));
 }
 
 main().catch(err => {

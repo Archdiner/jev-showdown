@@ -39,28 +39,53 @@ export class LadderQueue {
   private searching = false;
   private stopped = false;
   private draining = false;
+  private paused = false;
   private backoffMs = 1000;
   private timer: NodeJS.Timeout | null = null;
   private lastSearchAt = 0;
+  private maxActive: number;
 
   constructor(
     private readonly client: ShowdownClient,
     private readonly format: string,
-    private readonly concurrency: number,
+    concurrency: number,
     private readonly log: (message: string) => void = message => console.warn(`[ladder] ${message}`),
     private readonly autoSearch = true,
-  ) {}
+  ) {
+    this.maxActive = concurrency;
+  }
 
   get activeBattles(): number {
     return this.active.size;
   }
 
   get limit(): number {
-    return this.concurrency;
+    return this.maxActive;
   }
 
   get isDraining(): boolean {
     return this.draining;
+  }
+
+  /** Change how many games may be open. Does not touch games already running. */
+  setLimit(limit: number): void {
+    const next = Math.max(0, Math.floor(limit));
+    if (next === this.maxActive) return;
+    this.maxActive = next;
+    if (this.canSearch()) this.fill();
+  }
+
+  /** Stop starting searches. Active games stay. Never sends /forfeit. */
+  pauseSearches(): void {
+    if (this.stopped || this.paused) return;
+    this.paused = true;
+    this.cancelOutstanding();
+  }
+
+  resumeSearches(): void {
+    if (this.stopped || !this.paused) return;
+    this.paused = false;
+    if (this.canSearch()) this.fill();
   }
 
   noteBattle(roomId: string): void {
@@ -68,7 +93,7 @@ export class LadderQueue {
     this.active.add(roomId);
     this.searching = false;
     this.backoffMs = 1000;
-    if (this.autoSearch && !this.draining) this.fill();
+    if (this.autoSearch && this.canSearch()) this.fill();
   }
 
   noteEnd(roomId: string): void {
@@ -94,16 +119,16 @@ export class LadderQueue {
     const formatId = toID(this.format);
     const queued = update.searching.some(format => toID(format) === formatId);
     this.searching = queued;
-    if (this.autoSearch && !this.draining && !queued && this.active.size < this.concurrency) this.fill();
+    if (this.autoSearch && this.canSearch() && !queued && this.active.size < this.maxActive) this.fill();
   }
 
   fill(): void {
-    if (!this.autoSearch || this.stopped || this.draining || this.searching || this.timer) return;
+    if (!this.autoSearch || !this.canSearch() || this.searching || this.timer) return;
     if (this.client.isBlocked()) {
       this.stopped = true;
       return;
     }
-    if (this.active.size >= this.concurrency) return;
+    if (this.active.size >= this.maxActive) return;
     if (!this.client.isReady()) {
       this.schedule(READY_WAIT_MS);
       return;
@@ -143,6 +168,10 @@ export class LadderQueue {
     this.cancelOutstanding();
   }
 
+  private canSearch(): boolean {
+    return !this.stopped && !this.draining && !this.paused;
+  }
+
   private cancelOutstanding(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
@@ -156,7 +185,7 @@ export class LadderQueue {
   }
 
   private schedule(delayMs: number): void {
-    if (this.stopped || this.draining || this.timer || this.client.isBlocked()) {
+    if (!this.canSearch() || this.timer || this.client.isBlocked()) {
       if (this.client.isBlocked()) this.stopped = true;
       return;
     }
