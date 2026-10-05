@@ -25,7 +25,8 @@ test('top-level switch prior follows the published turn bins', () => {
   expect(switchPriorPercent(20)).toBeCloseTo(19.4);
 });
 
-test('principle and hypothesis files are optional', () => {
-  expect(loadGuidance()).toEqual([]);
-  expect(loadHypotheses()).toEqual([]);
+test('principle and hypothesis files load from state/meta', () => {
+  expect(loadGuidance()).toHaveLength(65);
+  expect(loadHypotheses()).toHaveLength(16);
+  expect(loadGuidance()[0]?.id).toBe('G01');
 });
