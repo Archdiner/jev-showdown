@@ -2,6 +2,7 @@ import { Dex } from '@pkmn/dex';
 import { Move, Pokemon, Field, calculate } from '@smogon/calc';
 import type { PokemonBelief, RandbatsStats, RoleData, SpeciesStats } from '../../types/index.js';
 import { effectiveSpeed } from '../battle-facts.js';
+import { battleSpecies } from '../../engine/exact/species.js';
 import type { BoardInput, BoardMon, FactCache, RollLine, SetFact, StatSpread } from './types.js';
 
 const STAT_KEYS = ['hp', 'atk', 'def', 'spa', 'spd', 'spe'] as const;
@@ -31,12 +32,18 @@ export function buildFacts(board: BoardInput): FactCache {
   }
 
   for (const foe of foes) {
-    const moves = likelyMoveNames(foe, board.pools[foe.species]).slice(0, 4);
+    const moves = likelyMoveNames(foe, poolFor(foe, board.pools)).slice(0, 4);
     for (const moveName of moves) {
       for (const target of mine) {
         foeAttacks.push(roll(foe, target, moveName, field, board.pools, false));
       }
     }
+  }
+
+  const teraDefense: RollLine[] = [];
+  if (myActive && !myActive.fainted && foeActive && board.canTera && myActive.teraKnown && myActive.teraType) {
+    const moves = likelyMoveNames(foeActive, poolFor(foeActive, board.pools)).slice(0, 4);
+    for (const moveName of moves) teraDefense.push(roll(foeActive, myActive, moveName, field, board.pools, false, true));
   }
 
   const speed = speedText(myActive, foeActive, board);
@@ -48,6 +55,7 @@ export function buildFacts(board: BoardInput): FactCache {
     ourAttacks,
     foeAttacks,
     teraAttacks,
+    teraDefense,
     speed,
     threat: threatText(speed, ourBest, foeBest, myActive),
     sets: [...board.myTeam, ...board.opponentTeam].map(mon => setFact(mon, board.pools)),
@@ -103,7 +111,8 @@ function roll(
   moveName: string,
   field: Field,
   pools: RandbatsStats,
-  terastallize: boolean
+  attackerTera: boolean,
+  defenderTera = false,
 ): RollLine {
   const move = Dex.moves.get(moveName);
   const label = move.exists ? move.name : moveName;
@@ -126,8 +135,8 @@ function roll(
   try {
     const result = calculate(
       9,
-      toCalc(attackerMon, pools, terastallize),
-      toCalc(defenderMon, pools, false),
+      toCalc(attackerMon, pools, attackerTera),
+      toCalc(defenderMon, pools, defenderTera),
       new Move(9, label),
       field
     );
@@ -145,7 +154,7 @@ function roll(
     } catch {
       ko = 'ko=?';
     }
-    const tera = terastallize ? ' tera' : '';
+    const tera = attackerTera ? ' tera' : defenderTera ? ' vs-tera' : '';
     return {
       move: label,
       attacker: attackerMon.species,
@@ -202,7 +211,7 @@ function priorityText(mine: BoardMon, foe: BoardMon, pools: RandbatsStats): stri
   const ours = mine.moveSlots
     .map(name => ({ name, pri: Dex.moves.get(name).priority }))
     .filter(move => move.pri);
-  const theirs = likelyMoveNames(foe, pools[foe.species])
+  const theirs = likelyMoveNames(foe, poolFor(foe, pools))
     .map(name => ({ name, pri: Dex.moves.get(name).priority }))
     .filter(move => move.pri);
   const fmt = (rows: Array<{ name: string; pri: number }>) =>
@@ -213,7 +222,7 @@ function priorityText(mine: BoardMon, foe: BoardMon, pools: RandbatsStats): stri
 function speedOf(mon: BoardMon, pools: RandbatsStats, item: string | undefined): { value: number; detail: string } {
   const species = Dex.species.get(mon.species);
   const base = species.exists ? species.baseStats.spe : 0;
-  const spread = spreadFor(mon, pools[mon.species]);
+  const spread = spreadFor(mon, poolFor(mon, pools));
   const stage = mon.boosts.spe ?? 0;
   const value = species.exists ? effectiveSpeed(base, mon.level, spread.evs.spe, spread.nature, item, stage) : 0;
   return {
@@ -224,7 +233,7 @@ function speedOf(mon: BoardMon, pools: RandbatsStats, item: string | undefined):
 
 function scarfPossible(mon: BoardMon, pools: RandbatsStats): { possible: boolean; weight: string } {
   if (mon.itemKnown) return { possible: mon.item === 'Choice Scarf', weight: mon.item === 'Choice Scarf' ? '1' : '0' };
-  const stats = pools[mon.species];
+  const stats = poolFor(mon, pools);
   const weights = new Map<string, number>();
   for (const role of narrowedRoles(mon, stats)) {
     for (const [item, weight] of Object.entries(role.data.items ?? {})) {
@@ -235,8 +244,12 @@ function scarfPossible(mon: BoardMon, pools: RandbatsStats): { possible: boolean
   return { possible: total > 0, weight: total > 0 ? total.toFixed(2) : '0' };
 }
 
+function poolFor(mon: BoardMon, pools: RandbatsStats): SpeciesStats | undefined {
+  return pools[mon.species] ?? pools[battleSpecies(mon.species)];
+}
+
 function setFact(mon: BoardMon, pools: RandbatsStats): SetFact {
-  const stats = pools[mon.species];
+  const stats = poolFor(mon, pools);
   if (!stats) {
     return { species: mon.species, side: mon.moveSlots.length > 0 ? 'mine' : 'opponent', text: `${mon.species} no randbats row` };
   }
@@ -316,7 +329,7 @@ function readEvs(raw: Record<string, number> | undefined): { values: StatSpread;
 }
 
 function toCalc(mon: BoardMon, pools: RandbatsStats, terastallize: boolean): Pokemon {
-  const stats = pools[mon.species];
+  const stats = poolFor(mon, pools);
   const ability = mon.abilityKnown ? mon.ability : topWeight(stats?.abilities);
   const item = mon.itemKnown ? mon.item : topWeight(topRole(mon, stats)?.data.items);
   const spread = spreadFor(mon, stats);
@@ -337,7 +350,7 @@ function toCalc(mon: BoardMon, pools: RandbatsStats, terastallize: boolean): Pok
     status: mapStatus(mon.status),
     teraType: terastallize ? mon.teraType : undefined,
   };
-  return new Pokemon(9, mon.species, options as never);
+  return new Pokemon(9, battleSpecies(mon.species), options as never);
 }
 
 function calcField(board: BoardInput): Field {

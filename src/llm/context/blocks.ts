@@ -1,4 +1,4 @@
-import type { BoardInput, BoardMon, ContextBlock, RollLine } from './types.js';
+import type { BoardInput, BoardMon, ContextBlock, LegalOption, RollLine } from './types.js';
 import { loadGuidance, loadHypotheses, loadReplayStats, switchPhase, switchPriorPercent } from './meta.js';
 import { deriveSituation, formatPrinciple, selectPrinciples } from './situation.js';
 
@@ -183,10 +183,84 @@ export const contextBlocks: ContextBlock[] = [
     render() {
       const rows = loadHypotheses() as Array<{ id?: string; change?: string }>;
       if (rows.length === 0) return '';
-      return rows.map(row => `${row.id ?? '?'}: ${row.change ?? ''}`).join('\n');
+      const lines = rows.map(row => `${row.id ?? '?'}: ${row.change ?? ''}`);
+      return ['Research notes, not orders. The decision lines decide KOs, switches, and Tera.', ...lines].join('\n');
+    },
+  },
+  {
+    id: 'decision',
+    version: '1',
+    defaultMaxChars: 2400,
+    render(board) {
+      return decisionText(board);
     },
   },
 ];
+
+function decisionText(board: BoardInput): string {
+  const mine = board.myTeam[board.myActive];
+  const foe = board.opponentTeam[board.opponentActive];
+  if (!mine || !foe || mine.fainted || foe.fainted) return 'no active pair';
+  const ourRows = rowsBetween(board.facts?.ourAttacks, mine.species, foe.species);
+  const teraRows = rowsBetween(board.facts?.teraAttacks, mine.species, foe.species);
+  const incoming = rowsBetween(board.facts?.foeAttacks, foe.species, mine.species);
+  const teraIncoming = (board.facts?.teraDefense ?? []).filter(row => row.defender === mine.species && row.attacker === foe.species);
+  const incomingKo = incoming.some(row => kills(row, mine));
+  const teraIncomingKo = teraIncoming.some(row => kills(row, mine));
+  const canReadTera = mine.teraKnown && !!mine.teraType && teraIncoming.length > 0;
+  const lines: string[] = [];
+  let weKo = false;
+  let teraOnlyKo = false;
+  for (const option of board.legal) {
+    const action = option.action;
+    if (option.choice === 'default' || (action.type === 'move' && action.moveIndex <= 0)) continue;
+    if (action.type === 'switch') {
+      const mon = board.myTeam.find(candidate => candidate.slot === action.switchIndex);
+      const hits = rowsBetween(board.facts?.foeAttacks, foe.species, mon?.species);
+      const worst = hits.reduce((max, row) => Math.max(max, row.maxPct), 0);
+      const dies = mon ? hits.some(row => kills(row, mon)) : false;
+      lines.push(`${option.id} ${option.label} incomingMax=${hits.length ? worst : '?'}% koNow=${hits.length === 0 ? 'unknown' : dies ? 'yes' : 'no'}`);
+      continue;
+    }
+    const moveName = optionMove(board, option);
+    const row = (action.terastallize ? teraRows : ourRows).find(candidate => candidate.move === moveName);
+    const plain = ourRows.find(candidate => candidate.move === moveName);
+    const now = ko(row, foe);
+    const without = ko(plain, foe);
+    if (now) weKo = true;
+    if (action.terastallize && now && !without) teraOnlyKo = true;
+    const sure = row && foe.hpPercent != null && row.minPct >= foe.hpPercent ? 'yes' : 'no';
+    const flip = action.terastallize ? ` flipsKO=${now && !without ? 'yes' : 'no'}` : '';
+    lines.push(`${option.id} ${option.label} koNow=${row ? (now ? 'yes' : 'no') : '?'} sure=${row ? sure : '?'}${flip}`);
+  }
+  const they = incoming.length === 0 ? 'unknown' : incomingKo ? 'yes' : 'no';
+  const survival = canReadTera ? (incomingKo && !teraIncomingKo ? 'yes' : 'no') : 'unknown';
+  const headline = [
+    `exchange weKO=${weKo ? 'yes' : 'no'} theyKO=${they}`,
+    `tera flipsKO=${teraOnlyKo ? 'yes' : 'no'} flipsSurvival=${survival}`,
+    `incoming KO if we stay: ${they}`,
+  ];
+  return [...headline, ...lines].join('\n');
+}
+
+function rowsBetween(rows: RollLine[] | undefined, attacker: string | undefined, defender: string | undefined): RollLine[] {
+  if (!rows || !attacker || !defender) return [];
+  return rows.filter(row => row.attacker === attacker && row.defender === defender);
+}
+
+function ko(row: RollLine | undefined, defender: BoardMon): boolean {
+  return !!row && defender.hpPercent != null && row.maxPct >= defender.hpPercent;
+}
+
+function kills(row: RollLine, defender: BoardMon): boolean {
+  return defender.hpPercent != null && row.maxPct >= defender.hpPercent;
+}
+
+function optionMove(board: BoardInput, option: LegalOption): string | undefined {
+  if (option.action.type !== 'move') return undefined;
+  const actor = board.myTeam[board.myActive];
+  return actor?.moveSlots[option.action.moveIndex - 1];
+}
 
 function winText(board: BoardInput): string {
   const attacks = board.facts?.ourAttacks ?? [];

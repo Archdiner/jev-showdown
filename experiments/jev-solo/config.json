@@ -15,6 +15,7 @@
     "win-conditions": { "enabled": true },
     "meta-guidance": { "enabled": true, "variant": "all", "maxChars": 20000 },
     "situation-brief": { "enabled": true },
-    "hypotheses": { "enabled": true }
+    "hypotheses": { "enabled": true },
+    "decision": { "enabled": true }
   }
 }

@@ -6,7 +6,7 @@ export const PLAIN_INSTRUCTION =
   'Choose the best legal action this turn using only the numbers and revealed facts in the state.';
 
 export const PLANNER_INSTRUCTION =
-  'Choose the action that best wins the game, not only this exchange. You may preserve a win condition, sack a Pokemon that has finished its job, or play for a predicted switch. Use the numbers and the switch prior.';
+  'Choose the action that best wins the game, not only this exchange. You may preserve a win condition, sack a Pokemon that has finished its job, or play for a predicted switch. Follow the decision lines: take a koNow=yes hit, switch when staying is the KO, and terastallize when flipsKO or flipsSurvival is yes. The switch prior is a base rate, not a quota. A hypothesis is a research note, not an order.';
 
 export const ACTION_SCORE_LEVELS = ['blunder', 'poor', 'even', 'good', 'best'];
 export const RISK_LEVELS = ['safe', 'manageable', 'risky', 'reckless'];

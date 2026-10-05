@@ -97,6 +97,38 @@ test('turn 1 with a switch and tera selects a matching principle', () => {
   expect(loadGuidance().every(row => full.includes(row.id))).toBe(true);
 });
 
+test('decision lines mark a tera-only KO and a survival flip', () => {
+  const input = board();
+  input.myTeam[0].teraKnown = true;
+  input.myTeam[0].teraType = 'Ground';
+  input.canTera = true;
+  input.myTeam.push({ ...mon('Snorlax', 2), active: false });
+  input.legal = [
+    { id: 'a0', choice: 'move 1', action: { type: 'move', moveIndex: 1 }, label: 'Earthquake' },
+    { id: 'a1', choice: 'move 1 terastallize', action: { type: 'move', moveIndex: 1, terastallize: true }, label: 'Earthquake + tera' },
+    { id: 'a2', choice: 'switch 2', action: { type: 'switch', switchIndex: 2 }, label: 'switch Snorlax' },
+  ];
+  input.facts = {
+    ourAttacks: [{ move: 'Earthquake', attacker: 'Garchomp', defender: 'Blissey', text: '', minPct: 20, maxPct: 30 }],
+    foeAttacks: [
+      { move: 'Ice Beam', attacker: 'Blissey', defender: 'Garchomp', text: '', minPct: 80, maxPct: 120 },
+      { move: 'Ice Beam', attacker: 'Blissey', defender: 'Snorlax', text: '', minPct: 10, maxPct: 20 },
+    ],
+    teraAttacks: [{ move: 'Earthquake', attacker: 'Garchomp', defender: 'Blissey', text: '', minPct: 110, maxPct: 140 }],
+    teraDefense: [{ move: 'Ice Beam', attacker: 'Blissey', defender: 'Garchomp', text: '', minPct: 10, maxPct: 30 }],
+    speed: 'speed',
+    threat: 'threat',
+    sets: [],
+    threatened: true,
+  };
+  const text = blockById('decision')!.render(input, { id: 'decision', version: '1', enabled: true, maxChars: 2400 });
+  expect(text).toContain('exchange weKO=yes theyKO=yes');
+  expect(text).toContain('tera flipsKO=yes flipsSurvival=yes');
+  expect(text).toContain('a0 Earthquake koNow=no sure=no');
+  expect(text).toContain('a1 Earthquake + tera koNow=yes sure=yes flipsKO=yes');
+  expect(text).toContain('a2 switch Snorlax incomingMax=20% koNow=no');
+});
+
 test('meta stats quote the top-rated tera and hazard rates', () => {
   const text = blockById('meta-stats')!.render(board(), {
     id: 'meta-stats',

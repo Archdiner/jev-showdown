@@ -1,6 +1,7 @@
 import { Battle, Dex, Teams } from '@pkmn/sim';
 import { Pokemon as CalcPokemon } from '@smogon/calc';
 import { expectedDamage } from './max-damage.js';
+import { battleSpecies } from './species.js';
 import { SideId, ensureGenerators, legalChoices } from './battle-utils.js';
 
 /**
@@ -54,10 +55,11 @@ export function likelyMoves(species: string, revealed: string[]): string[] {
 const maxHpCache = new Map<string, number>();
 
 export function estimatedMaxHp(species: string, level: number): number {
-  const key = `${species}|${level}`;
+  const name = battleSpecies(species);
+  const key = `${name}|${level}`;
   const cached = maxHpCache.get(key);
   if (cached) return cached;
-  const mon = new CalcPokemon(9, species, { level, evs: NEUTRAL_EVS, ivs: NEUTRAL_IVS });
+  const mon = new CalcPokemon(9, name, { level, evs: NEUTRAL_EVS, ivs: NEUTRAL_IVS });
   const hp = Math.max(1, mon.maxHP());
   maxHpCache.set(key, hp);
   return hp;
@@ -66,7 +68,7 @@ export function estimatedMaxHp(species: string, level: number): number {
 const damageCache = new Map<string, number>();
 
 function synth(species: string, level: number, hpFrac: number): any {
-  const name = Dex.species.get(species).name || species;
+  const name = battleSpecies(species);
   const maxhp = estimatedMaxHp(name, level);
   const hp = Math.max(1, Math.round(maxhp * Math.max(0, Math.min(1, hpFrac))));
   return {

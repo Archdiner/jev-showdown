@@ -21,6 +21,7 @@ export const CONTEXT_BLOCK_IDS = [
   'meta-guidance',
   'situation-brief',
   'hypotheses',
+  'decision',
 ] as const;
 
 export type ContextBlockId = (typeof CONTEXT_BLOCK_IDS)[number];
@@ -148,6 +149,8 @@ export interface FactCache {
   ourAttacks: RollLine[];
   foeAttacks: RollLine[];
   teraAttacks: RollLine[];
+  /** Incoming rolls if our active terastallizes. Empty when tera is unknown or spent. */
+  teraDefense?: RollLine[];
   speed: string;
   /** Speed order, our best hit into the active foe, and whether that foe can KO us from the current HP. */
   threat: string;

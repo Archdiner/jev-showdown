@@ -1,6 +1,7 @@
 import { Battle, Dex } from '@pkmn/sim';
 import { calculate, Pokemon as CalcPokemon, Move, Field } from '@smogon/calc';
 import { SideId, legalChoices } from './battle-utils.js';
+import { battleSpecies } from './species.js';
 
 const WEATHER: Record<string, 'Sun' | 'Rain' | 'Sand' | 'Snow'> = {
   sunnyday: 'Sun',
@@ -29,7 +30,7 @@ function calcMon(pokemon: any): CalcPokemon {
   // The sim stores ids ("levitate"). @smogon/calc only applies the display
   // name ("Levitate"). Passing the id overrides the species ability and
   // Ground moves hit Levitate targets.
-  return new CalcPokemon(9, pokemon.species.name, {
+  return new CalcPokemon(9, battleSpecies(pokemon.species?.name || ''), {
     level: pokemon.level,
     ability: dexName('abilities', pokemon.ability || set.ability),
     item: dexName('items', pokemon.item || set.item),

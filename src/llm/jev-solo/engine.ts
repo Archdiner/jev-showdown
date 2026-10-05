@@ -6,7 +6,7 @@ import type { SideId } from '../../engine/exact/battle-utils.js';
 import { GatewayClient, type EvaluateQuestion } from '../gateway-client.js';
 import { JEV_MODEL_ID } from '../models.js';
 import { renderContextBrief } from '../context-brief.js';
-import { assembleBrief, boardFromGameState, boardFromSim, withTeraChoices } from '../context/index.js';
+import { assembleBrief, boardFromGameState, boardFromSim, choiceToAction, withTeraChoices } from '../context/index.js';
 import type { BoardInput, LegalOption } from '../context/types.js';
 import { contextConfigOf, type JevSoloConfig } from './config.js';
 import { ACTION_SCORE_LEVELS, RISK_LEVELS, choiceQuestion, questionsFor } from './questions.js';
@@ -55,11 +55,15 @@ export async function jevSoloOnBattle(args: {
   client?: GatewayClient;
   pools?: RandbatsStats;
 }): Promise<JevDecision> {
-  const choices = withTeraChoices(args.battle, args.side);
-  const board = boardFromSim(args.battle, args.side, args.pools ?? loadPools());
-  board.situationBrief = renderContextBrief(args.battle, args.side, 2000).text;
-  board.legal = board.legal.filter(option => choices.includes(option.choice));
-  return decideBoard(board, args.config, args.client ?? sharedJevClient());
+  try {
+    const choices = withTeraChoices(args.battle, args.side);
+    const board = boardFromSim(args.battle, args.side, args.pools ?? loadPools());
+    board.situationBrief = renderContextBrief(args.battle, args.side, 2000).text;
+    board.legal = board.legal.filter(option => choices.includes(option.choice));
+    return await decideBoard(board, args.config, args.client ?? sharedJevClient());
+  } catch (error) {
+    return fallbackDecision(firstChoice(args.battle, args.side), args.config, error);
+  }
 }
 
 export async function jevSoloFromState(args: {
@@ -74,16 +78,21 @@ export async function jevSoloFromState(args: {
 }
 
 export async function decideBoard(board: BoardInput, config: JevSoloConfig, client: GatewayClient): Promise<JevDecision> {
-  const legal = board.legal.filter(option => option.choice !== 'default');
+  const legal = (board.legal ?? []).filter(option => option.choice !== 'default');
   if (legal.length === 0) {
-    const choice = board.legal[0]?.choice ?? 'default';
+    const choice = board.legal?.[0]?.choice ?? 'default';
     return finish(choice, board, config, false, false, 0, 0, [], 0);
   }
   if (legal.length === 1) {
     return finish(legal[0].choice, board, config, false, false, 0, 0, [], 0);
   }
 
-  const brief = assembleBrief(board, contextConfigOf(config));
+  let brief;
+  try {
+    brief = assembleBrief(board, contextConfigOf(config));
+  } catch (error) {
+    return fallbackDecision(legal[0].choice, config, error);
+  }
   const guidanceOn = brief.blocks.some(block => block.id === 'meta-guidance');
   client.startTurn();
   try {
@@ -266,6 +275,36 @@ export class JevSoloEngine {
   getLastDecision(): { evaluation: { score: number } } {
     return { evaluation: { score: this.lastScore } };
   }
+}
+
+function firstChoice(battle: Battle, side: SideId): string {
+  try {
+    return withTeraChoices(battle, side)[0] ?? 'move 1';
+  } catch {
+    return 'move 1';
+  }
+}
+
+function fallbackDecision(choice: string, config: JevSoloConfig, error: unknown): JevDecision {
+  const message = error instanceof Error ? error.message : 'brief_threw';
+  return {
+    choice,
+    action: choiceToAction(choice),
+    trace: {
+      fallback: true,
+      called: false,
+      hardSwitch: false,
+      tera: false,
+      teraLegal: false,
+      switchLegal: false,
+      latencyMs: 0,
+      costUsd: 0,
+      design: config.question,
+      blocks: [],
+      briefChars: 0,
+      error: message,
+    },
+  };
 }
 
 function same(a: Action, b: Action): boolean {

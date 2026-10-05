@@ -6,7 +6,7 @@ import { loadGuidance, loadHypotheses } from '../context/meta.js';
 import { emptyLog } from '../context/log.js';
 import { choiceAllowed, safeChoose, startRandomBattle, teamsForSeed } from '../../engine/exact/battle-utils.js';
 import { withTeraChoices } from '../context/board.js';
-import { decideBoard } from './engine.js';
+import { decideBoard, jevSoloOnBattle } from './engine.js';
 import { contextConfigOf, loadJevSoloConfig, withBlock } from './config.js';
 import { PLAIN_INSTRUCTION, PLANNER_INSTRUCTION } from './questions.js';
 import type { BoardInput } from '../context/types.js';
@@ -115,6 +115,44 @@ test('Jev is followed, and a failed call plays the first legal action', async ()
   expect(failed.action).toEqual({ type: 'move', moveIndex: 1 });
   expect(failed.trace.fallback).toBe(true);
   expect(failed.trace.error).toBe('missing_api_key');
+});
+
+test('a brief error falls back to the first legal action', async () => {
+  const battle = { getSide() { throw new Error('brief blew up'); } } as never;
+  const decision = await jevSoloOnBattle({
+    battle,
+    side: 'p1',
+    config: loadJevSoloConfig(),
+    client: scripted({ model: 'typesafe-ai/jev', answers: {}, usage: {} }),
+    pools: {},
+  });
+  expect(decision.trace.fallback).toBe(true);
+  expect(decision.trace.error).toContain('brief blew up');
+  expect(decision.choice).toBe('move 1');
+  expect(decision.action).toEqual({ type: 'move', moveIndex: 1 });
+
+  const broken = board();
+  (broken as { myTeam?: unknown }).myTeam = undefined;
+  const assembled = await decideBoard(broken, loadJevSoloConfig(), scripted({ model: 'typesafe-ai/jev', answers: {}, usage: {} }));
+  expect(assembled.trace.fallback).toBe(true);
+  expect(assembled.choice).toBe('move 1');
+});
+
+test('cosmetic formes on the screen seeds still produce a choice', async () => {
+  const client = scripted({
+    model: 'typesafe-ai/jev',
+    answers: { bestAction: { type: 'choice', choice: 'a0', probabilities: { a0: 1 } } },
+    usage: { inputTokens: 1, outputTokens: 1 },
+  });
+  for (const seed of [50010, 50045]) {
+    const teams = teamsForSeed(seed);
+    const battle = startRandomBattle(teams.p1, teams.p2, seed);
+    for (const side of ['p1', 'p2'] as const) {
+      const decision = await jevSoloOnBattle({ battle, side, config: loadJevSoloConfig(), client, pools: {} });
+      expect(decision.trace.fallback).toBe(false);
+      expect(decision.trace.error).toBeUndefined();
+    }
+  }
 });
 
 test('a legal tera choice is played instead of the first move', () => {

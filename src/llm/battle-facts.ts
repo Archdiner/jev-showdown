@@ -2,6 +2,7 @@ import { Dex } from '@pkmn/dex';
 import { Move, Pokemon, Field, calculate, calcStat } from '@smogon/calc';
 import type { GameState, PokemonBelief, RandbatsStats, RoleData, SpeciesStats } from '../types/index.js';
 import type { AdvisorCandidate } from './types.js';
+import { battleSpecies } from '../engine/exact/species.js';
 import { actionId, capEvaluationState } from './state-summary.js';
 
 export interface BattleFacts {
@@ -130,7 +131,7 @@ function candidateSummary(
 }
 
 function likelyMovesLine(state: GameState, opp: PokemonBelief, pools: RandbatsStats, field: Field): string {
-  const moves = likelyMoveNames(opp, pools[opp.species]);
+  const moves = likelyMoveNames(opp, poolFor(opp.species, pools));
   if (moves.length === 0) return 'OPP LIKELY MOVES: role pool has none';
   const attacker = makeCalcMon(opp, pools, false);
   const targets = [state.myTeam[state.myActive], ...state.myTeam.filter((_, index) => index !== state.myActive)]
@@ -153,7 +154,7 @@ function likelyMoveRollsOnto(
 ): string {
   if (!opp) return 'none';
   const attacker = makeCalcMon(opp, pools, false);
-  const moves = likelyMoveNames(opp, pools[opp.species]).slice(0, 4);
+  const moves = likelyMoveNames(opp, poolFor(opp.species, pools)).slice(0, 4);
   if (moves.length === 0) return 'none';
   return moves.map(moveName => `${moveName} ${damageRoll(attacker, defender, moveName, field)}`).join('; ');
 }
@@ -246,8 +247,8 @@ function speedLine(
 function speedOf(mon: PokemonBelief, pools: RandbatsStats): { value: number; detail: string } {
   const species = Dex.species.get(mon.species);
   const base = species.exists ? species.baseStats.spe : 0;
-  const spread = spreadFor(mon, pools[mon.species]);
-  const item = itemFor(mon, pools[mon.species]);
+  const spread = spreadFor(mon, poolFor(mon.species, pools));
+  const item = itemFor(mon, poolFor(mon.species, pools));
   const stage = mon.boosts?.spe ?? 0;
   const value = species.exists ? effectiveSpeed(base, mon.level, spread.evs.spe, spread.nature, item.name, stage) : 0;
   return {
@@ -288,7 +289,7 @@ function fieldLine(state: GameState): string {
 }
 
 function assumptionText(mon: PokemonBelief, pools: RandbatsStats): { ability: string; item: string; spread: string } {
-  const stats = pools[mon.species];
+  const stats = poolFor(mon.species, pools);
   const ability = abilityFor(mon, stats);
   const item = itemFor(mon, stats);
   const spread = spreadFor(mon, stats);
@@ -361,8 +362,12 @@ function topRole(mon: PokemonBelief, stats: SpeciesStats | undefined): { name: s
     .sort((a, b) => (b.data.weight ?? 0) - (a.data.weight ?? 0))[0];
 }
 
+function poolFor(species: string, pools: RandbatsStats): SpeciesStats | undefined {
+  return pools[species] ?? pools[battleSpecies(species)];
+}
+
 function makeCalcMon(mon: PokemonBelief, pools: RandbatsStats, terastallize: boolean): Pokemon {
-  const stats = pools[mon.species];
+  const stats = poolFor(mon.species, pools);
   const ability = abilityFor(mon, stats).name;
   const item = itemFor(mon, stats).name;
   const spread = spreadFor(mon, stats);
@@ -384,11 +389,11 @@ function makeCalcMon(mon: PokemonBelief, pools: RandbatsStats, terastallize: boo
     status: mapStatus(mon.status),
     teraType: terastallize ? mon.revealedTeraType : undefined,
   };
-  const draft = new Pokemon(9, mon.species, options as never);
+  const draft = new Pokemon(9, battleSpecies(mon.species), options as never);
   if (mon.currentHp != null && mon.maxHp) {
     const pct = mon.currentHp / mon.maxHp;
     options.curHP = Math.max(1, Math.round(draft.maxHP() * pct));
-    return new Pokemon(9, mon.species, options as never);
+    return new Pokemon(9, battleSpecies(mon.species), options as never);
   }
   return draft;
 }

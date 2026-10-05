@@ -10,6 +10,7 @@ import { Action, GameState, PokemonBelief } from '../types/index.js';
 import { Format } from '../types/format.js';
 import { Dex } from '@pkmn/sim';
 import { calculate, Pokemon, Move, Field, Result } from '@smogon/calc';
+import { battleSpecies } from './exact/species.js';
 
 export interface Simple1PlyConfig {
   opponentModel: 'uniform' | 'max-damage';
@@ -198,13 +199,13 @@ export class Simple1Ply {
   private calculateDamage(attacker: PokemonBelief, defender: PokemonBelief, moveName: string): number {
     try {
       // Create Pokemon objects for calculator
-      const attackerPokemon = new Pokemon(9, attacker.species, {
+      const attackerPokemon = new Pokemon(9, battleSpecies(attacker.species), {
         level: attacker.level || 80,
         evs: { hp: 85, atk: 85, def: 85, spa: 85, spd: 85, spe: 85 },
         nature: 'Hardy',
       });
 
-      const defenderPokemon = new Pokemon(9, defender.species, {
+      const defenderPokemon = new Pokemon(9, battleSpecies(defender.species), {
         level: defender.level || 80,
         evs: { hp: 85, atk: 85, def: 85, spa: 85, spd: 85, spe: 85 },
         nature: 'Hardy',
