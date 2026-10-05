@@ -453,7 +453,7 @@ describe('recorded screens', () => {
     wilson95: [0.506, 0.641] as [number, number],
   };
 
-  function writeScreen(dir: string, patch: Partial<typeof screen> = {}): void {
+  function writeScreen(dir: string, patch: Partial<typeof screen> & { evaluatorId?: string } = {}): void {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'exact-1ply-qw.json'), JSON.stringify({ ...screen, ...patch }));
   }
@@ -508,6 +508,75 @@ describe('recorded screens', () => {
     });
     expect(verdict[0].labeled).toBe(false);
     expect(verdict[0].sprt).toBe('continue');
+    expect(labelsOf(paths)).toHaveLength(0);
+  });
+
+  test('the fitted-1ply screen is live-approved and is not the champion', () => {
+    const loaded = loadConfig(path.join(process.cwd(), 'configs/fitted-1ply.yaml'));
+    expect(loaded.config.search.id).toBe('greedy-1ply');
+    expect(loaded.config.search.params.depth).toBe(1);
+    expect(loaded.config.search.params.samples).toBe(8);
+    expect(loaded.config.evaluator.id).toBe('fitted-team');
+    expect(exactDiagnosticsConfig(loaded)?.evalMode).toBe('hp');
+    const raw = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'state/ops/recorded/fitted-1ply.json'), 'utf8'));
+    expect(raw).toMatchObject({
+      policyId: 'fitted-1ply',
+      searchId: 'greedy-1ply',
+      evaluatorId: 'fitted-team',
+      configId: loaded.configId,
+      configPath: 'configs/fitted-1ply.yaml',
+      games: 200,
+      wins: 119,
+      losses: 81,
+      ties: 0,
+      invalid: 0,
+      crashes: 0,
+      viewMiss: 0,
+    });
+    const paths = tempPaths();
+    const dir = path.join(paths.root, 'recorded');
+    fs.mkdirSync(dir);
+    fs.copyFileSync(path.join(process.cwd(), 'state/ops/recorded/fitted-1ply.json'), path.join(dir, 'fitted-1ply.json'));
+    const verdict = ingestRecordedEvidence(paths, {
+      dir,
+      diagnostics: () => ({ passed: 22, failed: 0, total: 22 }),
+    });
+    expect(verdict[0].labeled).toBe(true);
+    expect(verdict[0].sprt).toBe('continue');
+    expect(labelsOf(paths)).toEqual([expect.objectContaining({
+      configId: loaded.configId,
+      labels: ['live-approved'],
+    })]);
+    expect(listProposals(paths)).toHaveLength(0);
+    const db = openDb(paths);
+    const result = db.getNodesByType('Result')[0];
+    db.close();
+    expect(result?.metrics).toMatchObject({
+      wins: 119,
+      losses: 81,
+      invalid: 0,
+      p50ms: 74,
+      p99ms: 156,
+      evaluatorId: 'fitted-team',
+      policyId: 'fitted-1ply',
+    });
+  });
+
+  test('a recorded evaluator that does not match the yaml stays unlabeled', () => {
+    const paths = tempPaths();
+    const dir = path.join(paths.root, 'recorded');
+    writeScreen(dir, {
+      configPath: 'configs/fitted-1ply.yaml',
+      searchId: 'greedy-1ply',
+      evaluatorId: 'hp-fraction',
+      policyId: 'fitted-1ply',
+    });
+    const verdict = ingestRecordedEvidence(paths, {
+      dir,
+      diagnostics: () => ({ passed: 22, failed: 0, total: 22 }),
+    });
+    expect(verdict[0].labeled).toBe(false);
+    expect(verdict[0].reason).toContain('evaluator');
     expect(labelsOf(paths)).toHaveLength(0);
   });
 });
