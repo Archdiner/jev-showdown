@@ -8,6 +8,12 @@ Three blocks are separate config flags. The game plan is asynchronous (turn 1, f
 
 Honest bench, hidden information, 52 pairs (104 games), sides swapped, 509 randbats species. `hybrid-core` (search only) vs exact-1ply: 55W-49L-0T, Wilson 95% 43.4–62.2%, invalid 0, crashes 0, timeouts 0, p50 144ms, p95 196ms. Vs max-damage: 67W-37L-0T, Wilson 95% 54.9–73.0%, invalid 0, crashes 0, timeouts 0, p50 149ms, p95 215ms. Commit `a7d4dfe`. The plan and judgment screens did not finish: the Vercel AI Gateway answered `http_402` (credit balance required) after the first successful calls. An every-turn arm calls the model on every turn with the compact full-section brief and the search ranking. The margin still rejects a pick that is too far behind the best score. Qwen stays on Cerebras at medium effort, Opus is low, and Grok 4.7 is effort `none`. A wide-margin Qwen profile sets the margin to 3.
 
+## Cosmetic formes and Revival Blessing switches
+
+`@smogon/calc` has no entry for a cosmetic forme such as Gastrodon-East, so damage for that Pokémon came back as zero. `speciesForCalc` maps a cosmetic forme to the base species and leaves a forme the calc already lists, such as Ogerpon-Wellspring, unchanged. `calcMon` uses that name.
+
+A Revival Blessing follow-up is a forced switch onto a fainted teammate. `legalChoices` used to offer a healthy Pokémon, which the sim rejects (`INC-007`). It now offers the fainted teammates when the active slot has `revivalblessing`. The hidden-info battle copies the request's `reviving` flag onto that slot, so the search and the real battle list the same switches.
+
 ## Live losses reach the factory
 
 A ladder loss used to write a hypothesis and then stop. Per-battle logs have no `>start` input log, so position mining returned nothing and no factory job was enqueued. The same generic fallback text for every loss never became a self-play variant. Each reviewed loss now queues a challenger for that mechanism or eval term, or a mined position when the log can be reconstructed, or a line in `state/ops/dispositions.jsonl` saying why it was skipped. The factory claims open hypotheses, including `state/meta/hypotheses.json` rows, and plays them against max-damage. `npm run ops -- status` prints the cycle counts. The sentinel check `improvement-stall` is a P1 when losses were reviewed and nothing was queued for 15 minutes.

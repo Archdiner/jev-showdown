@@ -311,6 +311,11 @@ export function buildDecisionBattle(position: LivePosition): Battle | null {
     applyRevealedTera(battle.p2, foe.kept.map(mon => mon.terastallized || ''));
     battle.makeRequest(force ? 'switch' : 'move');
     if (typeof position.turn === 'number' && Number.isFinite(position.turn)) battle.turn = position.turn;
+    const reviving = (request.side?.pokemon || []).some((mon: { reviving?: boolean }) => mon?.reviving);
+    if (reviving) {
+      const slot = battle.p1.slotConditions[active.position] as Record<string, unknown>;
+      if (slot) slot.revivalblessing = { id: 'revivalblessing' };
+    }
     if (legalChoices(battle, 'p1').length === 0) return null;
     attachBattleEvidence(battle, position);
     return battle;
