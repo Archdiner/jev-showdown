@@ -1,5 +1,9 @@
 # Changelog
 
+## Live search fills hidden foe sets from randbats
+
+Exact 1-ply on the ladder used to hand the opponent only the moves it had already seen. With nothing revealed that set was Tackle, and teammates that had not switched in were missing, so knocking out the last revealed Pokémon looked like the end of the game. Each decision now keeps the revealed moves, item, and ability, fills the open slots from the weighted randbats roles, and puts a real species from that table on the bench for every unseen teammate. One weighted set is built per decision. A search budget under 80ms, or a richer team that fails to build, falls back to the revealed-only foe.
+
 ## Live opponent beliefs
 
 The ladder client keeps the BeliefTracker from before calibrated set inference unless that battle's config sets `setInference.id` to `calibrated`. The champion file and a run with no config file stay on that tracker, so a restarted runner uses the same opponent beliefs as before. `configs/examples/opponent-calibrated.yaml` is the opt-in. The posterior is not constructed on the legacy path. If a posterior update throws, the client logs it, counts it as `beliefErrors` on the game record, and finishes that battle on BeliefTracker instead of failing the decision.

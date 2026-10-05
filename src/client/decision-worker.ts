@@ -65,7 +65,15 @@ async function decide(message: DecideRequest): Promise<void> {
   const started = Date.now();
   const routed = playerFor(message.battleId);
   try {
-    const picked = await chooseLive(routed.engine, message.position, message.legal, routed.player);
+    // The parent process does not ship the species table. This worker already
+    // loaded it. A tight search budget keeps the revealed-only foe.
+    const position = message.position
+      ? { ...message.position, useLoadedPriors: message.position.modelHidden !== false }
+      : undefined;
+    const picked = await chooseLive(routed.engine, position, message.legal, {
+      budgetMs: message.searchTimeMs,
+      player: routed.player,
+    });
     const known = message.legal.some(candidate => sameAction(candidate, picked.action));
     if (!known) {
       send({

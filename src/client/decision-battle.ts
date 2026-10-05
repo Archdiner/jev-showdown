@@ -1,7 +1,12 @@
 import { Battle, Dex, PRNG, PokemonSet } from '@pkmn/sim';
-import { Action } from '../types/index.js';
+import { Action, RandbatsStats } from '../types/index.js';
 import { decide } from '../engine/exact/policies.js';
 import { legalChoices } from '../engine/exact/battle-utils.js';
+import {
+  completeFoeTeam,
+  FOE_PRIOR_MIN_BUDGET_MS,
+  loadedSpeciesStats,
+} from '../engine/foe-prior.js';
 import { EngineName } from './engines.js';
 import { sameAction } from './choice.js';
 import { ladderPolicy } from './ladder-engine.js';
@@ -26,6 +31,10 @@ export interface FoeMon {
   moves: string[];
   boosts?: StatBoosts;
   fainted?: boolean;
+  /** Revealed tera, used only to narrow the role posterior. */
+  teraType?: string;
+  /** Teammate that has not switched in. The set is the species prior. */
+  placeholder?: boolean;
 }
 
 /**
@@ -38,6 +47,22 @@ export interface LivePosition {
   foeBench: FoeMon[];
   ourBoosts?: StatBoosts;
   weather?: string;
+  /**
+   * Randbats role table. When set, unrevealed moves, items, and abilities
+   * are filled from it and unseen teammates become placeholders.
+   */
+  speciesStats?: RandbatsStats;
+  /** Use the table the decision worker loaded, instead of `speciesStats`. */
+  useLoadedPriors?: boolean;
+  /** Keep the revealed-only foe even when a table is available. */
+  modelHidden?: boolean;
+}
+
+export interface DecisionBuildOptions {
+  /** Skip the prior when the caller has less than {@link FOE_PRIOR_MIN_BUDGET_MS}. */
+  budgetMs?: number;
+  /** Labeled champion. When set, it chooses on the battle this function built. */
+  player?: LiveConfigPlayer | null;
 }
 
 const WEATHER: Record<string, string> = {
@@ -159,6 +184,31 @@ function knownFoes(position: LivePosition): FoeMon[] {
   return [position.foeActive, ...position.foeBench].filter((mon): mon is FoeMon => !!mon?.species);
 }
 
+function priorsEnabled(position: LivePosition, budgetMs?: number): boolean {
+  if (position.modelHidden === false) return false;
+  if (budgetMs != null && budgetMs < FOE_PRIOR_MIN_BUDGET_MS) return false;
+  return position.speciesStats != null || position.useLoadedPriors === true;
+}
+
+function speciesTable(position: LivePosition): RandbatsStats | null {
+  if (position.speciesStats) return position.speciesStats;
+  if (position.useLoadedPriors) return loadedSpeciesStats();
+  return null;
+}
+
+/** Revealed foes, with hidden sets filled in when a prior table is available. */
+function modeledFoes(position: LivePosition, budgetMs?: number): FoeMon[] {
+  const known = knownFoes(position);
+  if (!priorsEnabled(position, budgetMs)) return known;
+  const stats = speciesTable(position);
+  if (!stats) return known;
+  try {
+    return completeFoeTeam(known, stats) as FoeMon[];
+  } catch {
+    return known;
+  }
+}
+
 function foeSets(foes: FoeMon[]): { sets: PokemonSet[]; kept: FoeMon[] } {
   const sets: PokemonSet[] = [];
   const kept: FoeMon[] = [];
@@ -183,11 +233,11 @@ function foeSets(foes: FoeMon[]): { sets: PokemonSet[]; kept: FoeMon[] } {
  * A @pkmn/sim battle whose `move N` / `switch N` indexes match the live request.
  * Slot 0 is the active pokemon. That is the same indexing the server uses.
  */
-export function buildDecisionBattle(position: LivePosition): Battle | null {
+export function buildDecisionBattle(position: LivePosition, options?: DecisionBuildOptions): Battle | null {
   const request = position.request;
   if (!request || request.wait || request.teamPreview) return null;
   const ours = ourSets(request);
-  const foe = foeSets(knownFoes(position));
+  const foe = foeSets(modeledFoes(position, options?.budgetMs));
   if (!ours || foe.sets.length === 0) return null;
 
   try {
@@ -267,22 +317,44 @@ export interface LiveConfigPlayer {
  * `max-damage` runs maxDamageChoice. A labeled champion, when passed,
  * chooses through that bot instead. The action is one of `legal`.
  */
+async function chooseFrom(
+  engine: EngineName,
+  position: LivePosition,
+  legal: Action[],
+  options?: DecisionBuildOptions,
+): Promise<{ action: Action; score: number | null } | null> {
+  const battle = buildDecisionBattle(position, options);
+  if (!battle) return null;
+  const decision = options?.player
+    ? await options.player.decide({ battle, side: 'p1' })
+    : await decide(ladderPolicy(engine), battle, 'p1', new PRNG([1, 2, 3, 4] as any));
+  const action = actionFromChoice(decision.choice);
+  if (!action || !legal.some(candidate => sameAction(candidate, action))) return null;
+  const score = decision.scores?.find(row => row.choice === decision.choice)?.score ?? null;
+  return { action, score };
+}
+
 export async function chooseLive(
   engine: EngineName,
   position: LivePosition | undefined,
   legal: Action[],
-  player?: LiveConfigPlayer | null,
+  options?: DecisionBuildOptions,
 ): Promise<{ action: Action; score: number | null }> {
   if (!position) throw new Error('missing live position');
-  const battle = buildDecisionBattle(position);
-  if (!battle) throw new Error('could not build a sim battle');
-  const decision = player
-    ? await player.decide({ battle, side: 'p1' })
-    : await decide(ladderPolicy(engine), battle, 'p1', new PRNG([1, 2, 3, 4] as any));
-  const action = actionFromChoice(decision.choice);
-  if (!action || !legal.some(candidate => sameAction(candidate, action))) {
-    throw new Error(`engine returned a choice that is not legal (${decision.choice})`);
+  const picked = await chooseFrom(engine, position, legal, options);
+  if (picked) return { action: picked.action, score: picked.score };
+  // A richer foe that fails to build, or a choice the request rejects, plays
+  // the revealed-only battle instead of the max-damage legal fallback.
+  if (position.modelHidden !== false && (position.speciesStats || position.useLoadedPriors)) {
+    const revealed = await chooseFrom(engine, {
+      ...position,
+      modelHidden: false,
+      useLoadedPriors: false,
+      speciesStats: undefined,
+    }, legal, options);
+    if (revealed) return { action: revealed.action, score: revealed.score };
   }
-  const score = decision.scores?.find(row => row.choice === decision.choice)?.score ?? null;
-  return { action, score };
+  const battle = buildDecisionBattle({ ...position, modelHidden: false });
+  if (!battle) throw new Error('could not build a sim battle');
+  throw new Error('engine returned a choice that is not legal');
 }

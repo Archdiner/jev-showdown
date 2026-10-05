@@ -16,6 +16,7 @@ export interface PokemonSet {
 export interface RoleData {
   weight: number;
   moves: Record<string, number>;
+  /** Role-level ability frequencies. Species abilities are the fallback. */
   abilities?: Record<string, number>;
   items?: Record<string, number>;
   teraTypes?: Record<string, number>;

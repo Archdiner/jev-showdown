@@ -98,6 +98,11 @@ export class DataLoader {
     return this.stats;
   }
 
+  /** Null until `load()` finishes. Callers can skip the prior instead of throwing. */
+  tryGetStats(): RandbatsStats | null {
+    return this.loaded ? this.stats : null;
+  }
+
   getSpeciesStats(species: string): SpeciesStats | undefined {
     this.ensureLoaded();
     return this.stats[species];
