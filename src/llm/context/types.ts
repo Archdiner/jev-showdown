@@ -16,6 +16,7 @@ export const CONTEXT_BLOCK_IDS = [
   'field',
   'history',
   'switch-odds',
+  'meta-stats',
   'win-conditions',
   'meta-guidance',
   'situation-brief',

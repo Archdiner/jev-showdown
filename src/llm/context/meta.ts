@@ -4,7 +4,7 @@ import path from 'path';
 /**
  * Shared meta research. The strategist agent reads the same files.
  * Search order prefers a file that agent writes, then this tree.
- * Hypotheses are stored for that agent and are not pasted into prompts.
+ * The jev-solo `hypotheses` block pastes them when that block is enabled.
  */
 export const META_CANDIDATES = {
   guidance: ['state/meta/guidance.json', 'state/meta-guidance.json', 'data/meta/guidance.json'],
@@ -28,6 +28,19 @@ export interface ReplayBucket {
   hard_switch_mid: number;
   hard_switch_late: number;
   turn1_hard_switch_pct: number;
+  turns_median?: number;
+  player_tera_rate?: number;
+  tera_turn_median?: number;
+  tera_offensive_stab_pct?: number;
+  tera_other_defensive_pct?: number;
+  setup_move_share?: number;
+  status_move_share?: number;
+  hazard_move_share?: number;
+  pivot_move_share?: number;
+  recovery_move_share?: number;
+  games_with_any_hazard_pct?: number;
+  first_hazard_turn_median?: number;
+  winner_mons_left_median?: number;
 }
 
 export interface ReplayStatsFile {

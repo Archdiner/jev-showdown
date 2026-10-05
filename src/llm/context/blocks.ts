@@ -145,11 +145,27 @@ export const contextBlocks: ContextBlock[] = [
     render(board, settings) {
       const principles = loadGuidance();
       if (principles.length === 0) return '';
+      if (settings.variant === 'all') return principles.map(formatPrinciple).join('\n');
       const situation = deriveSituation(board);
       const budget = Math.max(80, settings.maxChars - `[${settings.id} v${settings.version}]`.length - 2);
       const picked = selectPrinciples(principles, situation, budget);
       if (picked.length === 0) return '';
       return picked.map(formatPrinciple).join('\n');
+    },
+  },
+  {
+    id: 'meta-stats',
+    version: '1',
+    defaultMaxChars: 700,
+    render() {
+      const bucket = loadReplayStats()?.hi;
+      if (!bucket) return '';
+      return [
+        `top-rated gen9randombattle n=${bucket.n} turns_median=${bucket.turns_median ?? '?'}`,
+        `tera_rate=${bucket.player_tera_rate ?? '?'}% tera_turn_median=${bucket.tera_turn_median ?? '?'} tera_offensive=${bucket.tera_offensive_stab_pct ?? '?'}% tera_defensive=${bucket.tera_other_defensive_pct ?? '?'}%`,
+        `move shares setup=${bucket.setup_move_share ?? '?'}% status=${bucket.status_move_share ?? '?'}% hazard=${bucket.hazard_move_share ?? '?'}% pivot=${bucket.pivot_move_share ?? '?'}% recovery=${bucket.recovery_move_share ?? '?'}%`,
+        `hazards in ${bucket.games_with_any_hazard_pct ?? '?'}% of games first_hazard_turn=${bucket.first_hazard_turn_median ?? '?'} winner_mons_left=${bucket.winner_mons_left_median ?? '?'}`,
+      ].join('\n');
     },
   },
   {

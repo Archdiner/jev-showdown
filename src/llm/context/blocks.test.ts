@@ -87,4 +87,25 @@ test('turn 1 with a switch and tera selects a matching principle', () => {
   expect(guidance).toMatch(/G\d+/);
   const hidden = loadHypotheses() as Array<{ change?: string }>;
   expect(guidance).not.toContain(hidden[0]?.change ?? 'H01-missing');
+  const full = blockById('meta-guidance')!.render(board(), {
+    id: 'meta-guidance',
+    version: '1',
+    enabled: true,
+    variant: 'all',
+    maxChars: 20000,
+  });
+  expect(loadGuidance().every(row => full.includes(row.id))).toBe(true);
+});
+
+test('meta stats quote the top-rated tera and hazard rates', () => {
+  const text = blockById('meta-stats')!.render(board(), {
+    id: 'meta-stats',
+    version: '1',
+    enabled: true,
+    maxChars: 700,
+  });
+  expect(text).toContain('n=260');
+  expect(text).toContain('tera_rate=79.8%');
+  expect(text).toContain('tera_turn_median=20');
+  expect(text).toContain('hazards in 53.5%');
 });
