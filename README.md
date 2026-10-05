@@ -172,6 +172,8 @@ Connects to Pokemon Showdown, logs in, and searches for rated Gen 9 Random Battl
 
 `run-live.sh` is the live runner. It calls the ladder client.
 
+`--labeled-champion` plays the gatekeeper's current champion file for the whole batch. It is off unless you pass it. `--rollback` keeps the builtin `--engine` policy. The process logs `config live` with the config id, content hash, and commit before searching, and writes those three fields on every finished game. A promotion does not swap the engine until the next batch.
+
 Concurrency is 1 unless you pass `--concurrency K` (absolute max 16). `--use-engine-profile` uses `configs/live/concurrency.json` (search 3, max-damage 4, grok 1). `--concurrency-config FILE` replaces those numbers. `--runners N` multiplies the limit. Grok (`--engine grok`) is the search engine with an LLM prior and stays at 1 game because a call is about 25 seconds. `ops live --runners=N --concurrency=K` uses the same limit: default 1, then those flags, clamped at 16. It does not pick an engine profile, because one login plays whichever config the gatekeeper approved.
 
 ### Graceful drain
@@ -195,7 +197,7 @@ Each run also appends `logs/ladder/metrics.jsonl` (one JSON object per line) nex
 
 ### Live metrics JSONL
 
-`v` is the schema version (`1`). Every line also has `ts` (unix ms), `runId`, and `engine`.
+`v` is the schema version (`1`). Every line also has `ts` (unix ms), `runId`, and `engine`. A batch also stamps `configId`, `configHash`, and `gitSha` from the config chosen at startup.
 
 Percentiles are nearest-rank: sort the samples and take index `ceil(p/100 * n) - 1`. An empty sample list is `null`.
 
@@ -544,8 +546,8 @@ Other fields:
 | `latencyMaxMs` | largest `latencyMs` sample. Null when there are no samples. |
 | `minTimerMarginSec` | smallest Showdown seconds-left observed for us. Null if no timer line. |
 | `engine` | ladder engine name, or the ops search layer id |
-| `configId` | caller-supplied. Null on `npm run ladder` until a config layer passes one. `ops live` writes the config id. |
-| `configHash` | 16 hex chars. Same function as `configIdOf`. The ladder hashes the engine name plus `BotConfig`. Ops writes the config id. |
+| `configId` | Builtin policy id (`champion-exact-1ply` or `maxdamage-v1`), or the gatekeeper label's id when `--labeled-champion` is on. `ops live` writes the config id. |
+| `configHash` | Builtin: sha256 of the policy object. Labeled champion: 16-hex content hash of the file, the same value as `configId` when the label still matches. |
 | `gitSha` | `JEV_GIT_SHA` or `GIT_COMMIT` or `GITHUB_SHA`, else `git rev-parse HEAD` |
 | `concurrency` | configured `--concurrency` |
 | `replayId` | Public replay id. The server's id when it confirms one, otherwise the room id with the `battle-` prefix removed (`gen9randombattle-…`). |
@@ -565,7 +567,7 @@ Per-turn rows in the battle file (not copied into `games.jsonl`):
 Example:
 
 ```json
-{"schema":"jev.ladder-game.v1","kind":"ladder-game","source":"ladder","battleId":"battle-gen9randombattle-1","opponent":"Rival","opponentRating":1400,"outcome":"win","endReason":"ko","turns":21,"invalidChoices":0,"crashes":0,"fallbacks":0,"eloBefore":1073,"eloAfter":1089,"gxe":null,"durationMs":84000,"decisions":20,"latencyP50Ms":40,"latencyP95Ms":180,"latencyP99Ms":400,"latencyMaxMs":400,"minTimerMarginSec":12,"engine":"max-damage","configId":null,"configHash":"ab12","gitSha":"87b268f","concurrency":1,"replayUrl":null,"replayStatus":"unconfirmed"}
+{"schema":"jev.ladder-game.v1","kind":"ladder-game","source":"ladder","battleId":"battle-gen9randombattle-1","opponent":"Rival","opponentRating":1400,"outcome":"win","endReason":"ko","turns":21,"invalidChoices":0,"crashes":0,"fallbacks":0,"eloBefore":1073,"eloAfter":1089,"gxe":null,"durationMs":84000,"decisions":20,"latencyP50Ms":40,"latencyP95Ms":180,"latencyP99Ms":400,"latencyMaxMs":400,"minTimerMarginSec":12,"engine":"max-damage","configId":"maxdamage-v1","configHash":"ab12","gitSha":"87b268f","concurrency":1,"replayUrl":null,"replayStatus":"unconfirmed"}
 ```
 
 ## Rating and GXE

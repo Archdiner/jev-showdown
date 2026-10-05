@@ -1,6 +1,7 @@
 import { parentPort } from 'node:worker_threads';
 import { gen9RandomBattle } from '../formats/gen9-randombattle.js';
 import { dataLoader } from '../data/data-loader.js';
+import { buildBot, type BuiltBot } from '../config/bot.js';
 import { BotConfig } from '../types/index.js';
 import { pickBestLegal, sameAction } from './choice.js';
 import { chooseLive } from './decision-battle.js';
@@ -14,6 +15,7 @@ if (!parentPort) {
 const port = parentPort;
 
 let engineName: EngineName = 'search';
+let champion: BuiltBot | null = null;
 const battles = new Set<string>();
 let chain = Promise.resolve();
 
@@ -21,8 +23,9 @@ function send(message: WorkerResponse): void {
   port.postMessage(message);
 }
 
-async function init(_config: BotConfig, engine: EngineName): Promise<void> {
+async function init(_config: BotConfig, engine: EngineName, championConfigPath?: string | null): Promise<void> {
   engineName = engine;
+  champion = championConfigPath ? buildBot(championConfigPath, 'ladder') : null;
   await dataLoader.load(gen9RandomBattle);
   send({ type: 'ready' });
 }
@@ -39,7 +42,7 @@ async function decide(message: DecideRequest): Promise<void> {
   if (!battles.has(message.battleId)) openBattle(message.battleId);
   const started = Date.now();
   try {
-    const picked = await chooseLive(engineName, message.position, message.legal);
+    const picked = await chooseLive(engineName, message.position, message.legal, champion);
     const known = message.legal.some(candidate => sameAction(candidate, picked.action));
     if (!known) {
       send({
@@ -84,7 +87,7 @@ async function decide(message: DecideRequest): Promise<void> {
 
 async function handle(message: WorkerRequest): Promise<void> {
   if (message.type === 'init') {
-    await init(message.config, message.engine);
+    await init(message.config, message.engine, message.championConfigPath);
     return;
   }
   if (message.type === 'open-battle') {

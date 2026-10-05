@@ -41,7 +41,14 @@ export class LiveMetrics {
 
   constructor(
     readonly filePath: string,
-    private readonly context: { runId: string; engine: string; concurrency: number },
+    private readonly context: {
+      runId: string;
+      engine: string;
+      concurrency: number;
+      configId?: string | null;
+      configHash?: string | null;
+      gitSha?: string | null;
+    },
   ) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     this.stream = fs.createWriteStream(filePath, { flags: 'a' });
@@ -137,6 +144,9 @@ export class LiveMetrics {
       ts: Date.now(),
       runId: this.context.runId,
       engine: this.context.engine,
+      ...(this.context.configId ? { configId: this.context.configId } : {}),
+      ...(this.context.configHash ? { configHash: this.context.configHash } : {}),
+      ...(this.context.gitSha ? { gitSha: this.context.gitSha } : {}),
       ...event,
     };
     this.stream.write(`${JSON.stringify(line)}\n`);

@@ -1,5 +1,11 @@
 # Changelog
 
+## Ladder games name the config that played them
+
+Every finished ladder game stores `configId`, `configHash`, and the git commit of the config chosen when the batch started. The default is still the builtin policy: `champion-exact-1ply` for `--engine search` / `exact`, and `maxdamage-v1` for `--engine max-damage`. The hash is the policy itself, not the turn time limit.
+
+`--labeled-champion` opts in to the gatekeeper's active champion file. The client loads it once, before the first search, and only if the file's content hash still matches the label. It logs `config live` with the source, id, hash, and commit. A missing label, two labels, or a file that changed after the label rolls back to the builtin policy and logs the reason. `--rollback` forces that builtin policy. A promotion while games are in progress does not change the engine. Start a new batch to pick it up.
+
 ## Optional PostHog mirror
 
 If `POSTHOG_API_KEY` is set, each finished ladder game is also sent to PostHog as `ladder_game`. The HTTP call is queued and is never awaited while a turn is being chosen. `POSTHOG_LLM_TRACES=1` adds model, latency, token, and cost metrics for gateway calls, without the prompt. Unset, the sink does nothing. The JSONL file remains the record that matters.

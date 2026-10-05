@@ -254,19 +254,31 @@ export function buildDecisionBattle(position: LivePosition): Battle | null {
   }
 }
 
+/** A config-layer bot. The reconstructed battle is always our side as p1. */
+export interface LiveConfigPlayer {
+  decide(input: {
+    battle: Battle;
+    side: 'p1';
+  }): Promise<{ choice: string; scores?: Array<{ choice: string; score: number }> }>;
+}
+
 /**
  * One ladder decision. `search` / `exact` run exactSearch(EXACT_1PLY).
- * `max-damage` runs maxDamageChoice. The action is one of `legal`.
+ * `max-damage` runs maxDamageChoice. A labeled champion, when passed,
+ * chooses through that bot instead. The action is one of `legal`.
  */
 export async function chooseLive(
   engine: EngineName,
   position: LivePosition | undefined,
   legal: Action[],
+  player?: LiveConfigPlayer | null,
 ): Promise<{ action: Action; score: number | null }> {
   if (!position) throw new Error('missing live position');
   const battle = buildDecisionBattle(position);
   if (!battle) throw new Error('could not build a sim battle');
-  const decision = await decide(ladderPolicy(engine), battle, 'p1', new PRNG([1, 2, 3, 4] as any));
+  const decision = player
+    ? await player.decide({ battle, side: 'p1' })
+    : await decide(ladderPolicy(engine), battle, 'p1', new PRNG([1, 2, 3, 4] as any));
   const action = actionFromChoice(decision.choice);
   if (!action || !legal.some(candidate => sameAction(candidate, action))) {
     throw new Error(`engine returned a choice that is not legal (${decision.choice})`);

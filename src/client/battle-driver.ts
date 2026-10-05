@@ -97,6 +97,7 @@ export interface BattleDriverOptions {
   configId?: string | null;
   configHash?: string | null;
   gitSha?: string | null;
+  configPath?: string | null;
   concurrency?: number;
   localServer?: boolean;
   /** Delay between choice-delivery retries. Tests use a few milliseconds. */
@@ -809,6 +810,7 @@ export class BattleDriver extends EventEmitter {
       configId: this.options.configId ?? null,
       configHash: this.options.configHash ?? null,
       gitSha: this.options.gitSha ?? null,
+      configPath: this.options.configPath ?? undefined,
       concurrency: this.options.concurrency ?? 1,
       replayId: room.replay?.id ?? null,
       replayUrl: room.replay?.url ?? null,
