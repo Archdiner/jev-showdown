@@ -13,6 +13,7 @@
     "test:network-guard": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPattern='network-guard|robustness.test'",
     "test:soak": "tsx src/soak/cli.ts",
     "live:preflight": "tsx src/cli/preflight.ts",
+    "stack": "bash scripts/stack.sh",
     "verify": "bash scripts/verify.sh",
     "graph": "tsx src/graph/cli.ts",
     "gate": "tsx src/graph/gate-cli.ts",

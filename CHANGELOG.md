@@ -8,6 +8,9 @@ Three blocks are separate config flags. The game plan is asynchronous (turn 1, f
 
 Honest bench, hidden information, 52 pairs (104 games), sides swapped, 509 randbats species. `hybrid-core` (search only) vs exact-1ply: 55W-49L-0T, Wilson 95% 43.4–62.2%, invalid 0, crashes 0, timeouts 0, p50 144ms, p95 196ms. Vs max-damage: 67W-37L-0T, Wilson 95% 54.9–73.0%, invalid 0, crashes 0, timeouts 0, p50 149ms, p95 215ms. Commit `a7d4dfe`. The plan and judgment screens did not finish: the Vercel AI Gateway answered `http_402` (credit balance required) after the first successful calls. An every-turn arm calls the model on every turn with the compact full-section brief and the search ranking. The margin still rejects a pick that is too far behind the best score. Qwen stays on Cerebras at medium effort, Opus is low, and Grok 4.7 is effort `none`. A wide-margin Qwen profile sets the margin to 3. Hybrid choices use the same request-slot parser as the ladder (`moveSlotIndex` / `legalChoices` / `actionFromChoice`). A choice that is not in that list is not sent.
 
+## Stack supervisor
+
+`scripts/stack.sh start|stop|status|restart` runs ladder, the ops roles (including sentinel, which `supervise` does not start), and the dashboard as separate process groups. The pgid is `state/pids/<component>.pid`. Logs are `logs/stack/<component>.log`. `LADDER_LOG_DIR` and `LIVE_RUNS_DIR` are set. The script re-execs under bash when a zsh login shell invokes it, then enables `set -euo pipefail` and `nullglob`. Pgids are read into an array, so an orphan kill still reaches every group. `start ladder` deletes `state/DRAIN` and `live-runs/*.drain` and refuses to detach if a drain file remains. `stop` signals the group with SIGINT, then SIGTERM, then SIGKILL, and then any leftover process with that component's command line. `status` exits non-zero when a component is missing, duplicated, or orphaned. `start ladder` runs live preflight before the client, which records the account lock. See `OPERATIONS.md`.
 ## Development constraints
 
 Unit tests write sets and stats under `JEV_DATA_DIR` (a temp directory) and set `JEV_ALLOW_SMALL_DATA=1`. The data guard fails the run if anything under `data/` changes. The loader throws when it sees fewer than 500 species unless that test-only flag is set. Live preflight ignores the flag. Benchmarks and self-play print `data species=N hash=H` and write those fields on the results file.
@@ -19,6 +22,10 @@ Unit tests write sets and stats under `JEV_DATA_DIR` (a temp directory) and set 
 `npm run live:preflight` runs before `run-live.sh` logs in. It requires a clean tree on a commit that is contained in `origin/main`, at least 500 species, no other public ladder process for the account, and a 2-game local canary with the same engine flags.
 
 Unit tests clear `VERCEL_AI_GATEWAY_KEY`, `AI_GATEWAY_API_KEY`, `XAI_API_KEY`, `OPENAI_API_KEY`, `CEREBRAS_API_KEY`, and `POSTHOG_API_KEY`, and replace `fetch` with a stub that throws. A test fails if any attempt was recorded, including when the caller catches the error.
+
+## The live breaker cannot idle the only champion
+
+A loss streak no longer pulls the champion. Five losses is normal variance for a config winning about 20% of games, and pulling the only approved config made `ops live` exit every cycle with `every approved config is pulled`. The champion stays schedulable. A streak that is unlikely at that config's baseline win rate flags a regression, and if a distinct previous champion exists the live worker plays that one. A challenger is pulled only when its own streak crosses that same baseline threshold (or its ladder rating drops), then returns after a 30 minute cooldown. Local games and ladder games keep separate counters in `circuits.json`, so a local loss cannot add to the ladder streak. `npm run ops -- sentinel` raises P1 when live reports that skip or when every approved config in a scope is pulled. The check does not read `/proc`.
 
 ## A ladder batch no longer dies on a wall-clock deadline
 

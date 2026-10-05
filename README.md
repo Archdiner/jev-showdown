@@ -553,7 +553,7 @@ P0 is losing games or corrupting data now. P1 is the loop or visibility broken. 
 | ops-worker-duplicate | P1 | Two fresh pids for one of those workers |
 | improvement-stall | P1 | Losses reviewed and nothing queued for 15 minutes |
 | analyst-log-dir | P1 | Analyst process has no `LADDER_LOG_DIR` and its default dirs have no game JSONL while the ladder log dir does |
-| circuits-all-pulled | P1 | Every entry in `circuits.json` is pulled, so ops live stays idle |
+| circuits-all-pulled | P1 | ops live reports every approved config is pulled, or circuits.json has every approved config pulled |
 | mixed-ratings | P1 | A local rating and a ladder rating in the same lookback window |
 | replay-unconfirmed | P2 | Public game with `replayUrl` null and `replayStatus` `unconfirmed` |
 | timer-margin-null | P2 | A played game with `minTimerMarginSec` null |
@@ -583,6 +583,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). One feature per pull request, rebase on 
 `npm run test:soak` plays the real ladder client against the ops local server. `npm run test:soak -- --ci` is the short CI form. `npm run live:preflight` is what `./run-live.sh` runs before login: clean commit on `origin/main`, species floor, account lock, and a 2-game canary.
 
 Unit tests do not call the network. Provider keys are cleared and `fetch` throws. A recorded attempt fails the test.
+
+`scripts/stack.sh` starts and stops the live processes as process groups. `OPERATIONS.md` describes the commands, the pidfiles, and the stop signals.
 
 ## Ladder game records
 
