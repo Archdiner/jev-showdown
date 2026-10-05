@@ -43,3 +43,16 @@ export function sideWinRate(results: GameResult[], configId: string): { wins: nu
   }
   return { wins, games, winRate: games ? wins / games : 0 };
 }
+
+
+/** Factory / gate self-play guard: any invalid choice fails the config. */
+export function assertZeroInvalid(results: GameResult[], label = 'self-play'): void {
+  const invalid = results.reduce((sum, game) => sum + game.p1Invalid + game.p2Invalid, 0);
+  if (invalid > 0) {
+    const sample = results.find(game => game.p1Invalid > 0 || game.p2Invalid > 0);
+    throw new Error(
+      `${label} guardrail failed: invalid=${invalid}`
+      + (sample ? ` (seed=${sample.seed} error=${sample.error ?? 'illegal choice'})` : ''),
+    );
+  }
+}

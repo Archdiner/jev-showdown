@@ -22,7 +22,7 @@ export const CHECKS: InvariantCheck[] = [
     id: 'choice-sent-not-applied',
     severity: 'P0',
     title: 'A turn-1 choice was logged sent and the game ended on our timer',
-    suggestedFix: 'Treat /choose returning true as delivery, not application. Resend the same choice until a later turn or a new request shows the server took it.',
+    suggestedFix: 'Treat /choose returning true as delivery, not application. Retry only on socket failure or a fresh |request| for the same rqid — never on |inactive| clock ticks (INC-041).',
     detect: choiceSentNotApplied,
   },
   {
@@ -38,6 +38,13 @@ export const CHECKS: InvariantCheck[] = [
     title: 'A finished game logged invalid choices',
     suggestedFix: 'The choice must be one of the legal actions on that request. An invalid choice is a lost turn. When invalidChoiceReasons is present, each new reason is listed on the incident.',
     detect: invalidChoices,
+  },
+  {
+    id: 'duplicate-choose-per-rqid',
+    severity: 'P0',
+    title: 'More than one /choose was sent for the same rqid without a server reason',
+    suggestedFix: 'At most one successful /choose per rqid unless the socket failed the first send or the server asked again (fresh |request| / non-locked rejection). Never resend on |inactive| clock ticks (INC-041).',
+    detect: duplicateChoosePerRqid,
   },
   {
     id: 'crash-or-fallback',
@@ -1064,6 +1071,75 @@ function malformedLines(ctx: SentinelContext): CheckHit[] {
       detail: `${row.file}:${row.line} ${row.error}`,
       evidence: [{ file: row.file, line: row.line, detail: row.error ?? 'invalid JSON' }],
     }));
+}
+
+
+function duplicateChoosePerRqid(ctx: SentinelContext): CheckHit[] {
+  const hits: CheckHit[] = [];
+  const byFile = groupRows(ctx);
+  for (const [file, rows] of byFile) {
+    /** battleId -> rqid -> list of successful sends */
+    const sends = new Map<string, Map<number, Array<{ line: number; cause: string; choice: string; ts: number | null }>>>();
+    const reasons = new Map<string, Set<number>>();
+    for (const row of rows) {
+      const value = row.value;
+      if (!value) continue;
+      const kind = text(value.type) ?? text(value.kind);
+      if (kind !== 'choice-delivery') continue;
+      const battleId = text(value.battleId) ?? '';
+      const rqid = numberOf(value.rqid);
+      if (!battleId || rqid === null) continue;
+      const cause = text(value.cause) ?? '';
+      if (value.sent === true) {
+        const byRqid = sends.get(battleId) ?? new Map();
+        const list = byRqid.get(rqid) ?? [];
+        list.push({
+          line: row.line,
+          cause,
+          choice: text(value.choice) ?? '',
+          ts: numberOf(value.ts),
+        });
+        byRqid.set(rqid, list);
+        sends.set(battleId, byRqid);
+      }
+      // Socket failure or server-asked retry justifies another send for this rqid.
+      if (
+        value.sent === false
+        && (cause === 'socket-closed' || cause === 'send-threw' || cause === 'illegal' || cause === 'server-rejected')
+      ) {
+        const set = reasons.get(battleId) ?? new Set();
+        set.add(rqid);
+        reasons.set(battleId, set);
+      }
+    }
+    for (const [battleId, byRqid] of sends) {
+      for (const [rqid, list] of byRqid) {
+        const unconfirmed = list.filter(item => item.cause === 'unconfirmed');
+        const allowed = reasons.get(battleId)?.has(rqid) === true;
+        const over = list.length > 1 && (!allowed || unconfirmed.length > 0);
+        if (!over && unconfirmed.length === 0) continue;
+        const sample = list[list.length - 1];
+        if (!inLookback(ctx, sample.ts) || !admitted(ctx, sample.ts)) continue;
+        const game = ctx.games.find(item => item.battleId === battleId);
+        hits.push({
+          key: `${battleId}:rqid:${rqid}`,
+          detail: `${battleId} sent ${list.length} /choose for rqid ${rqid}`
+            + (unconfirmed.length ? ` including ${unconfirmed.length} unconfirmed watchdog resend(s)` : '')
+            + (allowed ? '' : ' without a recorded server/socket reason'),
+          evidence: list.map(item => ({
+            file,
+            line: item.line,
+            detail: `cause=${item.cause} choice=${item.choice}`,
+          })),
+          at: sample.ts ?? game?.ts ?? null,
+          gitSha: game?.gitSha ?? null,
+          runId: game?.runId ?? null,
+          battleId,
+        });
+      }
+    }
+  }
+  return dedupeHits(hits);
 }
 
 function invalidChoices(ctx: SentinelContext): CheckHit[] {

@@ -170,7 +170,9 @@ async function runChallenger(paths: OpsPaths, job: QueueJob, opts: FactoryRunOpt
   const resultId = writeResult(paths, job, summary, { ...progress });
   const terminal = results.length === 0 || verdict !== 'continue' || playedGames >= maxGames;
   if (!terminal) return { resultId, summary, requeue: true, progress };
-  if (liveProposalAllowed(wins, losses, invalid)) {
+  // Self-play gate (INC-041): any invalid choice fails the config.
+  const guardrailFail = invalid > 0 || crashes > 0;
+  if (liveProposalAllowed(wins, losses, invalid) && !guardrailFail) {
     return {
       resultId,
       summary,
@@ -187,7 +189,9 @@ async function runChallenger(paths: OpsPaths, job: QueueJob, opts: FactoryRunOpt
     resultId,
     summary,
     progress,
-    rejectedReason: verdict === 'reject' ? summary : undefined,
+    rejectedReason: guardrailFail
+      ? `guardrail failed: invalid=${invalid} crashes=${crashes}`
+      : verdict === 'reject' ? summary : undefined,
     handoff: {
       configPath: challengerPath,
       configId: challenger.configId,

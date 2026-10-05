@@ -251,7 +251,7 @@ describe('ladder delivery and timers', () => {
     await driver.stop();
   });
 
-  it('resends the same choice and rqid when the clock ticks and the turn does not', async () => {
+  it('does not resend when the clock ticks after /choose (INC-041)', async () => {
     const { driver, socket, logDir, sent } = harness(() => true);
     const room = 'battle-gen9randombattle-7005';
     const done = ended(driver);
@@ -262,19 +262,15 @@ describe('ladder delivery and timers', () => {
     expect(sent).toEqual([{ roomId: room, choice: 'move 1|2' }]);
     socket.emit('line', room, '|inactive|BotAlpha has 120 seconds left.');
     socket.emit('line', room, '|inactive|Time left: 90 sec this turn | 150 sec total');
-    expect(sent).toEqual([
-      { roomId: room, choice: 'move 1|2' },
-      { roomId: room, choice: 'move 1|2' },
-      { roomId: room, choice: 'move 1|2' },
-    ]);
+    expect(sent).toEqual([{ roomId: room, choice: 'move 1|2' }]);
     socket.emit('line', room, '|turn|2');
     socket.emit('line', room, '|inactive|BotAlpha has 150 seconds left.');
-    expect(sent).toHaveLength(3);
+    expect(sent).toHaveLength(1);
     socket.emit('line', room, '|win|BotAlpha');
-    await done;
+    const summary = await done;
+    expect(summary.invalidChoices).toBe(0);
     const resends = readLog(logDir, room).filter(event => event.cause === 'unconfirmed');
-    expect(resends).toHaveLength(2);
-    expect(resends[0]).toMatchObject({ rqid: 2, choice: 'move 1|2', sent: true, retry: 1 });
+    expect(resends).toHaveLength(0);
     await driver.stop();
   });
 
@@ -302,11 +298,11 @@ describe('ladder delivery and timers', () => {
     await new Promise(resolve => setTimeout(resolve, 40));
     expect(sent).toEqual([{ roomId: room, choice: 'move 1|4' }]);
     socket.emit('line', room, '|inactive|BotAlpha has 120 seconds left.');
-    expect(sent).toHaveLength(2);
+    expect(sent).toHaveLength(1);
     socket.emit('line', room, "|error|[Invalid choice] Can't undo: A trapping/disabling effect would cause undo to leak information");
     socket.emit('line', room, '|c|BotAlpha|invalid choice echo');
     socket.emit('line', room, '|inactive|BotAlpha has 90 seconds left.');
-    expect(sent).toHaveLength(2);
+    expect(sent).toHaveLength(1);
     socket.emit('line', room, '|win|BotAlpha');
     const summary = await done;
     expect(summary.invalidChoices).toBe(1);
@@ -542,4 +538,73 @@ describe('ladder delivery and timers', () => {
     expect(latestReplay).not.toContain('gen9randombattle-7000');
     await driver.stop();
   });
+
+  it('INC-041: timer-ON Time left after /choose must not resend or count too-late', async () => {
+    const room = 'battle-gen9randombattle-2693049384';
+    const move: Action = { type: 'move', moveIndex: 4 };
+    const { driver, socket, logDir, sent } = harness(() => true, { action: move });
+    const done = ended(driver);
+    const moveRequest = JSON.stringify({
+      rqid: 3,
+      side: {
+        id: 'p1',
+        pokemon: [
+          { ident: 'p1: Cramorant', details: 'Cramorant', condition: '100/100', active: true },
+          { ident: 'p1: Bench', details: 'Magikarp', condition: '100/100', active: false },
+        ],
+      },
+      active: [{
+        moves: [
+          { move: 'Tackle', id: 'tackle', pp: 35, maxpp: 35, target: 'normal', disabled: false },
+          { move: 'Growl', id: 'growl', pp: 40, maxpp: 40, target: 'normal', disabled: false },
+          { move: 'Splash', id: 'splash', pp: 40, maxpp: 40, target: 'self', disabled: false },
+          { move: 'Surf', id: 'surf', pp: 15, maxpp: 15, target: 'allAdjacentFoes', disabled: false },
+        ],
+      }],
+    });
+    const switchRequest = JSON.stringify({
+      rqid: 5,
+      forceSwitch: [true],
+      side: {
+        id: 'p1',
+        pokemon: [
+          { ident: 'p1: Cramorant', details: 'Cramorant', condition: '0 fnt', active: true },
+          { ident: 'p1: Bench', details: 'Magikarp', condition: '100/100', active: false },
+        ],
+      },
+    });
+    socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
+    socket.emit('line', room, '|player|p2|Rival|2|1400');
+    socket.emit('line', room, `|request|${moveRequest}`);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(sent).toEqual([{ roomId: room, choice: 'move 4|3' }]);
+    // Exact INC-041 sequence: timer ON + private Time left after the choose.
+    socket.emit('line', room, '|inactive|Battle timer is ON: referred to by BotAlpha');
+    socket.emit('line', room, '|inactive|Time left: 150 sec this turn | 150 sec total | 60 sec grace');
+    expect(sent).toEqual([{ roomId: room, choice: 'move 4|3' }]);
+    const unconfirmed = readLog(logDir, room).filter(event => event.cause === 'unconfirmed');
+    expect(unconfirmed).toHaveLength(0);
+    // Real INC-041 order: successor |request| arrives, then the delayed "too late"
+    // for the prior choose is attributed to the new rqid unless we remember lastSent.
+    socket.emit('line', room, '|faint|p1a: Cramorant');
+    socket.emit('line', room, `|request|${switchRequest}`);
+    socket.emit(
+      'line',
+      room,
+      '|error|[Invalid choice] Sorry, too late to make a different move; the next turn has already started (move 4|3)',
+    );
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(sent.some(row => row.choice === 'move 4|3' && sent.indexOf(row) > 0)).toBe(false);
+    expect(sent.filter(row => row.choice.startsWith('move 4|3'))).toHaveLength(1);
+    expect(sent.some(row => row.choice.startsWith('switch') && row.choice.endsWith('|5'))).toBe(true);
+    socket.emit('line', room, '|win|Rival');
+    const summary = await done;
+    expect(summary.invalidChoices).toBe(0);
+    expect(summary.invalidChoiceReasons).toEqual([]);
+    const tooLate = readLog(logDir, room).filter(event => event.cause === 'too-late');
+    expect(tooLate).toHaveLength(1);
+    expect(tooLate[0]).toMatchObject({ rqid: 3, sent: false, choice: 'move 4|3' });
+    await driver.stop();
+  });
+
 });
