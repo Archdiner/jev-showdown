@@ -69,4 +69,37 @@ describe('ladder concurrency', () => {
       jest.useRealTimers();
     }
   });
+
+  it('cancels the search on drain and leaves the active game running', () => {
+    jest.useFakeTimers({ now: 10_000 });
+    try {
+      const searches: string[] = [];
+      let cancels = 0;
+      const client = {
+        isReady: () => true,
+        isBlocked: () => false,
+        search: (format: string) => {
+          searches.push(format);
+          return true;
+        },
+        cancelSearch: () => {
+          cancels += 1;
+          return true;
+        },
+      } as unknown as ShowdownClient;
+      const queue = new LadderQueue(client, 'gen9randombattle', 2, () => {}, true);
+      queue.fill();
+      expect(searches).toEqual(['gen9randombattle']);
+      queue.noteBattle('battle-gen9randombattle-1');
+      queue.drain();
+      expect(queue.activeBattles).toBe(1);
+      expect(queue.isDraining).toBe(true);
+      expect(cancels).toBe(1);
+      queue.fill();
+      jest.advanceTimersByTime(5_000);
+      expect(searches).toEqual(['gen9randombattle']);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });

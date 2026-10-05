@@ -145,6 +145,8 @@ The ladder client speaks the Showdown websocket protocol. `--engine max-damage` 
 
 One login can play several battles at once. `--concurrency K` (default 1, maximum 5) keeps a ladder search queued whenever fewer than K battles are active. Each battle has its own protocol state, JSONL log, and worker-thread engine. Search time is per battle and is split across decisions that are in flight. If the server rejects a search (already searching, the 5-game cap, or high load), the client logs the popup, backs off, and retries. It never sends `/forfeit`.
 
+`./run-live.sh` is the same ladder client. To swap engines without forfeiting, drain the run: `kill -USR1 <pid>`, `kill -TERM <pid>`, `touch state/DRAIN`, or `touch live-runs/<runId>.drain`. The process prints `<pid>` and `<runId>` when it starts. It stops searching, finishes games already on the ladder, writes `logs/ladder/summary.json`, and exits. A second `SIGTERM` or `SIGUSR1` exits immediately. Remove `state/DRAIN` before starting again.
+
 Real ladder (run this on your Mac, not from a cloud agent, and only after `--check` reports `locked=no`):
 
 ```bash
