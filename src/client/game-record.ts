@@ -6,6 +6,7 @@ import { toID } from './ids.js';
 import { ourClockUpdate } from './inactive-clock.js';
 import { parseRatingLine, parseReplayUrl } from './showdown-client.js';
 import { percentile } from './live-metrics.js';
+import type { CalibrationSummary } from './prediction.js';
 
 /**
  * One finished game. The ladder client appends it to `{logDir}/games.jsonl`.
@@ -86,6 +87,11 @@ export interface LadderGameRecord {
   phantom?: true;
   /** Seat we occupied. Absent when the protocol never named us. */
   ourSide?: 'p1' | 'p2';
+  /**
+   * Sim-versus-protocol totals for this game. Omitted when no turn was forecast.
+   * Counts are exact; rates are nearest 1/10000.
+   */
+  calibration?: CalibrationSummary;
   /** Present on `ops live` rows. The ladder client leaves these off. */
   configPath?: string;
   variantId?: string;
@@ -296,6 +302,7 @@ export interface LadderGameInput {
   variantId?: string;
   inputLog?: string;
   log?: string;
+  calibration?: CalibrationSummary | null;
 }
 
 export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord {
@@ -351,6 +358,7 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     ...(input.variantId ? { variantId: input.variantId } : {}),
     ...(input.inputLog !== undefined ? { inputLog: input.inputLog } : {}),
     ...(input.log !== undefined ? { log: input.log } : {}),
+    ...(input.calibration ? { calibration: input.calibration } : {}),
   };
 }
 

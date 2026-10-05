@@ -1,3 +1,10 @@
+import {
+  type CalibrationSample,
+  type CalibrationSummary,
+  calibrationFromUnknown,
+  sampleFromRow,
+} from '../client/prediction.js';
+
 /** Parsers for ladder JSONL, `[ladder]` lines, and ops live/heartbeat JSONL. */
 
 import { isLocalLiveGame, isPhantomRecord } from '../client/game-record.js';
@@ -50,6 +57,7 @@ export interface GameRecord {
   fallbacks: number | null;
   source: string;
   progress: string | null;
+  calibration: CalibrationSummary | null;
 }
 
 export interface Heartbeat {
@@ -64,6 +72,7 @@ export interface ParsedFile {
   games: GameRecord[];
   heartbeats: Heartbeat[];
   openBattles: string[];
+  scores: CalibrationSample[];
   skipped: number;
 }
 
@@ -167,6 +176,7 @@ export function parseLadderLine(line: string, hint: { source: string; runner: st
     fallbacks: Number(match[9]),
     source: hint.source,
     progress: `${match[2]}/${match[3]}`,
+    calibration: null,
   });
 }
 
@@ -175,7 +185,7 @@ function outcomeOf(value: string | null): GameRecord['outcome'] | null {
   return null;
 }
 
-export function parseJsonRecord(row: Record<string, unknown>, hint: { source: string; runner: string | null; engines: Map<string, string> }): { game?: GameRecord; heartbeat?: Heartbeat; opened?: string; closed?: string } | null {
+export function parseJsonRecord(row: Record<string, unknown>, hint: { source: string; runner: string | null; engines: Map<string, string> }): { game?: GameRecord; heartbeat?: Heartbeat; opened?: string; closed?: string; score?: CalibrationSample } | null {
   const kind = String(row.type || row.kind || '');
   const ts = num(row.ts) ?? num(row.timestamp) ?? 0;
   if (row.facility && kind === '') {
@@ -183,13 +193,15 @@ export function parseJsonRecord(row: Record<string, unknown>, hint: { source: st
     if (!facility) return null;
     return { heartbeat: { facility, pid: num(row.pid), ts, status: str(row.status) || 'ok', detail: str(row.detail) || '' } };
   }
+  const score = sampleFromRow(row);
   const battleId = str(row.battleId) || (kind === 'live-game' || kind === 'game' ? str(row.id) : null);
   if (kind === 'game_start' && battleId) {
     if (typeof row.engine === 'string') hint.engines.set(battleId, row.engine);
-    return { opened: battleId };
+    return score ? { opened: battleId, score } : { opened: battleId };
   }
   if (isPhantomRecord(row)) return null;
   const outcome = outcomeOf(str(row.outcome) || str(row.winner));
+  if (score && !outcome) return { score };
   const isGame = kind === 'result' || kind === 'live-game' || kind === 'ladder-game' || kind === 'game';
   if (!isGame || !outcome) return null;
   const local = isLocalLiveGame({
@@ -227,7 +239,9 @@ export function parseJsonRecord(row: Record<string, unknown>, hint: { source: st
       fallbacks: num(row.fallbacks),
       source: hint.source,
       progress: null,
+      calibration: calibrationFromUnknown(row.calibration),
     }),
+    ...(score ? { score } : {}),
   };
 }
 
@@ -269,6 +283,7 @@ export function parseSummary(value: unknown, source: string): GameRecord[] {
       fallbacks: num(row.fallbacks),
       source,
       progress: null,
+      calibration: calibrationFromUnknown(row.calibration),
     }));
   }
   return games;
@@ -278,6 +293,7 @@ export function parseSummary(value: unknown, source: string): GameRecord[] {
 export function parseLog(text: string, hint: { source: string; runner: string | null }): ParsedFile {
   const games: GameRecord[] = [];
   const heartbeats: Heartbeat[] = [];
+  const scores: CalibrationSample[] = [];
   const open = new Set<string>();
   const engines = new Map<string, string>();
   let skipped = 0;
@@ -294,6 +310,7 @@ export function parseLog(text: string, hint: { source: string; runner: string | 
         const parsed = parseJsonRecord(JSON.parse(line) as Record<string, unknown>, { source: hint.source, runner: hint.runner, engines });
         if (!parsed) continue;
         if (parsed.heartbeat) heartbeats.push(parsed.heartbeat);
+        if (parsed.score) scores.push(parsed.score);
         if (parsed.opened) open.add(parsed.opened);
         if (parsed.closed) open.delete(parsed.closed);
         if (parsed.game) games.push(parsed.game);
@@ -305,5 +322,5 @@ export function parseLog(text: string, hint: { source: string; runner: string | 
     const game = parseLadderLine(line, { source: hint.source, runner: hint.runner, engine, ts: lineNo });
     if (game) games.push(game);
   }
-  return { games, heartbeats, openBattles: [...open], skipped };
+  return { games, heartbeats, openBattles: [...open], scores, skipped };
 }

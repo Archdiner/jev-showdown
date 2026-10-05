@@ -7,6 +7,13 @@ import type { DashboardPaths } from './paths.js';
 import { classifyLoss, parseLog, parseSummary, runnerFromName, type GameRecord, type Heartbeat, type LatencySummary } from './parse.js';
 import { reportGames, type GameReport } from './games.js';
 import { sprt, wilson } from './stats.js';
+import {
+  type CalibrationSample,
+  type CalibrationSummary,
+  combineCalibrations,
+  dedupeSamples,
+  summarizeSamples,
+} from '../client/prediction.js';
 
 export interface Gap {
   id: string;
@@ -58,6 +65,8 @@ export interface Snapshot {
     variants: VariantRow[];
     regressions: { available: boolean; note: string };
   };
+  /** Sim-versus-protocol totals across every logged turn, not only the recent table. */
+  calibration: CalibrationSummary | null;
   agents: { available: false; path: string; note: string };
 }
 
@@ -166,7 +175,14 @@ function combine(a: GameRecord, b: GameRecord): GameRecord {
     invalid: pick(primary.invalid, other.invalid),
     crashes: pick(primary.crashes, other.crashes),
     fallbacks: pick(primary.fallbacks, other.fallbacks),
+    calibration: preferCalibration(primary.calibration, other.calibration),
   };
+}
+
+function preferCalibration(left: CalibrationSummary | null, right: CalibrationSummary | null): CalibrationSummary | null {
+  if (!left) return right;
+  if (!right) return left;
+  return left.compared >= right.compared ? left : right;
 }
 
 function opsBundle(root: string, graph: string): OpsPaths {
@@ -219,6 +235,7 @@ function variantsOf(games: GameRecord[]): VariantRow[] {
 export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot {
   const games: GameRecord[] = [];
   const beats: Heartbeat[] = [];
+  const scores: CalibrationSample[] = [];
   const logs: Snapshot['runs']['logs'] = [];
   const sources: Snapshot['sources'] = [];
   const gaps: Gap[] = [];
@@ -239,6 +256,7 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
     skipped += parsed.skipped;
     games.push(...parsed.games);
     beats.push(...parsed.heartbeats);
+    scores.push(...parsed.scores);
     logs.push({ path: file, runner: runner || 'log', games: parsed.games.length, openBattles: parsed.openBattles });
   };
 
@@ -346,7 +364,16 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
     return { name, health, ageMs, pid: beat.pid, detail: beat.detail };
   });
 
+  const rolled = rollScores(dedupeSamples(scores));
   const unique = dedupe(games);
+  for (const game of unique) {
+    if (!game.battleId) continue;
+    const fromTurns = rolled.get(game.battleId);
+    if (!fromTurns) continue;
+    // A finished game row is the full total. A log tail can hold only the latest turns.
+    if (!game.calibration || fromTurns.compared > game.calibration.compared) game.calibration = fromTurns;
+  }
+  const calibration = calibrationOf(unique, rolled);
   const variants = variantsOf(unique);
   const orderedAll = [...unique].sort((a, b) => b.ts - a.ts);
   const record = {
@@ -408,5 +435,37 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
       path: path.join(paths.cwd, 'state', 'cloud-agents.json'),
       note: 'Cloud agents and GitHub PRs are not loaded in this slice. Expected later: state/cloud-agents.json version 1 plus the GitHub pulls API.',
     },
+    calibration,
   };
+}
+
+function rollScores(samples: CalibrationSample[]): Map<string, CalibrationSummary> {
+  const groups = new Map<string, CalibrationSample[]>();
+  for (const sample of samples) {
+    if (!sample.battleId) continue;
+    const rows = groups.get(sample.battleId) ?? [];
+    rows.push(sample);
+    groups.set(sample.battleId, rows);
+  }
+  const out = new Map<string, CalibrationSummary>();
+  for (const [battleId, rows] of groups) {
+    const summary = summarizeSamples(rows);
+    if (summary) out.set(battleId, summary);
+  }
+  return out;
+}
+
+/** One total per battle. Turn rows fill games that never wrote `calibration`. Orphan turn rows still count. */
+function calibrationOf(games: GameRecord[], byBattle: Map<string, CalibrationSummary>): CalibrationSummary | null {
+  const seen = new Set<string>();
+  const parts: CalibrationSummary[] = [];
+  for (const game of games) {
+    if (game.battleId) seen.add(game.battleId);
+    if (game.calibration) parts.push(game.calibration);
+  }
+  for (const [battleId, summary] of byBattle) {
+    if (seen.has(battleId)) continue;
+    parts.push(summary);
+  }
+  return combineCalibrations(parts);
 }

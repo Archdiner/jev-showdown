@@ -151,6 +151,26 @@ function opponentDistribution(battle: Battle, opp: SideId, config: ExactConfig):
   return [{ choice: maxDamageChoice(battle, opp, moves), prob: 1 }];
 }
 
+/**
+ * The opponent action this config assumes for one turn.
+ * `sideId` is our side. The string is a sim choice (`move 1`, `switch 2`).
+ */
+export function modalReply(battle: Battle, sideId: SideId, config: ExactConfig): string | null {
+  const replies = opponentDistribution(battle, otherSide(sideId), config);
+  let best: WeightedChoice | null = null;
+  for (const reply of replies) {
+    if (!reply.choice) continue;
+    if (!best || reply.prob > best.prob) best = reply;
+  }
+  return best?.choice ?? null;
+}
+
+/** Same seed the search uses for draw `sample` (0 is the first draw). */
+export function reseed(battle: Battle, sample: number): void {
+  const prng = new PRNG([sample + 1, 0x6d2b79f5, 0x1b873593, 0x85ebca6b] as any);
+  battle.resetRNG(prng.startingSeed);
+}
+
 function ownChoices(battle: Battle, sideId: SideId, config: ExactConfig, atRoot: boolean): string[] {
   const legal = legalChoices(battle, sideId);
   const cap = config.deeperChoices ?? 0;
@@ -210,11 +230,6 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
     predictedSwitch,
     answersPredictedSwitch: predictedSwitch && best === answer,
   };
-}
-
-function reseed(battle: Battle, sample: number): void {
-  const prng = new PRNG([sample + 1, 0x6d2b79f5, 0x1b873593, 0x85ebca6b] as any);
-  battle.resetRNG(prng.startingSeed);
 }
 
 interface ChoiceScore {

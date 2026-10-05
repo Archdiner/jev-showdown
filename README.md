@@ -557,17 +557,30 @@ Other fields:
 | `localReplayPath` | raw protocol log on disk |
 | `logPath` | per-battle JSONL |
 | `ts`, `startedAt` | epoch ms. `pid` is the process id. |
+| `calibration` | present when at least one turn was compared with the protocol. Foe-action accuracy, damage MAE, KO misses, and speed-order misses. See Sim calibration below. |
 
 Per-turn rows in the battle file (not copied into `games.jsonl`):
 
 - `searchMs`: engine time.
 - `latencyMs`: wall clock spent choosing. The game row's percentiles are computed from these samples.
 - `secondsLeft`: Showdown clock at the decision. Null when no `|inactive|` for us has been seen.
+- `prediction`: `jev.turn-forecast.v1`, or null when the sim battle could not be built. The foe action is the modal reply (`move id` or `switch:<species id>`). HP and damage are fractions of max HP. The search champion averages its 8 draws; max-damage uses one draw. Either way the rollout is after the choice is sent, and it is capped at 8.
+- `predictionBaseline`: `{ourSide, ourHpBefore, foeHpBefore}` from the client at decision time. The offline report uses it with the replay log.
+
+A later `prediction_error` row (`jev.prediction-error.v1`) on the same file scores that forecast against the protocol up to the next request or result: `foeActionMatch`, `ourActionMatch`, `damageDealtAbs`, `damageTakenAbs`, `ourKoMismatch`, `foeKoMismatch`, `speedOrderMismatch`. `comparable` is false when the turn never played (forfeit, disconnect). Those rows are the game's `calibration` totals.
 
 Example:
 
 ```json
 {"schema":"jev.ladder-game.v1","kind":"ladder-game","source":"ladder","battleId":"battle-gen9randombattle-1","opponent":"Rival","opponentRating":1400,"outcome":"win","endReason":"ko","turns":21,"invalidChoices":0,"crashes":0,"fallbacks":0,"eloBefore":1073,"eloAfter":1089,"gxe":null,"durationMs":84000,"decisions":20,"latencyP50Ms":40,"latencyP95Ms":180,"latencyP99Ms":400,"latencyMaxMs":400,"minTimerMarginSec":12,"engine":"max-damage","configId":"maxdamage-v1","configHash":"ab12","gitSha":"87b268f","concurrency":1,"replayUrl":null,"replayStatus":"unconfirmed"}
+```
+
+## Sim calibration
+
+`npm run calibration` reads `logs/ladder` (or `--log-dir`) and prints foe-action accuracy, damage MAE both ways, KO misses, and speed-order misses. `--json` prints the same totals. The dashboard's Sim calibration panel reads the `prediction_error` rows and, when a battle only has the game-level total, `calibration` on `jev.ladder-game.v1`.
+
+```bash
+npm run calibration -- --log-dir logs/ladder
 ```
 
 ## Rating and GXE
