@@ -22,6 +22,7 @@ import { pruneReplies, replyDistribution, WeightedChoice } from './switch-model.
 import { teamEval } from './team-eval.js';
 import { fittedTeamEval } from './fitted-eval.js';
 import { selectiveDepth2 } from './depth2.js';
+import { solveZeroSum } from './matrix-solve.js';
 import { createHash } from 'crypto';
 
 export interface SelectiveOptions {
@@ -99,6 +100,23 @@ export interface ExactConfig {
    * combined. Unset keeps the configured depth everywhere.
    */
   endgame?: EndgameOptions;
+  /**
+   * Opt-in simultaneous-move solve at the root: score every own choice
+   * against several foe replies, solve the zero-sum matrix game, and rank
+   * own choices by value against a blend of the modelled reply and the
+   * foe's equilibrium mix. Unset keeps the single modelled reply.
+   */
+  replySolve?: ReplySolveOptions;
+}
+
+export interface ReplySolveOptions {
+  /** Foe replies in the matrix: damage-ranked moves first, then ranked switches. */
+  maxReplies: number;
+  /** RNG draws per cell outside the modelled reply's column (that one uses `samples`). */
+  samples: number;
+  /** Weight on the foe's equilibrium mix; the rest stays on the modelled reply. 1 = pure Nash. */
+  nashWeight: number;
+  iterations: number;
 }
 
 export interface EndgameOptions {
@@ -360,6 +378,10 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
   }, null);
   const predictedSwitch = Boolean(modal?.choice.startsWith('switch'));
 
+  if (config.replySolve) {
+    return solvedSearch(working, snap, sideId, mine, replies, config, config.replySolve, predictedSwitch);
+  }
+
   const scores: ScoredChoice[] = [];
   let best = mine[0];
   let bestScore = -Infinity;
@@ -387,6 +409,64 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
     predictedSwitch,
     answersPredictedSwitch: predictedSwitch && best === answer,
   };
+}
+
+/** Foe replies for the matrix: the modelled replies, then damage-ranked moves, then ranked switches. */
+function matrixReplies(battle: Battle, opp: SideId, modelled: WeightedChoice[], cap: number): string[] {
+  const legal = legalChoices(battle, opp).filter(choice => !choice.includes('terastallize'));
+  const out: string[] = [];
+  const add = (choice: string) => {
+    if (out.length < cap && legal.includes(choice) && !out.includes(choice)) out.push(choice);
+  };
+  for (const row of modelled) add(row.choice);
+  const moves = legal.filter(choice => choice.startsWith('move '));
+  for (const row of replyWeights(battle, opp, moves)) add(row.choice);
+  for (const row of rankedSwitches(battle, opp, false)) add(row.choice);
+  for (const choice of legal) add(choice);
+  return out;
+}
+
+function solvedSearch(
+  working: Battle,
+  snap: string,
+  sideId: SideId,
+  mine: string[],
+  modelled: WeightedChoice[],
+  config: ExactConfig,
+  options: ReplySolveOptions,
+  predictedSwitch: boolean,
+): SearchTrace {
+  const opp = otherSide(sideId);
+  const columns = matrixReplies(working, opp, modelled, Math.max(1, options.maxReplies));
+  const modelProb = columns.map(choice => modelled.find(row => row.choice === choice)?.prob ?? 0);
+  const modelTotal = modelProb.reduce((sum, p) => sum + p, 0);
+  const rows: string[] = [];
+  const payoffs: number[][] = [];
+  for (const choice of mine) {
+    if (searchBudgetExpired(config.deadlineMs, rows.length)) break;
+    const penalty = config.progress ? progressPenalty(working, sideId, choice) : 0;
+    const cells = columns.map((reply, j) => {
+      const draws = modelProb[j] > 0 ? config.samples ?? 1 : options.samples;
+      return scoreChoice(snap, sideId, choice, config.depth, config, draws, [{ choice: reply, prob: 1 }], null).mean - penalty;
+    });
+    rows.push(choice);
+    payoffs.push(cells);
+  }
+  if (rows.length === 0) return { choice: mine[0], scores: [] };
+  const solution = solveZeroSum(payoffs, options.iterations);
+  const w = Math.min(1, Math.max(0, options.nashWeight));
+  const target = columns.map((_, j) => (1 - w) * (modelTotal > 0 ? modelProb[j] / modelTotal : 0) + w * solution.cols[j]);
+  const scores: ScoredChoice[] = rows.map((choice, i) => ({
+    choice,
+    score: payoffs[i].reduce((sum, v, j) => sum + v * target[j], 0),
+  }));
+  let bestIndex = 0;
+  for (let i = 1; i < scores.length; i++) {
+    const better = scores[i].score > scores[bestIndex].score + 1e-9;
+    const tie = Math.abs(scores[i].score - scores[bestIndex].score) <= 1e-9 && solution.rows[i] > solution.rows[bestIndex];
+    if (better || tie) bestIndex = i;
+  }
+  return { choice: rows[bestIndex], scores, predictedSwitch, answersPredictedSwitch: false };
 }
 
 function withFoePrior(battle: Battle, sideId: SideId, statsPrior?: StatsPriorOptions): Battle {

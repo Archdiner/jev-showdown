@@ -81,6 +81,15 @@ export const SearchParamsSchema = z.object({
    */
   endgameMons: z.number().int().min(2).max(12).optional(),
   endgameDepth: z.number().int().min(2).max(3).optional(),
+  /**
+   * Opt-in simultaneous-move solve for exact-1ply-qw: a matrix of own
+   * choices x up to replySolveReplies foe replies, solved as a zero-sum
+   * game. replySolveNashWeight blends the foe's equilibrium mix (1) with the
+   * modelled reply (0). Unset keeps the single modelled reply and config ids.
+   */
+  replySolveReplies: z.number().int().min(2).max(10).optional(),
+  replySolveSamples: z.number().int().min(1).max(16).optional(),
+  replySolveNashWeight: z.number().min(0).max(1).optional(),
 }).strict();
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
 

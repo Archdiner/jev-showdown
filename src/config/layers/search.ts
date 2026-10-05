@@ -137,6 +137,16 @@ async function runSearch(
       ...(params.endgameMons != null
         ? { endgame: { mons: params.endgameMons, depth: params.endgameDepth ?? 2 } }
         : {}),
+      ...(params.replySolveReplies != null
+        ? {
+            replySolve: {
+              maxReplies: params.replySolveReplies,
+              samples: params.replySolveSamples ?? 4,
+              nashWeight: params.replySolveNashWeight ?? 1,
+              iterations: 400,
+            },
+          }
+        : {}),
     });
     return trace;
   }
