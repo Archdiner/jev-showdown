@@ -1,5 +1,11 @@
 # Changelog
 
+## Exact search can Terastallize
+
+The champion still never Terastallizes. `exact-tera-1ply` is a separate config (`configs/challengers/exact-tera-1ply.yaml`, ladder `--engine exact-tera`) that adds `move N terastallize` beside each legal move. The live request's `teraType` is copied onto the cloned battle, so the sim changes typing and damage when that choice is played. A revealed foe Tera is copied the same way. Hidden foe Tera types are not guessed. The clone's turn is the real battle's turn, so the hold uses the same clock on the ladder and in hidden-information self-play.
+
+Tera is held until it flips a KO or a survival in at least half the sampled replies. Before turn 10 that is the only reason to Tera. After that, the gain has to be at least half a mon of HP if the opponent has already Terastallized, and a full mon of HP if they have not. The factory can sweep `teraMargin`, `teraHoldTurn`, and `teraUnspentMargin` on that config. Promotion is still the gate.
+
 ## Self-play uses the ladder's hidden information
 
 Local self-play, the factory, and the gatekeeper used to search the real battle, so each bot saw the opponent's full team, sets, and unrevealed moves. They now build the decision the way the live ladder does: a `@pkmn/client` replay of the lines that side would receive, then `livePositionFromClient` and `buildDecisionBattle`. Unrevealed teammates, moves, items, and abilities stay hidden. The foe model is that same function, so a later change to the ladder's opponent sets applies here too.

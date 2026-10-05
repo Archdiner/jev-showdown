@@ -61,6 +61,11 @@ export const SearchParamsSchema = z.object({
   variancePenalty: z.number().nonnegative().default(0),
   opponentModel: z.enum(['max-damage', 'uniform']).default('max-damage'),
   evalMode: z.enum(['hp', 'full']).default('hp'),
+  /** Score our Terastallize choices. Absent on the champion, so its hash stays put. */
+  tera: z.boolean().optional(),
+  teraMargin: z.number().nonnegative().optional(),
+  teraHoldTurn: z.number().int().nonnegative().optional(),
+  teraUnspentMargin: z.number().nonnegative().optional(),
 }).strict();
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
 

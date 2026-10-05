@@ -5,6 +5,7 @@ import { isBotSpec } from '../config/load.js';
 import { hazardScore } from '../config/layers/battle.js';
 import {
   hpEval,
+  isPlayableChoice,
   legalChoices,
   safeChoose,
   startRandomBattle,
@@ -72,6 +73,9 @@ export interface GameResult {
   p2Switches: number;
   p2Predicted: number;
   p2Answered: number;
+  /** Turn of the first `terastallize` choice, or null when that side never Terastallized. */
+  p1TeraTurn: number | null;
+  p2TeraTurn: number | null;
   decisions?: Array<{
     side: SideId;
     turn: number;
@@ -154,6 +158,8 @@ export async function runGame(job: GameJob): Promise<GameResult> {
     p2Switches: 0,
     p2Predicted: 0,
     p2Answered: 0,
+    p1TeraTurn: null,
+    p2TeraTurn: null,
     decisions: job.logDecisions ? [] : undefined,
   };
   const gameId = `${p1.id}:${p2.id}:${job.seed}:${job.index}`;
@@ -180,7 +186,8 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         if (decision.viewMiss) result.p1ViewMiss++;
         result.p1TurnTimes.push(decision.ms);
         notePlay(result, 'p1', p1Legal, decision);
-        if (!p1Legal.includes(decision.choice) && decision.choice !== 'default') result.p1Invalid++;
+        noteTeraChoice(result, 'p1', decision.choice, battle.turn);
+        if (decision.choice !== 'default' && !isPlayableChoice(battle, 'p1', decision.choice)) result.p1Invalid++;
         const ok = safeChoose(battle, 'p1', decision.choice);
         if (!ok) result.p1Invalid++;
         result.decisions?.push({
@@ -196,7 +203,8 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         if (decision.viewMiss) result.p2ViewMiss++;
         result.p2TurnTimes.push(decision.ms);
         notePlay(result, 'p2', p2Legal, decision);
-        if (!p2Legal.includes(decision.choice) && decision.choice !== 'default') result.p2Invalid++;
+        noteTeraChoice(result, 'p2', decision.choice, battle.turn);
+        if (decision.choice !== 'default' && !isPlayableChoice(battle, 'p2', decision.choice)) result.p2Invalid++;
         const ok = safeChoose(battle, 'p2', decision.choice);
         if (!ok) result.p2Invalid++;
         result.decisions?.push({
@@ -272,6 +280,15 @@ async function choose(
   }
   const decision = await player.bot!.decide({ battle, side, rng, gameId, seed });
   return decision;
+}
+
+function noteTeraChoice(result: GameResult, side: SideId, choice: string, turn: number): void {
+  if (!choice.includes(' terastallize')) return;
+  if (side === 'p1') {
+    if (result.p1TeraTurn == null) result.p1TeraTurn = turn;
+  } else if (result.p2TeraTurn == null) {
+    result.p2TeraTurn = turn;
+  }
 }
 
 function emptySituations(): SideSituations {

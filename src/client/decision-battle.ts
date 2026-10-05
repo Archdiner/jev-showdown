@@ -26,6 +26,8 @@ export interface FoeMon {
   moves: string[];
   boosts?: StatBoosts;
   fainted?: boolean;
+  /** Set only after this pokemon has Terastallized. The type is the one it became. */
+  terastallized?: string;
 }
 
 /**
@@ -38,6 +40,8 @@ export interface LivePosition {
   foeBench: FoeMon[];
   ourBoosts?: StatBoosts;
   weather?: string;
+  /** Real battle turn. The reconstructed sim starts at 1, which would keep the Tera hold shut. */
+  turn?: number;
 }
 
 const WEATHER: Record<string, string> = {
@@ -56,7 +60,11 @@ const STATS = ['atk', 'def', 'spa', 'spd', 'spe'] as const;
 
 export function actionFromChoice(choice: string): Action | null {
   const move = /^move (\d+)/.exec(choice);
-  if (move) return { type: 'move', moveIndex: Number(move[1]) };
+  if (move) {
+    const action: Action = { type: 'move', moveIndex: Number(move[1]) };
+    if (choice.includes('terastallize')) action.terastallize = true;
+    return action;
+  }
   const swapped = /^switch (\d+)/.exec(choice);
   if (swapped) return { type: 'switch', switchIndex: Number(swapped[1]) };
   return null;
@@ -79,12 +87,26 @@ function named(kind: 'abilities' | 'items' | 'moves' | 'species', raw: string | 
   return entry?.exists ? entry.name : '';
 }
 
-function toSet(species: string, moves: string[], level: number, ability?: string, item?: string): PokemonSet | null {
+function namedType(raw: string | undefined): string {
+  if (!raw) return '';
+  const entry = Dex.types.get(raw);
+  return entry?.exists ? entry.name : '';
+}
+
+function toSet(
+  species: string,
+  moves: string[],
+  level: number,
+  ability?: string,
+  item?: string,
+  teraType?: string,
+): PokemonSet | null {
   const speciesName = named('species', species);
   if (!speciesName) return null;
   const moveNames = moves.map(move => named('moves', move)).filter(Boolean).slice(0, 4);
   if (moveNames.length === 0) moveNames.push('Tackle');
   const dexSpecies = Dex.species.get(speciesName);
+  const tera = namedType(teraType);
   return {
     species: speciesName,
     moves: moveNames,
@@ -93,6 +115,7 @@ function toSet(species: string, moves: string[], level: number, ability?: string
     nature: 'Hardy',
     evs: { hp: 85, atk: 85, def: 85, spa: 85, spd: 85, spe: 85 },
     level: level || 80,
+    ...(tera ? { teraType: tera } : {}),
   } as PokemonSet;
 }
 
@@ -123,6 +146,18 @@ function applyStatus(mon: any, condition: string | undefined, status: string | u
   }
 }
 
+function applyRevealedTera(side: Battle['p1'], used: string[]): void {
+  const index = used.findIndex(type => Boolean(type));
+  if (index < 0) return;
+  const type = namedType(used[index]) || used[index];
+  for (const mon of side.pokemon) mon.canTerastallize = null;
+  const mon = side.pokemon[index];
+  if (!mon || !type) return;
+  mon.teraType = type;
+  mon.terastallized = type;
+  mon.apparentType = type;
+}
+
 function applyBoosts(mon: any, boosts: StatBoosts | undefined): void {
   if (!mon || !boosts) return;
   for (const stat of STATS) {
@@ -147,6 +182,7 @@ function ourSets(request: any): PokemonSet[] | null {
       levelOf(slot.details, slot.level || 80),
       slot.ability || slot.baseAbility,
       slot.item,
+      slot.teraType,
     );
     // Dropping a slot would renumber `switch N`. Fail the build instead.
     if (!set) return null;
@@ -164,7 +200,14 @@ function foeSets(foes: FoeMon[]): { sets: PokemonSet[]; kept: FoeMon[] } {
   const kept: FoeMon[] = [];
   for (const mon of foes) {
     if (sets.length >= 6) break;
-    const set = toSet(mon.species, mon.moves || [], mon.level || 80, mon.ability, mon.item);
+    const set = toSet(
+      mon.species,
+      mon.moves || [],
+      mon.level || 80,
+      mon.ability,
+      mon.item,
+      mon.terastallized,
+    );
     if (!set) continue;
     sets.push(set);
     kept.push(mon);
@@ -234,6 +277,8 @@ export function buildDecisionBattle(position: LivePosition): Battle | null {
     }
     applyBoosts(active, position.ourBoosts);
     applyBoosts(battle.p2.active[0], position.foeActive?.boosts);
+    applyRevealedTera(battle.p1, slots.map(slot => String(slot?.terastallized || '')));
+    applyRevealedTera(battle.p2, foe.kept.map(mon => mon.terastallized || ''));
 
     const weather = WEATHER[(position.weather || '').toLowerCase()];
     if (weather) {
@@ -247,6 +292,7 @@ export function buildDecisionBattle(position: LivePosition): Battle | null {
     const force = isForceSwitch(request) || !!active.fainted;
     if (force) active.switchFlag = true;
     battle.makeRequest(force ? 'switch' : 'move');
+    if (typeof position.turn === 'number' && Number.isFinite(position.turn)) battle.turn = position.turn;
     if (legalChoices(battle, 'p1').length === 0) return null;
     return battle;
   } catch {

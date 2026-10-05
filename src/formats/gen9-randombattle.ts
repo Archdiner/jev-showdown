@@ -308,12 +308,19 @@ export class Gen9RandomBattle implements Format {
       
       // Add legal moves
       if (active.moves) {
+        const movable: number[] = [];
         for (let i = 0; i < active.moves.length; i++) {
           const move = active.moves[i];
           const hasDisabled = move.disabled === true;
           const hasNoPP = move.pp !== undefined && move.pp <= 0;
           if (!hasDisabled && !hasNoPP) {
             actions.push({ type: 'move', moveIndex: i + 1 });
+            movable.push(i + 1);
+          }
+        }
+        if (active.canTerastallize) {
+          for (const moveIndex of movable) {
+            actions.push({ type: 'move', moveIndex, terastallize: true });
           }
         }
       }

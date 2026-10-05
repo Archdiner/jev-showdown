@@ -8,7 +8,9 @@ import { EngineName } from './engines.js';
  * `max-damage` is the frozen @smogon/calc baseline.
  */
 export function ladderConfigId(engine: EngineName): string {
-  return engine === 'max-damage' ? 'maxdamage-v1' : 'champion-exact-1ply';
+  if (engine === 'max-damage') return 'maxdamage-v1';
+  if (engine === 'exact-tera') return 'challenger-exact-tera-1ply';
+  return 'champion-exact-1ply';
 }
 
 /** The policy object the gate would build for this ladder engine. */

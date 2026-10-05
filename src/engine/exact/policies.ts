@@ -2,7 +2,7 @@ import { Battle, PRNG } from '@pkmn/sim';
 import { Action } from '../../types/index.js';
 import { SideId, legalChoices } from './battle-utils.js';
 import { maxDamageChoice } from './max-damage.js';
-import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2, ScoredChoice, battleToState, exactSearch } from './search.js';
+import { EXACT_1PLY, EXACT_TERA_1PLY, ExactConfig, SWITCH_DEPTH2, ScoredChoice, battleToState, exactSearch } from './search.js';
 
 export type PolicySpec =
   | { kind: 'random' }
@@ -97,6 +97,10 @@ export function specFromId(id: string): PolicySpec {
     case 'challenger-exact-1ply':
     case 'champion-exact-1ply':
       return { kind: 'exact', config: EXACT_1PLY };
+    case 'exact-tera':
+    case 'exact-tera-1ply':
+    case 'challenger-exact-tera-1ply':
+      return { kind: 'exact', config: EXACT_TERA_1PLY };
     case 'switch-depth2':
     case 'challenger-switch-depth2':
       return { kind: 'exact', config: SWITCH_DEPTH2 };
@@ -146,6 +150,13 @@ const CHAMPION_BLUEPRINTS: Record<string, ChampionBlueprint> = {
     title: 'Champion: depth-2 switch search',
     description: 'Depth-2 exact battle clone. Opponent replies mix staying to attack and switching, fit on high-Elo replays. Eval scores both teams. Every legal switch is scored at the root.',
     config_path: 'experiments/switch-depth2/config.json',
+  },
+  'challenger-exact-tera-1ply': {
+    id: 'champion-exact-tera-1ply',
+    version: 'exact-tera-1ply',
+    title: 'Champion: exact 1-ply with Terastallize',
+    description: 'Exact 1-ply plus move-and-Terastallize. Tera is held until it flips a KO or a survival, or the gain clears the margin. The champion id stays exact-1ply until the gate promotes this one.',
+    config_path: 'configs/challengers/exact-tera-1ply.yaml',
   },
 };
 

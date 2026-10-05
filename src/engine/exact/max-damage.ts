@@ -75,7 +75,7 @@ export function expectedDamage(attacker: any, defender: any, moveName: string, w
 export function maxDamageChoice(battle: Battle, sideId: SideId, choices?: string[]): string {
   const legal = choices || legalChoices(battle, sideId);
   if (legal.length === 0) return 'default';
-  const moves = legal.filter(choice => choice.startsWith('move '));
+  const moves = legal.filter(choice => choice.startsWith('move ') && !choice.includes('terastallize'));
   if (moves.length === 0) return legal[0];
 
   const side = battle.getSide(sideId);

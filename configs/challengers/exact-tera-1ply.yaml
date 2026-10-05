@@ -1,0 +1,6 @@
+name: exact-tera-1ply
+extends: ../champion.yaml
+search:
+  id: greedy-1ply
+  params:
+    tera: true

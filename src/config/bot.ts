@@ -123,7 +123,7 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
       const active = activeConfig === loaded.config ? base : implsOf(activeConfig);
       const activeLayerIds = layerIdsOf(activeConfig);
       const plan = await planFor(active, activeConfig, input, client, spend, runtime);
-      const legal = legalChoices(input.battle, input.side);
+      const legal = legalChoices(input.battle, input.side, { tera: Boolean(activeConfig.search.params.tera) });
       const budget = Math.min(activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs);
       const trace = legal.length === 0
         ? { choice: 'default', scores: [] as Array<{ choice: string; score: number }>, predictedSwitch: undefined, answersPredictedSwitch: undefined }
@@ -137,7 +137,7 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
           deadlineMs: searchDeadline(Date.now(), activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs),
         });
       let scores = trace.scores.length ? trace.scores : [{ choice: trace.choice, score: 0 }];
-      let choice = applyPolicies(active, input.battle, input.side, legal, plan, scores);
+      let choice = applyPolicies(active, input.battle, input.side, legal, plan, scores, trace.choice);
       scores = scores.map(row => ({ ...row, score: row.score }));
       let advisorCalled = false;
       let advisorSource: string | undefined;
@@ -242,7 +242,8 @@ function applyPolicies(
   side: SideId,
   legal: string[],
   plan: GamePlan | null,
-  scores: Array<{ choice: string; score: number }>
+  scores: Array<{ choice: string; score: number }>,
+  searchChoice?: string,
 ): string {
   if (legal.length === 0) return 'default';
   if (legal.length === 1) return legal[0];
@@ -256,6 +257,9 @@ function applyPolicies(
     }
   }
   if (override) return override;
+  // The Tera hold can pick a line that is not the raw score maximum.
+  // With no policy bias, that choice is the decision.
+  if (searchChoice && legal.includes(searchChoice) && Object.keys(bias).length === 0) return searchChoice;
   let best = scores.find(row => legal.includes(row.choice))?.choice ?? legal[0];
   let bestScore = -Infinity;
   const ranked = scores.filter(row => legal.includes(row.choice));

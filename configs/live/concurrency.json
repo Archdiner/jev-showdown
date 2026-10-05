@@ -3,6 +3,7 @@
   "engines": {
     "search": 3,
     "max-damage": 4,
-    "grok": 1
+    "grok": 1,
+    "exact-tera": 3
   }
 }

@@ -184,14 +184,14 @@ Preflight (log in, print named/locked and the current rating, exit):
 Real ladder, from a residential or university network (this process never stores the password):
   SHOWDOWN_USERNAME=bot SHOWDOWN_PASSWORD=secret npm run ladder -- --games 10 --format gen9randombattle --engine max-damage --concurrency 1
 
-Engines: max-damage (default; @smogon/calc maxDamageChoice), search (exact 1-ply, the gate champion; exact is an alias), or grok (search + LLM prior, concurrency 1).
+Engines: max-damage (default; @smogon/calc maxDamageChoice), search (exact 1-ply, the gate champion; exact is an alias), exact-tera (the same search plus Terastallize; not the champion), or grok (search + LLM prior, concurrency 1).
 --labeled-champion loads the gatekeeper's active champion at batch start and plays that file for every game in the batch. It stays off unless you pass it.
 --rollback plays the builtin policy for --engine even when a champion label is valid.
 A missing label, a file whose hash no longer matches the label, or two active champions rolls back to that builtin policy and logs the reason.
 The config is chosen once, before the first search. A promotion during the batch does not change it. Drain and start again to pick up a new champion.
 Each finished game records configId, configHash, and the commit. The startup line is: config live source=... id=... hash=... commit=...
 --concurrency K keeps up to K battles on one login (default 1, absolute max ${MAX_LADDER_CONCURRENCY}).
---use-engine-profile reads configs/live/concurrency.json (search 3, max-damage 4, grok 1).
+--use-engine-profile reads configs/live/concurrency.json (search 3, max-damage 4, grok 1, exact-tera 3).
 --concurrency-config FILE overrides those numbers. --runners N multiplies the limit. An explicit --concurrency wins.
 --ramp steps from 3 (search) or 4 (max-damage) up to K while p95 latency and the turn timer stay healthy, and steps back when they do not.
 Backpressure always pauses new searches when p95 latency degrades, the turn timer drops under the safety margin, or Showdown throttles a search. Games already running are left in place.

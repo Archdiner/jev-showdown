@@ -94,9 +94,18 @@ export function strictLegalActions(request: any): Action[] {
 
   const active = request.active?.[0];
   if (active?.moves) {
+    const movable: number[] = [];
     for (let i = 0; i < active.moves.length; i++) {
       const action: Action = { type: 'move', moveIndex: i + 1 };
-      if (isMoveLegal(request, action.moveIndex, false)) actions.push(action);
+      if (isMoveLegal(request, action.moveIndex, false)) {
+        actions.push(action);
+        movable.push(action.moveIndex);
+      }
+    }
+    if (active.canTerastallize) {
+      for (const moveIndex of movable) {
+        actions.push({ type: 'move', moveIndex, terastallize: true });
+      }
     }
   }
 
