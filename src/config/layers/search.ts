@@ -11,6 +11,7 @@ import { decide as legacyDecide } from '../../engine/exact/policies.js';
 import { exactSearch, searchBudgetExpired, type ExactConfig } from '../../engine/exact/search.js';
 import { register } from '../registry.js';
 import { SearchParamsSchema, type SearchParams } from '../schema.js';
+import { z } from 'zod';
 import type { GamePlan } from '../interfaces.js';
 import type { HybridParams } from '../schema.js';
 import type { RandbatsStats } from '../../types/index.js';
@@ -53,6 +54,13 @@ export interface SearchImpl {
 
 const ALGORITHMS = ['greedy-1ply', 'expectimax', 'depth-n', 'mcts-stub', 'random', 'max-damage', 'legacy', 'hybrid'] as const;
 
+export const SelectiveParamsSchema = SearchParamsSchema.extend({
+  topN: z.number().int().min(1).max(12).default(3),
+  topM: z.number().int().min(1).max(8).default(2),
+  rollGrouping: z.enum(['sample', 'ko']).default('ko'),
+}).strict();
+export type SelectiveParams = z.infer<typeof SelectiveParamsSchema>;
+
 export function registerSearch(): void {
   for (const id of ALGORITHMS) {
     register<SearchParams>({
@@ -69,6 +77,45 @@ export function registerSearch(): void {
         }),
     });
   }
+
+  register<SelectiveParams>({
+    layer: 'search',
+    id: 'selective-depth2',
+    schema: SelectiveParamsSchema,
+    defaults: SelectiveParamsSchema.parse({ depth: 2, topN: 3, topM: 2, rollGrouping: 'ko' }),
+    create: params => ({
+      id: 'selective-depth2',
+      params,
+      search: (battle: Battle, side: SideId, ctx: SearchCtx) => runSelective(params, battle, side, ctx),
+    }),
+  });
+}
+
+function evalModeOf(ctx: SearchCtx): ExactConfig['evalMode'] {
+  if (ctx.evaluate.kind === 'full') return 'full';
+  if (ctx.evaluate.kind === 'fitted') return 'fitted';
+  return 'hp';
+}
+
+function leafOf(ctx: SearchCtx): ExactConfig['leaf'] {
+  if (ctx.evaluate.kind !== 'weighted') return undefined;
+  return (battle, side) => ctx.evaluate.score(battle, side, ctx.plan);
+}
+
+async function runSelective(
+  params: SelectiveParams,
+  battle: Battle,
+  side: SideId,
+  ctx: SearchCtx,
+): Promise<SearchTrace> {
+  const model = ctx.behavior.exactModel || (params.opponentModel === 'uniform' ? 'uniform' : 'max-damage');
+  const trace = exactSearch(battle, side, {
+    ...exactConfig(params, model, evalModeOf(ctx), Math.max(2, params.depth), ctx.deadlineMs),
+    rollGrouping: params.rollGrouping,
+    selective: { topN: params.topN, topM: params.topM },
+    leaf: leafOf(ctx),
+  });
+  return { ...trace, note: `selective-depth2 topN=${params.topN} topM=${params.topM} ${params.rollGrouping}` };
 }
 
 async function runSearch(
@@ -99,7 +146,8 @@ async function runSearch(
   if (useExact(id, params, ctx)) {
     const model = ctx.behavior.exactModel || params.opponentModel;
     const depth = id === 'greedy-1ply' ? params.depth : params.depth;
-    return exactSearch(battle, side, exactConfig(params, model, ctx.evaluate.kind === 'full' ? 'full' : 'hp', depth, ctx.deadlineMs));
+    const config = exactConfig(params, model, evalModeOf(ctx), depth, ctx.deadlineMs);
+    return exactSearch(battle, side, config);
   }
   const trace = outlined(battle, side, params, ctx, params.depth);
   if (params.samples > 1) trace.note = `samples=${params.samples} recorded; this battle is one world`;
@@ -117,7 +165,7 @@ function useExact(id: string, params: SearchParams, ctx: SearchCtx): boolean {
 export function exactConfig(
   params: SearchParams,
   opponentModel: ExactConfig['opponentModel'],
-  evalMode: 'hp' | 'full',
+  evalMode: ExactConfig['evalMode'],
   depth: number,
   deadlineMs?: number,
 ): ExactConfig {

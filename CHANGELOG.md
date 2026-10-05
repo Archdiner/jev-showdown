@@ -8,6 +8,21 @@ Three blocks are separate config flags. The game plan is asynchronous (turn 1, f
 
 Honest bench, hidden information, 52 pairs (104 games), sides swapped, 509 randbats species. `hybrid-core` (search only) vs exact-1ply: 55W-49L-0T, Wilson 95% 43.4–62.2%, invalid 0, crashes 0, timeouts 0, p50 144ms, p95 196ms. Vs max-damage: 67W-37L-0T, Wilson 95% 54.9–73.0%, invalid 0, crashes 0, timeouts 0, p50 149ms, p95 215ms. Commit `a7d4dfe`. The plan and judgment screens did not finish: the Vercel AI Gateway answered `http_402` (credit balance required) after the first successful calls. An every-turn arm calls the model on every turn with the compact full-section brief and the search ranking. The margin still rejects a pick that is too far behind the best score. Qwen stays on Cerebras at medium effort, Opus is low, and Grok 4.7 is effort `none`. A wide-margin Qwen profile sets the margin to 3.
 
+## Fitted team eval and selective depth-2 search
+
+The leaf score is no longer only HP and faints. `fitted-team` averages the 1v1 matchup of every remaining Pokémon (Sarantinos 2022), then adds speed control, hazard chip on each side unless the Pokémon holds Heavy-Duty Boots, status, boosts, whether Tera is still available, and how many healthy checks remain. The weights are a logistic regression fit on self-play (even seeds max-damage and sometimes Terastallize; odd seeds play a random legal choice). Seeds split 60% train, 20% dev, 20% held-out before the fit. Held-out was scored once, after the weights were frozen. The randbats generator covers 508 species. `eval-weights.json` is that fit.
+
+Dev (n=780): team log loss 0.5615, accuracy 70.5%. HP-only log loss 0.5536, accuracy 70.4%. Constant log loss 0.6931. Held-out (n=800): team log loss 0.6092, accuracy 65.3%. HP-only log loss 0.6255, accuracy 65.3%.
+
+`selective-depth2` scores every legal move at depth 1, then spends the remaining deadline on the top-N of those moves against the opponent's top-M replies. Damaging rolls are two buckets, KO and non-KO. A transposition table remembers finished nodes for that decision. Both pieces are config components (`fitted-team`, `selective-depth2`). `exactSearch` honors `evalMode: 'fitted'`, `selective`, a leaf override, and an inner rollout deadline only when the caller sets them. Champion, weighted, and the other existing configs do not, so their scores stay the same.
+
+Info-honest bench, 60 pairs, sides swapped, 120 games, each policy sees only its public observation. Opponent is exact 1-ply (8 samples, HP eval). Invalid choices 0, crashes 0, view misses 0. Randbats generator species 508.
+
+| Policy | Result | Wilson 95% CI | p50 | p95 |
+| --- | --- | --- | --- | --- |
+| fitted 1-ply | 70W-50L-0T (58.3%) | 49.4–66.8% | 77ms | 126ms |
+| fitted depth-2 | 58W-62L-0T (48.3%) | 39.6–57.2% | 119ms | 313ms |
+
 ## Cosmetic formes and Revival Blessing switches
 
 `@smogon/calc` has no entry for a cosmetic forme such as Gastrodon-East, so damage for that Pokémon came back as zero. `speciesForCalc` maps a cosmetic forme to the base species and leaves a forme the calc already lists, such as Ogerpon-Wellspring, unchanged. `calcMon` uses that name.
