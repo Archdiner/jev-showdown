@@ -1,8 +1,9 @@
 import { Action, BotConfig, GameState } from '../types/index.js';
 import { damageEvaluator } from '../engine/damage-evaluator.js';
+import { ABSOLUTE_MAX_CONCURRENCY, clampLimit } from './concurrency-config.js';
 
-/** Official Showdown rejects a 6th simultaneous game. */
-export const MAX_LADDER_CONCURRENCY = 5;
+/** Client safety ceiling. The server can still throttle sooner. */
+export const MAX_LADDER_CONCURRENCY = ABSOLUTE_MAX_CONCURRENCY;
 
 export type EngineName = 'search' | 'max-damage';
 
@@ -16,10 +17,7 @@ export function parseEngine(name: string): EngineName {
 }
 
 export function clampConcurrency(value: number): number {
-  if (!Number.isFinite(value) || value < 1) {
-    throw new Error('--concurrency must be a positive number');
-  }
-  return Math.min(MAX_LADDER_CONCURRENCY, Math.floor(value));
+  return clampLimit(value);
 }
 
 /**
