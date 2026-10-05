@@ -1,20 +1,23 @@
-import { describe, it, expect, beforeAll } from '@jest/globals';
-import { dataLoader } from './data-loader.js';
+import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
+import { DataLoader } from './data-loader.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 
 describe('DataLoader', () => {
+  let testDir: string;
+  let testLoader: DataLoader;
+
   beforeAll(() => {
-    const dataDir = path.join(process.cwd(), 'data');
-    fs.mkdirSync(dataDir, { recursive: true });
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'data-loader-test-'));
     
     fs.writeFileSync(
-      path.join(dataDir, 'gen9-sets.json'),
+      path.join(testDir, 'gen9-sets.json'),
       JSON.stringify({ Pikachu: { level: 88 } })
     );
     
     fs.writeFileSync(
-      path.join(dataDir, 'gen9-stats.json'),
+      path.join(testDir, 'gen9-stats.json'),
       JSON.stringify({
         Pikachu: {
           level: 88,
@@ -29,24 +32,32 @@ describe('DataLoader', () => {
         },
       })
     );
+
+    testLoader = new DataLoader(testDir);
+  });
+
+  afterAll(() => {
+    if (testDir && fs.existsSync(testDir)) {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
   });
 
   it('should load data successfully', async () => {
-    await dataLoader.load();
-    const sets = dataLoader.getSets();
+    await testLoader.load();
+    const sets = testLoader.getSets();
     expect(sets).toBeDefined();
     expect(sets.Pikachu).toBeDefined();
   });
 
   it('should get species stats', async () => {
-    await dataLoader.load();
-    const stats = dataLoader.getSpeciesStats('Pikachu');
+    await testLoader.load();
+    const stats = testLoader.getSpeciesStats('Pikachu');
     expect(stats).toBeDefined();
     expect(stats?.level).toBe(88);
   });
 
   it('should throw if not loaded', () => {
-    const freshLoader = Object.create(Object.getPrototypeOf(dataLoader));
+    const freshLoader = new DataLoader(testDir);
     expect(() => freshLoader.getSets()).toThrow();
   });
 });
