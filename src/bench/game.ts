@@ -59,6 +59,8 @@ export interface GameResult {
   information: InformationMode;
   crashed: boolean;
   error?: string;
+  /** Stack trace of a thrown crash (first frames), so bench crashes are debuggable. */
+  errorStack?: string;
   p1TurnTimes: number[];
   p2TurnTimes: number[];
   p1ConfigId: string;
@@ -241,6 +243,7 @@ export async function runGame(job: GameJob): Promise<GameResult> {
   } catch (error) {
     result.crashed = true;
     result.error = error instanceof Error ? error.message : String(error);
+    if (error instanceof Error && error.stack) result.errorStack = error.stack.split('\n').slice(0, 12).join('\n');
   }
 
   p1.bot?.endGame({ winner: result.winner, turns: result.turns, invalid: result.p1Invalid, situations: { ...result.p1Situations } });

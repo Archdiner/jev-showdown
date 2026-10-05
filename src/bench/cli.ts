@@ -269,6 +269,8 @@ async function main() {
   console.log(`elapsed ${seconds}s`);
   const errors = results.filter(r => r.crashed).slice(0, 3);
   for (const error of errors) console.log(`crash seed=${error.seed}: ${error.error}`);
+  const traced = errors.find(r => r.errorStack);
+  if (traced) console.log(`first crash stack (seed=${traced.seed}):\n${traced.errorStack}`);
   publishDataResult('logs/bench.json', {
     pairs,
     information,
