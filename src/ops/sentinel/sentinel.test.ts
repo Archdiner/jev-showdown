@@ -559,6 +559,129 @@ describe('invalid choice reasons', () => {
   });
 });
 
+describe('genuine game dropped', () => {
+  function contamination(layout: Layout, row: Record<string, unknown>): void {
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    fs.appendFileSync(path.join(layout.ladderLogDir, 'games.contamination.jsonl'), `${JSON.stringify(row)}\n`);
+  }
+
+  test('a non-owning-process drop whose owner pid is dead is P1 without /proc', () => {
+    const missing = path.join(os.tmpdir(), `jev-noproc-dead-${process.pid}`);
+    expect(scanProcesses({ procRoot: missing })).toEqual([]);
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    contamination(layout, {
+      schema: 'jev.game-contamination.v1',
+      battleId: 'battle-gen9randombattle-2693017811',
+      pid: 42482,
+      ts: now - 1000,
+      reason: 'non-owning-process',
+      note: 'owner pid 35079',
+    });
+    const result = scanOnce(layout, { now, scanProcesses: false, git: quietGit, pidAlive: () => false });
+    const hit = result.hits.find(item => item.id === 'genuine-game-dropped');
+    expect(hit?.severity).toBe('P1');
+    expect(hit?.detail).toContain('owner pid 35079 is not alive');
+    expect(hit?.detail).toContain('battle-gen9randombattle-2693017811');
+  });
+
+  test('a drop whose owner run is not the writer run is P1 even when that pid is alive', () => {
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    contamination(layout, {
+      schema: 'jev.game-contamination.v1',
+      battleId: 'battle-gen9randombattle-2693017822',
+      pid: 42482,
+      ownerPid: 35079,
+      ts: now - 1000,
+      reason: 'non-owning-process',
+      note: 'owner pid 35079 run batch-12',
+      runId: 'batch-13',
+    });
+    const result = scanOnce(layout, { now, scanProcesses: false, git: quietGit, pidAlive: () => true });
+    const hit = result.hits.find(item => item.id === 'genuine-game-dropped');
+    expect(hit?.severity).toBe('P1');
+    expect(hit?.detail).toContain('owner run batch-12 is not writer run batch-13');
+  });
+
+  test('a live owner on the same run is not a dropped genuine game', () => {
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    contamination(layout, {
+      schema: 'jev.game-contamination.v1',
+      battleId: 'battle-gen9randombattle-1',
+      pid: 42482,
+      ownerPid: 35079,
+      ownerRunId: 'batch-12',
+      runId: 'batch-12',
+      ts: now - 1000,
+      reason: 'non-owning-process',
+      note: 'owner pid 35079 run batch-12',
+    });
+    const result = scanOnce(layout, { now, scanProcesses: false, git: quietGit, pidAlive: () => true });
+    expect(result.hits.map(item => item.id)).not.toContain('genuine-game-dropped');
+  });
+
+  test('finished live heartbeats with no live-games row are P1', () => {
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    fs.writeFileSync(path.join(layout.opsDir, 'heartbeats.jsonl'), [
+      JSON.stringify({ facility: 'live', pid: 15, ts: now - 2000, status: 'ok', detail: 'localbot win local' }),
+      JSON.stringify({ facility: 'live', pid: 15, ts: now - 1000, status: 'ok', detail: 'localbot loss local' }),
+      '',
+    ].join('\n'));
+    const result = scanOnce(layout, { now, scanProcesses: false, git: quietGit });
+    const hit = result.hits.find(item => item.id === 'genuine-game-dropped');
+    expect(hit?.severity).toBe('P1');
+    expect(hit?.detail).toContain('2 finished live heartbeats');
+    expect(hit?.detail).toContain('0 rows');
+  });
+
+  test('a heartbeat within two seconds of the row is not a gap', () => {
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    const rowTs = now - 1000;
+    fs.mkdirSync(layout.opsDir, { recursive: true });
+    fs.writeFileSync(path.join(layout.opsDir, 'live-games.jsonl'), `${JSON.stringify({
+      schema: 'jev.ladder-game.v1',
+      kind: 'ladder-game',
+      source: 'ops',
+      localServer: true,
+      battleId: 'battle-local-1',
+      ts: rowTs,
+      outcome: 'win',
+      endReason: 'ko',
+      turns: 4,
+      username: 'localbot',
+      format: 'gen9randombattle',
+    })}\n`);
+    fs.writeFileSync(path.join(layout.opsDir, 'heartbeats.jsonl'), `${JSON.stringify({
+      facility: 'live',
+      pid: 15,
+      ts: rowTs + 100,
+      status: 'ok',
+      detail: 'localbot win local',
+    })}\n`);
+    const result = scanOnce(layout, { now, scanProcesses: false, git: quietGit });
+    expect(result.hits.map(item => item.id)).not.toContain('genuine-game-dropped');
+  });
+
+  test('a progress line with no row for that run is P1', () => {
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    fs.mkdirSync(layout.liveRunsDir, { recursive: true });
+    fs.writeFileSync(path.join(layout.liveRunsDir, 'batch-13.log'), [
+      '[ladder] pid=42482 run=batch-13',
+      '[ladder] 1/10 win vs foe turns=12 invalid=0 crashes=0 fallbacks=0 elo=1074',
+      '',
+    ].join('\n'));
+    const result = scanOnce(layout, { now, scanProcesses: false, git: quietGit });
+    const hit = result.hits.find(item => item.id === 'genuine-game-dropped');
+    expect(hit?.severity).toBe('P1');
+    expect(hit?.detail).toContain('run batch-13 logged 1 finished game and 0 rows were written');
+  });
+});
+
 describe('sentinel docs', () => {
   test('the README names every check and its severity', () => {
     const readme = fs.readFileSync(path.join(process.cwd(), 'README.md'), 'utf8');

@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { pidAlive as processAlive } from '../../client/ladder-run.js';
 import { GraphDB } from '../../graph/db.js';
 import { readLabels } from '../labels-read.js';
 import { observeGames } from './games.js';
@@ -35,6 +36,8 @@ export interface LoadOptions {
   scanProcesses?: boolean;
   /** When set, this list is the process snapshot. /proc and ps are not read. */
   processes?: ProcessSnapshot[];
+  /** Overrides `process.kill(pid, 0)` for claim-owner checks. */
+  pidAlive?: (pid: number) => boolean;
   /** When set, git is not invoked. */
   git?: GitStatus;
 }
@@ -67,6 +70,7 @@ export function loadContext(layout: Layout, options: LoadOptions = {}): Sentinel
     batchSize: options.batchSize ?? DEFAULTS.batchSize,
     processesScanned,
     processes,
+    pidAlive: options.pidAlive ?? processAlive,
     git: options.git ?? readGit(layout.cwd),
     rows,
     games: observeGames(rows),

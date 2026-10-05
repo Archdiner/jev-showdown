@@ -146,6 +146,8 @@ export interface SentinelContext {
   batchSize: number;
   processesScanned: boolean;
   processes: ProcessSnapshot[];
+  /** `process.kill(pid, 0)`. Injected in tests. Does not read `/proc`. */
+  pidAlive: (pid: number) => boolean;
   git: GitStatus;
   rows: LogRow[];
   games: ObservedGame[];
