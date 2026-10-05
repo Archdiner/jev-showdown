@@ -5,6 +5,7 @@ import { loadPool } from '../config/positions.js';
 import { exactSearch } from '../engine/exact/search.js';
 import { ablate } from '../exp/ablate.js';
 import { playPaired, sideWinRate } from '../exp/play.js';
+import { liveProposalAllowed, tallySide } from './sprt.js';
 import { sweep } from '../exp/sweep.js';
 import { tournament } from '../exp/tournament.js';
 import { openDb } from './db.js';
@@ -77,9 +78,16 @@ async function runChallenger(paths: OpsPaths, job: QueueJob): Promise<{ resultId
   const games = evenGames(job.spec.games ?? 4);
   const results = await playPaired(toSpec(challenger, 'selfplay'), toSpec(opponent, 'selfplay'), games, 1000, false);
   const rate = sideWinRate(results, challenger.configId);
-  const invalid = results.reduce((sum, game) => sum + game.p1Invalid + game.p2Invalid, 0);
-  const summary = `${rate.wins}/${rate.games} wins, invalid ${invalid}`;
-  const proposal = rate.wins > rate.games / 2 && invalid === 0
+  const tally = tallySide(results.map(game => ({
+    winner: game.winner,
+    p1Id: game.p1ConfigId,
+    p2Id: game.p2ConfigId,
+    p1Invalid: game.p1Invalid,
+    p2Invalid: game.p2Invalid,
+    crashed: game.crashed,
+  })), challenger.configId);
+  const summary = `${tally.wins}/${rate.games} wins, invalid ${tally.invalid}`;
+  const proposal = liveProposalAllowed(tally.wins, tally.losses, tally.invalid)
     ? {
         action: 'live-approved' as const,
         configPath: challengerPath,
@@ -87,7 +95,7 @@ async function runChallenger(paths: OpsPaths, job: QueueJob): Promise<{ resultId
         summary,
       }
     : undefined;
-  return { resultId: writeResult(paths, job, summary, { wins: rate.wins, games: results.length, invalid }), summary, proposal };
+  return { resultId: writeResult(paths, job, summary, { wins: tally.wins, games: results.length, invalid: tally.invalid }), summary, proposal };
 }
 
 async function runSweep(paths: OpsPaths, job: QueueJob): Promise<{ resultId: string; summary: string; proposal?: Proposal }> {

@@ -1,7 +1,8 @@
 import { GraphDB } from './db.js';
 import { specForAlias } from '../config/aliases.js';
+import { isBotSpec } from '../config/load.js';
 import { championBlueprint, specFromId } from '../engine/exact/policies.js';
-import { EXACT_1PLY, ExactConfig } from '../engine/exact/search.js';
+import { ExactConfig } from '../engine/exact/search.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
 import { BenchPlayer, GameJob, GameResult as BenchGame } from '../bench/game.js';
 import { runGamesParallel } from '../bench/pool.js';
@@ -85,6 +86,15 @@ export interface HeldOutCheck {
   max_damage_deep_total?: number;
 }
 
+export interface SprtResult {
+  elo0: number;
+  elo1: number;
+  alpha: number;
+  beta: number;
+  llr: number;
+  decision: 'accept_h1' | 'accept_h0' | 'continue';
+}
+
 export interface TournamentResult {
   challenger_id: string;
   champion_id: string;
@@ -94,6 +104,7 @@ export interface TournamentResult {
   held_out: HeldOutCheck;
   verdict: 'promoted' | 'rejected';
   reason: string;
+  sprt_result: SprtResult;
 }
 
 export interface PanelResult {
@@ -117,6 +128,172 @@ export interface GuardrailsCheck {
   p99_turn_time_ms: number;
   fallback_rate: number;
   state_mismatches: number;
+}
+
+export function eloWinProbability(eloDiff: number): number {
+  return 1 / (1 + 10 ** (-eloDiff / 400));
+}
+
+/** SPRT described by GATE_CONFIG.sprt. elo0 0 is an even match with the champion. */
+export function sprtDecision(
+  wins: number,
+  losses: number,
+  params: { elo0: number; elo1: number; alpha: number; beta: number } = GATE_CONFIG.sprt,
+): SprtResult {
+  const p0 = eloWinProbability(params.elo0);
+  const p1 = eloWinProbability(params.elo1);
+  const boundary = Math.log((1 - params.beta) / params.alpha);
+  const played = wins + losses;
+  const llr = played === 0
+    ? 0
+    : wins * Math.log(p1 / p0) + losses * Math.log((1 - p1) / (1 - p0));
+  let decision: SprtResult['decision'] = 'continue';
+  if (played > 0 && llr >= boundary) decision = 'accept_h1';
+  else if (played > 0 && llr <= -boundary) decision = 'accept_h0';
+  return {
+    elo0: params.elo0,
+    elo1: params.elo1,
+    alpha: params.alpha,
+    beta: params.beta,
+    llr,
+    decision,
+  };
+}
+
+export function gateOpponents(championId: string): string[] {
+  const ids = [...GATE_CONFIG.panel];
+  if (!ids.includes(championId)) ids.push(championId);
+  return ids;
+}
+
+/** Ties are half a win and half a loss for the named player. */
+export function scoreAgainst(playerId: string, games: GameResult[]): { wins: number; losses: number; games: number } {
+  let wins = 0;
+  let losses = 0;
+  let n = 0;
+  for (const game of games) {
+    const mine = game.p1 === playerId ? 'p1' : game.p2 === playerId ? 'p2' : null;
+    if (!mine) continue;
+    n += 1;
+    if (game.winner === 'tie') {
+      wins += 0.5;
+      losses += 0.5;
+    } else if (game.winner === mine) {
+      wins += 1;
+    } else {
+      losses += 1;
+    }
+  }
+  return { wins, losses, games: n };
+}
+
+export function guardrailsFor(botId: string, games: GameResult[]): GuardrailsCheck {
+  const botGames = games.filter(game => game.p1 === botId || game.p2 === botId);
+  const metrics = botGames.map(game => game.p1 === botId ? game.p1_metrics : game.p2_metrics);
+  const totalInvalid = metrics.reduce((sum, row) => sum + row.invalid_choices, 0);
+  const totalCrashes = metrics.reduce((sum, row) => sum + row.crashes, 0);
+  const totalTimeouts = metrics.reduce((sum, row) => sum + row.timeouts, 0);
+  const allTurnTimes = metrics.flatMap(row => row.turn_times_ms);
+  allTurnTimes.sort((a, b) => a - b);
+  const p99Index = Math.floor(allTurnTimes.length * 0.99);
+  const p99TurnTime = allTurnTimes[p99Index] || 0;
+  const avgFallback = metrics.reduce((sum, row) => sum + row.fallback_rate, 0) / metrics.length;
+  const totalMismatches = metrics.reduce((sum, row) => sum + row.state_mismatches, 0);
+  const passed = (
+    totalInvalid <= GATE_CONFIG.guardrails.max_invalid_choices &&
+    totalCrashes <= GATE_CONFIG.guardrails.max_crashes &&
+    totalTimeouts <= GATE_CONFIG.guardrails.max_timeouts &&
+    p99TurnTime <= GATE_CONFIG.guardrails.max_p99_turn_time_ms &&
+    avgFallback <= GATE_CONFIG.guardrails.max_fallback_rate &&
+    totalMismatches <= GATE_CONFIG.guardrails.max_state_mismatches
+  );
+  return {
+    passed,
+    invalid_choices: totalInvalid,
+    crashes: totalCrashes,
+    timeouts: totalTimeouts,
+    p99_turn_time_ms: p99TurnTime,
+    fallback_rate: avgFallback,
+    state_mismatches: totalMismatches,
+  };
+}
+
+const EXACT_HELD_OUT = new Set(['greedy-1ply', 'depth-n', 'expectimax', 'mcts-stub']);
+
+/** Non-exact challengers do not inherit the default 1-ply held-out score. */
+export function heldOutPlan(challengerId: string): { ok: true; config: ExactConfig } | { ok: false; reason: string } {
+  try {
+    const spec = specFromId(challengerId);
+    if (spec.kind !== 'exact') return { ok: false, reason: 'held-out requires the challenger exact search' };
+    return { ok: true, config: spec.config };
+  } catch {
+    // A config path or alias is resolved below.
+  }
+  try {
+    const player = specForAlias(challengerId, 'gate');
+    if (!isBotSpec(player) || !EXACT_HELD_OUT.has(player.config.search.id)) {
+      return { ok: false, reason: 'held-out requires the challenger exact search' };
+    }
+    const params = player.config.search.params;
+    return {
+      ok: true,
+      config: {
+        depth: params.depth,
+        samples: params.samples,
+        opponentModel: params.opponentModel,
+        evalMode: params.evalMode === 'full' ? 'full' : 'hp',
+        errorAsLoss: false,
+      },
+    };
+  } catch {
+    return { ok: false, reason: `unknown challenger ${challengerId}` };
+  }
+}
+
+export function decidePromotion(input: {
+  championId: string;
+  panelResults: PanelResult[];
+  guardrails: GuardrailsCheck;
+  heldOut: HeldOutCheck;
+  championWins: number;
+  championLosses: number;
+  guardrailReason?: string;
+  sprt?: { elo0: number; elo1: number; alpha: number; beta: number };
+}): { verdict: 'promoted' | 'rejected'; reason: string; sprt_result: SprtResult } {
+  const sprt_result = sprtDecision(input.championWins, input.championLosses, input.sprt ?? GATE_CONFIG.sprt);
+  if (!input.guardrails.passed) {
+    return {
+      verdict: 'rejected',
+      reason: input.guardrailReason ?? 'Failed hard guardrails',
+      sprt_result,
+    };
+  }
+  const regressions = input.panelResults.filter(row => row.significant_regression && row.opponent !== input.championId);
+  if (regressions.length > 0) {
+    return {
+      verdict: 'rejected',
+      reason: `Significant regression vs ${regressions.map(row => row.opponent).join(', ')}`,
+      sprt_result,
+    };
+  }
+  if (sprt_result.decision === 'accept_h0') {
+    return { verdict: 'rejected', reason: `SPRT accept_h0 vs ${input.championId}`, sprt_result };
+  }
+  if (sprt_result.decision !== 'accept_h1') {
+    return {
+      verdict: 'rejected',
+      reason: `SPRT continue vs ${input.championId}; beating the panel is not a promotion`,
+      sprt_result,
+    };
+  }
+  if (!input.heldOut.ok) {
+    return { verdict: 'rejected', reason: input.heldOut.reason, sprt_result };
+  }
+  return {
+    verdict: 'promoted',
+    reason: `SPRT accept_h1 vs ${input.championId}. ${input.heldOut.reason}`,
+    sprt_result,
+  };
 }
 
 /** Config aliases play through buildBot. Engine-only ids, including switch-depth2, play the policy. */
@@ -148,25 +325,25 @@ export class Gate {
     console.log(`Challenger: ${challengerId}`);
     console.log(`Champion: ${championId}\n`);
 
-    // Run paired games against panel
     const games: GameResult[] = [];
     const panelResults: PanelResult[] = [];
+    let championWins = 0;
+    let championLosses = 0;
 
-    for (const opponent of GATE_CONFIG.panel) {
+    for (const opponent of gateOpponents(championId)) {
       console.log(`\nTesting vs ${opponent}...`);
-      
-      // Run paired games (same seeds, swapped sides)
       const opponentGames = await this.runPairedGames(
         challengerId,
-        championId,
         opponent,
         GATE_CONFIG.min_games_per_opponent
       );
-      
       games.push(...opponentGames);
-
-      // Calculate Elo and statistics
-      const result = this.analyzePanelResults(challengerId, championId, opponent, opponentGames);
+      if (opponent === championId) {
+        const scored = scoreAgainst(challengerId, opponentGames);
+        championWins = scored.wins;
+        championLosses = scored.losses;
+      }
+      const result = this.analyzePanelResults(challengerId, opponent, opponentGames, opponent === championId);
       panelResults.push(result);
       
       console.log(`  Challenger: ${result.challenger_elo.toFixed(1)} Elo (${(result.win_rate * 100).toFixed(1)}% WR)`);
@@ -191,8 +368,14 @@ export class Gate {
     console.log(`\n=== Held-out ===`);
     console.log(heldOut.reason);
 
-    // Make verdict
-    const { verdict, reason } = this.makeVerdict(panelResults, guardrails, heldOut);
+    const { verdict, reason, sprt_result } = this.makeVerdict(
+      panelResults,
+      guardrails,
+      heldOut,
+      championId,
+      championWins,
+      championLosses,
+    );
     
     console.log(`\n=== Verdict: ${verdict.toUpperCase()} ===`);
     console.log(`Reason: ${reason}\n`);
@@ -207,6 +390,7 @@ export class Gate {
       held_out: heldOut,
       verdict,
       reason,
+      sprt_result,
     });
 
     return {
@@ -218,20 +402,17 @@ export class Gate {
       held_out: heldOut,
       verdict,
       reason,
+      sprt_result,
     };
   }
 
   private async runPairedGames(
     challenger: string,
-    champion: string,
     opponent: string,
     numPairs: number
   ): Promise<GameResult[]> {
-    // Same teams and seed, policies swapped. The verdict scores only the
-    // challenger (see analyzePanelResults). Champion Elo stays the 1500
-    // baseline, so we do not also replay champion-v0: that engine rebuilds
-    // a battle per node and the rebuild rejects the choice.
-    void champion;
+    // Same teams and seed, policies swapped. The named opponent is who
+    // actually plays, including the current champion id.
     const challengerSpec = gatePlayer(challenger);
     const opponentSpec = gatePlayer(opponent);
     const jobs: GameJob[] = [];
@@ -295,25 +476,16 @@ export class Gate {
 
   private analyzePanelResults(
     challenger: string,
-    champion: string,
     opponent: string,
-    games: GameResult[]
+    games: GameResult[],
+    againstChampion: boolean,
   ): PanelResult {
-    // Calculate win rates
-    const challengerWins = games.filter(g => 
-      (g.p1 === challenger && g.winner === 'p1') || 
-      (g.p2 === challenger && g.winner === 'p2')
-    ).length;
-    
-    const challengerGames = games.filter(g => g.p1 === challenger || g.p2 === challenger).length;
-    const winRate = challengerGames > 0 ? challengerWins / challengerGames : 0;
-
-    // Wilson confidence interval
-    const [ciLower, ciUpper] = this.wilsonCI(challengerWins, challengerGames, GATE_CONFIG.confidence);
-
-    // Convert win rate to Elo (simple approximation)
+    const scored = scoreAgainst(challenger, games);
+    const winRate = scored.games > 0 ? scored.wins / scored.games : 0;
+    const [ciLower, ciUpper] = this.wilsonCI(scored.wins, scored.games, GATE_CONFIG.confidence);
     const challengerElo = this.winRateToElo(winRate);
-    const championElo = 1500; // baseline
+    const championElo = 1500;
+    const sprt = sprtDecision(scored.wins, scored.losses);
 
     return {
       opponent,
@@ -323,9 +495,9 @@ export class Gate {
       win_rate: winRate,
       ci_lower: ciLower,
       ci_upper: ciUpper,
-      games: challengerGames,
-      significant_improvement: ciLower > 0.5, // Lower bound above 50%
-      significant_regression: ciUpper < 0.5,  // Upper bound below 50%
+      games: scored.games,
+      significant_improvement: againstChampion ? sprt.decision === 'accept_h1' : ciLower > 0.5,
+      significant_regression: againstChampion ? sprt.decision === 'accept_h0' : ciUpper < 0.5,
     };
   }
 
@@ -383,39 +555,7 @@ export class Gate {
   }
 
   private checkGuardrails(botId: string, games: GameResult[]): GuardrailsCheck {
-    const botGames = games.filter(g => g.p1 === botId || g.p2 === botId);
-    const metrics = botGames.map(g => g.p1 === botId ? g.p1_metrics : g.p2_metrics);
-
-    const totalInvalid = metrics.reduce((sum, m) => sum + m.invalid_choices, 0);
-    const totalCrashes = metrics.reduce((sum, m) => sum + m.crashes, 0);
-    const totalTimeouts = metrics.reduce((sum, m) => sum + m.timeouts, 0);
-    
-    const allTurnTimes = metrics.flatMap(m => m.turn_times_ms);
-    allTurnTimes.sort((a, b) => a - b);
-    const p99Index = Math.floor(allTurnTimes.length * 0.99);
-    const p99TurnTime = allTurnTimes[p99Index] || 0;
-
-    const avgFallback = metrics.reduce((sum, m) => sum + m.fallback_rate, 0) / metrics.length;
-    const totalMismatches = metrics.reduce((sum, m) => sum + m.state_mismatches, 0);
-
-    const passed = (
-      totalInvalid <= GATE_CONFIG.guardrails.max_invalid_choices &&
-      totalCrashes <= GATE_CONFIG.guardrails.max_crashes &&
-      totalTimeouts <= GATE_CONFIG.guardrails.max_timeouts &&
-      p99TurnTime <= GATE_CONFIG.guardrails.max_p99_turn_time_ms &&
-      avgFallback <= GATE_CONFIG.guardrails.max_fallback_rate &&
-      totalMismatches <= GATE_CONFIG.guardrails.max_state_mismatches
-    );
-
-    return {
-      passed,
-      invalid_choices: totalInvalid,
-      crashes: totalCrashes,
-      timeouts: totalTimeouts,
-      p99_turn_time_ms: p99TurnTime,
-      fallback_rate: avgFallback,
-      state_mismatches: totalMismatches,
-    };
+    return guardrailsFor(botId, games);
   }
 
   /**
@@ -426,8 +566,9 @@ export class Gate {
    * paired win rate. Hand-written diagnostics are not consulted.
    */
   private scoreHeldOut(challengerId: string): HeldOutCheck {
-    const spec = specFromId(challengerId);
-    const config: ExactConfig = spec.kind === 'exact' ? spec.config : EXACT_1PLY;
+    const plan = heldOutPlan(challengerId);
+    if (!plan.ok) return { ok: false, reason: plan.reason };
+    const config = plan.config;
     let score: SplitScore;
     try {
       score = scoreSplit('heldout', config);
@@ -453,46 +594,19 @@ export class Gate {
     panelResults: PanelResult[],
     guardrails: GuardrailsCheck,
     heldOut: HeldOutCheck,
-  ): { verdict: 'promoted' | 'rejected'; reason: string } {
-    // Hard guardrails must pass
-    if (!guardrails.passed) {
-      return {
-        verdict: 'rejected',
-        reason: 'Failed hard guardrails: ' + this.formatGuardrailFailures(guardrails),
-      };
-    }
-
-    // Check for significant regression vs any panel member
-    const regressions = panelResults.filter(r => r.significant_regression);
-    if (regressions.length > 0) {
-      return {
-        verdict: 'rejected',
-        reason: `Significant regression vs ${regressions.map(r => r.opponent).join(', ')}`,
-      };
-    }
-
-    // Check for improvement vs champion
-    const improvements = panelResults.filter(r => r.significant_improvement);
-    if (improvements.length === 0) {
-      return {
-        verdict: 'rejected',
-        reason: 'No significant improvement vs any panel member',
-      };
-    }
-
-    if (!heldOut.ok) {
-      return {
-        verdict: 'rejected',
-        reason: heldOut.reason,
-      };
-    }
-
-    // Promoted!
-    const avgEloGain = panelResults.reduce((sum, r) => sum + r.elo_diff, 0) / panelResults.length;
-    return {
-      verdict: 'promoted',
-      reason: `+${avgEloGain.toFixed(1)} avg Elo vs panel (${improvements.length}/${panelResults.length} improved). ${heldOut.reason}`,
-    };
+    championId: string,
+    championWins: number,
+    championLosses: number,
+  ): { verdict: 'promoted' | 'rejected'; reason: string; sprt_result: SprtResult } {
+    return decidePromotion({
+      championId,
+      panelResults,
+      guardrails,
+      heldOut,
+      championWins,
+      championLosses,
+      guardrailReason: 'Failed hard guardrails: ' + this.formatGuardrailFailures(guardrails),
+    });
   }
 
   private formatGuardrailFailures(g: GuardrailsCheck): string {
@@ -534,6 +648,7 @@ export class Gate {
         panel_results: result.panel_results,
         guardrails: result.guardrails,
         held_out: result.held_out,
+        sprt_result: result.sprt_result,
         play: this.playSummary(result.challenger_id, result.games),
       },
     };
@@ -561,7 +676,7 @@ export class Gate {
 
       const vsRandom = result.panel_results.find(r => r.opponent.includes('random'));
       const vsMax = result.panel_results.find(r => r.opponent.includes('max'));
-      const vsChampion = result.panel_results.find(r => r.opponent.includes('exact'));
+      const vsChampion = result.panel_results.find(r => r.opponent === result.champion_id);
       const blueprint = championBlueprint(result.challenger_id);
       const championNodeId = blueprint.id;
       this.db.addNode({

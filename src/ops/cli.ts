@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   factory, gatekeeper, live, analyst, supervise accept --once
   live --local uses the local server instead of the ladder
   live --runners=N --concurrency=K
-  gatekeeper --bootstrap labels configs/champion.yaml only when diagnostics are 100%
+  gatekeeper --bootstrap checks configs/champion.yaml and does not label it without paired games
   report --daily is the plain-English day summary
 Facilities share the graph and the JSONL logs. They do not import each other.`);
 }

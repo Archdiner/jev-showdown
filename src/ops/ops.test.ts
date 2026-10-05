@@ -6,13 +6,16 @@ import { countsFromLiveGames, loadVariantPool, thompsonDraw } from './variants.j
 import { runAnalyst } from './analyst.js';
 import { openDb } from './db.js';
 import { runFactory } from './factory.js';
-import { bootstrapChampion, judge, sprt } from './gatekeeper.js';
+import { bootstrapChampion, diagnosticsForConfig, exactDiagnosticsConfig, judge, reviewProposals, sprt } from './gatekeeper.js';
+import type { GameResult } from '../bench/game.js';
+import { loadConfig } from '../config/load.js';
+import { liveProposalAllowed, tallySide } from './sprt.js';
+import { completeJob, claimNext, enqueue, listJobs } from './queue.js';
 import { readLabels } from './labels-read.js';
 import { startLocalServer } from './local-server.js';
 import { liveSlotLimit, recordedRating, rememberRating, runLive } from './live.js';
 import { appendJsonl, opsPaths, readJsonl } from './paths.js';
 import { observeLog, emptyCounts, countsToPriors } from './priors.js';
-import { claimNext, completeJob, enqueue, listJobs } from './queue.js';
 import { dailyReport } from './report.js';
 import { statusReport } from './status.js';
 
@@ -195,14 +198,123 @@ describe('gatekeeper labels', () => {
     expect(labels[0].labels).toEqual(expect.arrayContaining(['champion', 'live-approved']));
   });
 
-  test('bootstrap labels the current champion only when diagnostics are 100%', () => {
+  test('bootstrap does not label a champion that has not played', () => {
     const paths = tempPaths();
-    const verdict = bootstrapChampion(paths);
-    const match = verdict.reason.match(/diagnostics (\d+)\/(\d+)/);
-    expect(match).not.toBeNull();
-    const passed = Number(match?.[1]);
-    const total = Number(match?.[2]);
-    expect(verdict.labeled).toBe(passed === total && total > 0);
+    const verdict = bootstrapChampion(paths, 'configs/champion.yaml', () => ({ passed: 22, failed: 0, total: 22 }));
+    expect(verdict.labeled).toBe(false);
+    expect(verdict.sprt).toBe('continue');
+    expect(verdict.reason).toContain('no paired games');
+    expect(labelsOf(paths)).toHaveLength(0);
+  });
+
+  test('a random config does not inherit the exact diagnostic suite', () => {
+    const random = loadConfig(path.join(process.cwd(), 'configs/panel/random.yaml'));
+    expect(exactDiagnosticsConfig(random)).toBeNull();
+    expect(diagnosticsForConfig(random)).toEqual({ passed: 0, failed: 1, total: 1 });
+    const champion = loadConfig(path.join(process.cwd(), 'configs/champion.yaml'));
+    expect(exactDiagnosticsConfig(champion)?.samples).toBe(champion.config.search.params.samples);
+    expect(exactDiagnosticsConfig(champion)?.depth).toBe(1);
+  });
+
+  test('review keeps playing until SPRT promotes and ignores the opponent invalid count', async () => {
+    const paths = tempPaths();
+    const champion = loadConfig(path.join(process.cwd(), 'configs/champion.yaml'));
+    enqueue(paths, { kind: 'challenger', challenger: 'configs/panel/random.yaml' });
+    const job = claimNext(paths);
+    expect(job).not.toBeNull();
+    completeJob(paths, job!.id, {
+      status: 'done',
+      proposal: {
+        action: 'live-approved',
+        configPath: 'configs/panel/random.yaml',
+        configId: 'pending',
+        summary: 'scripted',
+      },
+    });
+    let calls = 0;
+    const verdicts = await reviewProposals(paths, {
+      batch: 50,
+      maxGames: 1200,
+      diagnostics: () => ({ passed: 1, failed: 0, total: 1 }),
+      play: async (a, b, games) => {
+        calls += 1;
+        expect(b.configId).toBe(champion.configId);
+        return Array.from({ length: games }, (_, index) => scriptedGame(index, 'p1', a.configId, b.configId, { p2Invalid: 5 }));
+      },
+    });
+    expect(calls).toBe(3);
+    expect(verdicts[0].labeled).toBe(true);
+    expect(verdicts[0].sprt).toBe('promote');
+  });
+
+  test('a short even sample stays unlabeled, and a crash blocks a label', async () => {
+    const paths = tempPaths();
+    enqueue(paths, { kind: 'challenger', challenger: 'configs/panel/random.yaml' });
+    const job = claimNext(paths);
+    completeJob(paths, job!.id, {
+      status: 'done',
+      proposal: {
+        action: 'live-approved',
+        configPath: 'configs/panel/random.yaml',
+        configId: 'pending',
+        summary: 'scripted',
+      },
+    });
+    let calls = 0;
+    const continued = await reviewProposals(paths, {
+      batch: 2,
+      maxGames: 4,
+      diagnostics: () => ({ passed: 1, failed: 0, total: 1 }),
+      play: async (a, b) => {
+        calls += 1;
+        return [0, 1].map(index => scriptedGame(index, index === 0 ? 'p1' : 'p2', a.configId, b.configId));
+      },
+    });
+    expect(calls).toBe(2);
+    expect(continued[0].sprt).toBe('continue');
+    expect(continued[0].labeled).toBe(false);
+
+    const again = tempPaths();
+    enqueue(again, { kind: 'challenger', challenger: 'configs/panel/random.yaml', games: 8 });
+    const crashedJob = claimNext(again);
+    completeJob(again, crashedJob!.id, {
+      status: 'done',
+      proposal: {
+        action: 'live-approved',
+        configPath: 'configs/panel/random.yaml',
+        configId: 'pending',
+        summary: 'scripted',
+      },
+    });
+    const crashed = await reviewProposals(again, {
+      batch: 150,
+      maxGames: 150,
+      diagnostics: () => ({ passed: 1, failed: 0, total: 1 }),
+      play: async (a, b, games) => Array.from({ length: games }, (_, index) => (
+        scriptedGame(index, 'p1', a.configId, b.configId, { crashed: true })
+      )),
+    });
+    expect(crashed[0].sprt).toBe('promote');
+    expect(crashed[0].labeled).toBe(false);
+    expect(crashed[0].reason).toContain('crashes=');
+  });
+});
+
+describe('factory proposals', () => {
+  test('four games cannot propose a live label, and a tie is half', () => {
+    expect(liveProposalAllowed(3, 1, 0)).toBe(false);
+    expect(liveProposalAllowed(4, 0, 0)).toBe(false);
+    expect(liveProposalAllowed(250, 100, 0)).toBe(true);
+    expect(liveProposalAllowed(250, 100, 1)).toBe(false);
+    expect(sprt(117, 33)).toBe('continue');
+    expect(tallySide([{
+      winner: 'tie',
+      p1Id: 'a',
+      p2Id: 'b',
+      p1Invalid: 0,
+      p2Invalid: 4,
+      crashed: true,
+    }], 'a')).toEqual({ wins: 0.5, losses: 0.5, invalid: 0, crashes: 1 });
   });
 });
 
@@ -325,6 +437,36 @@ describe('factory', () => {
     expect(await runFactory(paths, { once: true })).toBe(0);
   }, 60_000);
 });
+
+function scriptedGame(
+  index: number,
+  winner: 'p1' | 'p2',
+  p1ConfigId: string,
+  p2ConfigId: string,
+  extra: { p2Invalid?: number; crashed?: boolean } = {},
+): GameResult {
+  return {
+    index,
+    seed: index,
+    winner,
+    turns: 1,
+    p1Invalid: 0,
+    p2Invalid: extra.p2Invalid ?? 0,
+    crashed: Boolean(extra.crashed),
+    p1TurnTimes: [],
+    p2TurnTimes: [],
+    p1ConfigId,
+    p2ConfigId,
+    p1Decisions: 0,
+    p1Switches: 0,
+    p1Predicted: 0,
+    p1Answered: 0,
+    p2Decisions: 0,
+    p2Switches: 0,
+    p2Predicted: 0,
+    p2Answered: 0,
+  } as unknown as GameResult;
+}
 
 function labelsOf(paths: ReturnType<typeof tempPaths>) {
   const db = openDb(paths);
