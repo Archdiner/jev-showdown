@@ -262,7 +262,10 @@ async function chooseSeen(
   if (legal.length === 1 && legal[0] === 'default') {
     return { choice: 'default', ms: 0, configId: player.id };
   }
-  const viewed = ladderDecisionBattle(battle, side, { enrich: enriches(player) });
+  const viewed = ladderDecisionBattle(battle, side, {
+    enrich: enriches(player),
+    quickWins: wantsQuickWins(player),
+  });
   if (!viewed) return { choice: legal[0] || 'default', ms: 0, configId: player.id, viewMiss: true };
   return choose(player, viewed, 'p1', rng, gameId, seed);
 }
@@ -288,6 +291,11 @@ async function choose(
   }
   const decision = await player.bot!.decide({ battle, side, rng, gameId, seed });
   return decision;
+}
+
+function wantsQuickWins(player: Opened): boolean {
+  if (player.policy?.kind === 'exact' && player.policy.config.tera === true) return true;
+  return player.bot?.config.search.id === QUICK_WIN_SEARCH_ID;
 }
 
 function enriches(player: Opened): boolean {

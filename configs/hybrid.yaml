@@ -17,9 +17,12 @@ hybrid:
     maxActions: 8
     maxReplies: 3
     regretIterations: 24
-    plan: true
-    opponent: true
-    judgment: true
+    # Model calls stay in the branch and off. Turn plan or judgment on in a
+    # separate file; the shipped hybrid and the screens do not.
+    plan: false
+    opponent: false
+    judgment: false
+    everyTurn: false
     margin: 0.75
     planEvery: 4
     model: alibaba/qwen3.8-27b

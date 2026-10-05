@@ -151,6 +151,9 @@ describe('hybrid search pieces', () => {
 
   it('draws the calibrated posterior when the sampler knob says so', () => {
     expect(HybridParamsSchema.parse({}).sampler).toBe('loose');
+    expect(loadConfig('configs/hybrid.yaml').config.hybrid?.params.plan).toBe(false);
+    expect(loadConfig('configs/hybrid.yaml').config.hybrid?.params.judgment).toBe(false);
+    expect(loadConfig('configs/hybrid.yaml').config.hybrid?.params.everyTurn).toBe(false);
     expect(loadConfig('configs/hybrid-core.yaml').config.hybrid?.params.sampler).toBe('loose');
     expect(loadConfig('configs/hybrid-calibrated.yaml').config.hybrid?.params.sampler).toBe('calibrated');
 
