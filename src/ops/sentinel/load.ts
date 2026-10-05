@@ -51,12 +51,6 @@ export interface LoadOptions {
 }
 
 export function loadContext(layout: Layout, options: LoadOptions = {}): SentinelContext {
-<<<<<<< HEAD
-  const processesScanned = options.scanProcesses !== false;
-  const processes = !processesScanned ? [] : (options.processes ?? scanProcesses());
-  const pidAlive = options.pidAlive
-    ?? (options.processes ? (pid: number) => options.processes?.some(proc => proc.pid === pid) ?? false : processAlive);
-=======
   const now = options.now ?? Date.now();
   const lookbackMs = options.lookbackMs ?? DEFAULTS.lookbackMs;
   const snapshot = options.scanProcesses === false
@@ -66,14 +60,11 @@ export function loadContext(layout: Layout, options: LoadOptions = {}): Sentinel
       : snapshotProcesses({ procRoot: '/proc' });
   const processesScanned = snapshot.scanned;
   const processes = snapshot.processes;
->>>>>>> origin/main
+  const pidAlive = options.pidAlive
+    ?? (options.processes ? (pid: number) => options.processes?.some(proc => proc.pid === pid) ?? false : processAlive);
   const rows = collectRows(layout);
   const speciesPath = path.join(layout.dataDir, 'gen9-stats.json');
   const species = readSpecies(speciesPath);
-  const runs = findRuns(layout.liveRunsDir);
-  const now = options.now ?? Date.now();
-  const opsGit = options.git ?? readGit(layout.cwd);
-  const summaryPath = path.join(layout.ladderLogDir, 'summary.json');
   return {
     now,
     layout,
@@ -90,11 +81,11 @@ export function loadContext(layout: Layout, options: LoadOptions = {}): Sentinel
     processesScanned,
     processes,
     pidAlive,
-    baselineMs: options.baselineMs === undefined ? defaultBaseline(runs) : options.baselineMs,
-    git: opsGit,
-    checkouts: readCheckouts(layout, opsGit, options.liveGit),
+    baselineMs: options.baselineMs === undefined ? defaultBaseline(findRuns(layout.liveRunsDir)) : options.baselineMs,
+    git: options.git ?? readGit(layout.cwd),
+    checkouts: readCheckouts(layout, options.git ?? readGit(layout.cwd), options.liveGit),
     rows,
-    games: assignRuns(observeGames(rows), runs),
+    games: assignRuns(observeGames(rows), findRuns(layout.liveRunsDir)),
     heartbeats: heartbeatRows(rows),
     circuits: readCircuits(path.join(layout.opsDir, 'circuits.json')),
     circuitsPath: path.join(layout.opsDir, 'circuits.json'),
@@ -102,25 +93,72 @@ export function loadContext(layout: Layout, options: LoadOptions = {}): Sentinel
     speciesPath,
     speciesError: species.error,
     drains: findDrains(layout),
-<<<<<<< HEAD
     locks: findLocks(layout),
-    runs,
-    runSummary: readSummary(summaryPath),
-    summaryMtimeMs: mtimeIfExists(summaryPath),
-=======
     runs: findRuns(layout.liveRunsDir),
+    runSummary: readSummary(path.join(layout.ladderLogDir, 'summary.json')),
     summaryMtimeMs: mtimeIfExists(path.join(layout.ladderLogDir, 'summary.json')),
     batchEnds: collectBatchEnds(layout, rows, now, lookbackMs),
->>>>>>> origin/main
     decisionSamples: decisionSamples(rows),
   };
 }
 
-<<<<<<< HEAD
+const LADDER_CMD = /src\/cli\/ladder\.ts|src\/ops\/cli\.ts|run-live\.sh/;
+const TIMED_OUT_LINE = /Timed out after (\d+)\/(\d+) games/;
+const STALLED_LINE = /stalled after (\d+)\/(\d+) games/;
+
+export interface ProcessScanInput {
+  /** Directory shaped like /proc. Missing on macOS. */
+  procRoot?: string;
+  /** Process table text. Used when `procRoot` does not exist. */
+  readTable?: () => string;
+  /** Alias for readTable. */
+  ps?: () => string;
+}
+
+/**
+ * Linux reads /proc. macOS has no /proc, so the same snapshot comes from `ps`.
+ * A failed listing is `scanned: false` so a dead process list is not treated as
+ * every runner having exited.
+ */
+export function snapshotProcesses(input: ProcessScanInput = {}): { processes: ProcessSnapshot[]; scanned: boolean } {
+  const root = input.procRoot ?? '/proc';
+  const readTable = input.readTable ?? input.ps;
+  if (readTable) {
+    try {
+      const procs = parseProcessTable(readTable()).filter(proc => relevantProcess(proc.cmd));
+      return { processes: procs, scanned: true };
+    } catch {
+      return { processes: [], scanned: false };
+    }
+  }
+  if (fs.existsSync(root)) return { processes: scanProc(root), scanned: true };
+  try {
+    return { processes: parseProcessTable(readProcessTable()), scanned: true };
+  } catch {
+    return { processes: [], scanned: false };
+  }
+}
+
+export function scanProcesses(input: ProcessScanInput = {}): ProcessSnapshot[] {
+  return snapshotProcesses(input).processes;
+}
+
 const MONTHS: Record<string, number> = {
   Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
   Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
 };
+
+export function relevantProcess(cmd: string): boolean {
+  return LADDER_CMD.test(cmd);
+}
+
+function parseLstart(text: string): number | undefined {
+  const match = /^(\w{3})\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/.exec(text.trim());
+  if (!match) return undefined;
+  const month = MONTHS[match[2]];
+  if (month === undefined) return undefined;
+  return Date.UTC(Number(match[7]), month, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]));
+}
 
 /** Parse `ps -axo pid,ppid,pgid,lstart,command`. The header and short lines are skipped. */
 export function parsePs(text: string): ProcessSnapshot[] {
@@ -139,36 +177,8 @@ export function parsePs(text: string): ProcessSnapshot[] {
       startedAt: parseLstart(match[4]),
       cmd,
     });
-=======
-const LADDER_CMD = /src\/cli\/ladder\.ts|src\/ops\/cli\.ts|run-live\.sh/;
-const TIMED_OUT_LINE = /Timed out after (\d+)\/(\d+) games/;
-const STALLED_LINE = /stalled after (\d+)\/(\d+) games/;
-
-export interface ProcessScanInput {
-  /** Directory shaped like /proc. Missing on macOS. */
-  procRoot?: string;
-  /** Process table text. Used when `procRoot` does not exist. */
-  readTable?: () => string;
-}
-
-/**
- * Linux reads /proc. macOS has no /proc, so the same snapshot comes from `ps`.
- * A failed listing is `scanned: false` so a dead process list is not treated as
- * every runner having exited.
- */
-export function snapshotProcesses(input: ProcessScanInput = {}): { processes: ProcessSnapshot[]; scanned: boolean } {
-  const root = input.procRoot ?? '/proc';
-  if (fs.existsSync(root)) return { processes: scanProc(root), scanned: true };
-  const readTable = input.readTable ?? readProcessTable;
-  try {
-    return { processes: parseProcessTable(readTable()), scanned: true };
-  } catch {
-    return { processes: [], scanned: false };
   }
-}
-
-export function scanProcesses(input: ProcessScanInput = {}): ProcessSnapshot[] {
-  return snapshotProcesses(input).processes;
+  return out;
 }
 
 /** `ps -axww -o pid=,command=` rows. Works on macOS and Linux. */
@@ -209,58 +219,10 @@ function scanProc(root: string): ProcessSnapshot[] {
       env = undefined;
     }
     out.push({ pid, cmd, env });
->>>>>>> origin/main
   }
   return out;
 }
 
-<<<<<<< HEAD
-export function relevantProcess(cmd: string): boolean {
-  return /src\/cli\/ladder\.ts|src\/ops\/cli\.ts|run-live\.sh/.test(cmd);
-}
-
-/**
- * Runner liveness is this `ps` list, or `kill -0` on a run-file pid.
- * `/proc` is not a liveness source. When it exists it only adds env to a pid `ps` already listed.
- */
-export function scanProcesses(deps: { ps?: () => string; procRoot?: string } = {}): ProcessSnapshot[] {
-  const procRoot = deps.procRoot ?? '/proc';
-  let psRows: ProcessSnapshot[] = [];
-  try {
-    const text = deps.ps
-      ? deps.ps()
-      : execFileSync('ps', ['-axo', 'pid,ppid,pgid,lstart,command'], {
-        encoding: 'utf8',
-        timeout: 4000,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-    psRows = parsePs(text).filter(row => relevantProcess(row.cmd));
-  } catch {
-    psRows = [];
-  }
-  if (psRows.length === 0) return [];
-  const envByPid = new Map(readProc(procRoot).map(row => [row.pid, row.env]));
-  return psRows.map(row => {
-    const env = envByPid.get(row.pid);
-    return env ? { ...row, env } : row;
-  });
-}
-
-/** Git root of `dir`, or null when `dir` is missing or not inside a work tree. */
-export function gitTopLevel(dir: string): string | null {
-  if (!dir || !fs.existsSync(dir)) return null;
-  try {
-    const out = execFileSync('git', ['rev-parse', '--show-toplevel'], {
-      cwd: dir,
-      encoding: 'utf8',
-      timeout: 4000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim();
-    return out || null;
-  } catch {
-    return null;
-  }
-=======
 function readProcessTable(): string {
   return execFileSync('ps', ['-axww', '-o', 'pid=,command='], {
     encoding: 'utf8',
@@ -391,7 +353,21 @@ function listLogFiles(dir: string): string[] {
   }
   walk(dir);
   return found;
->>>>>>> origin/main
+}
+
+export function gitTopLevel(dir: string): string | null {
+  if (!dir || !fs.existsSync(dir)) return null;
+  try {
+    const out = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: dir,
+      encoding: 'utf8',
+      timeout: 4000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
 }
 
 export function readGit(cwd: string): GitStatus {
@@ -554,6 +530,69 @@ function findDrains(layout: Layout): DrainFile[] {
   return [...found.values()];
 }
 
+function findRuns(dir: string): RunMeta[] {
+  if (!fs.existsSync(dir)) return [];
+  const runs: RunMeta[] = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith('.json')) continue;
+    const file = path.join(dir, name);
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (typeof parsed.pid !== 'number') continue;
+    runs.push({
+      path: file,
+      mtimeMs: mtimeIfExists(file) ?? 0,
+      runId: typeof parsed.runId === 'string' ? parsed.runId : name.replace(/\.json$/, ''),
+      pid: parsed.pid,
+      username: typeof parsed.username === 'string' ? parsed.username : undefined,
+      local: parsed.local === true,
+      engine: typeof parsed.engine === 'string' ? parsed.engine : undefined,
+    });
+  }
+  return runs;
+}
+
+function runStart(run: RunMeta): number {
+  return run.startedAt ?? run.mtimeMs;
+}
+
+function defaultBaseline(runs: RunMeta[]): number | null {
+  const live = runs.filter(run => !run.local);
+  if (live.length === 0) return null;
+  const newest = live.reduce((best, run) => runStart(run) >= runStart(best) ? run : best);
+  return runStart(newest);
+}
+
+function assignRuns(games: SentinelContext['games'], runs: RunMeta[]): SentinelContext['games'] {
+  const live = runs.filter(run => !run.local).sort((a, b) => runStart(a) - runStart(b));
+  return games.map(game => {
+    if (game.runId) return game;
+    if (game.ts === null || live.length === 0) return game;
+    let match: RunMeta | null = null;
+    for (const run of live) {
+      if (runStart(run) <= game.ts) match = run;
+    }
+    if (!match) return game;
+    return { ...game, runId: game.runId ?? match.runId, gitSha: game.gitSha ?? match.gitSha ?? null };
+  });
+}
+
+function readCheckouts(layout: Layout, opsGit: GitStatus, liveGit: GitStatus | undefined): CheckoutStatus[] {
+  const checkouts: CheckoutStatus[] = [{ role: 'ops', dir: layout.cwd, git: opsGit }];
+  if (!layout.liveRepoDir) return checkouts;
+  if (path.resolve(layout.liveRepoDir) === path.resolve(layout.cwd)) return checkouts;
+  checkouts.push({
+    role: 'live',
+    dir: layout.liveRepoDir,
+    git: liveGit ?? readGit(layout.liveRepoDir),
+  });
+  return checkouts;
+}
+
 function findLocks(layout: Layout): LockSnapshot[] {
   const locks: LockSnapshot[] = [];
   const seen = new Set<string>();
@@ -594,80 +633,6 @@ function readLock(file: string, checkout: 'ops' | 'live', dir: string): LockSnap
   };
 }
 
-function findRuns(dir: string): RunMeta[] {
-  if (!fs.existsSync(dir)) return [];
-  const runs: RunMeta[] = [];
-  for (const name of fs.readdirSync(dir)) {
-    if (!name.endsWith('.json')) continue;
-    const file = path.join(dir, name);
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-    if (typeof parsed.pid !== 'number') continue;
-    runs.push({
-      path: file,
-      mtimeMs: mtimeIfExists(file) ?? 0,
-      runId: typeof parsed.runId === 'string' ? parsed.runId : name.replace(/\.json$/, ''),
-      pid: parsed.pid,
-      username: typeof parsed.username === 'string' ? parsed.username : undefined,
-      local: parsed.local === true,
-      engine: typeof parsed.engine === 'string' ? parsed.engine : undefined,
-      startedAt: startedAtOf(parsed.startedAt),
-      gitSha: typeof parsed.gitSha === 'string' ? parsed.gitSha : null,
-    });
-  }
-  return runs;
-}
-
-function startedAtOf(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return undefined;
-}
-
-function defaultBaseline(runs: RunMeta[]): number | null {
-  const live = runs.filter(run => !run.local);
-  if (live.length === 0) return null;
-  const newest = live.reduce((best, run) => runStart(run) >= runStart(best) ? run : best);
-  return runStart(newest);
-}
-
-function runStart(run: RunMeta): number {
-  return run.startedAt ?? run.mtimeMs;
-}
-
-function assignRuns(games: SentinelContext['games'], runs: RunMeta[]): SentinelContext['games'] {
-  const live = runs.filter(run => !run.local).sort((a, b) => runStart(a) - runStart(b));
-  return games.map(game => {
-    if (game.runId) return game;
-    if (game.ts === null || live.length === 0) return game;
-    let match: RunMeta | null = null;
-    for (const run of live) {
-      if (runStart(run) <= game.ts) match = run;
-    }
-    if (!match) return game;
-    return { ...game, runId: match.runId, gitSha: game.gitSha ?? match.gitSha ?? null };
-  });
-}
-
-function readCheckouts(layout: Layout, opsGit: GitStatus, liveGit: GitStatus | undefined): CheckoutStatus[] {
-  const checkouts: CheckoutStatus[] = [{ role: 'ops', dir: layout.cwd, git: opsGit }];
-  if (!layout.liveRepoDir) return checkouts;
-  if (path.resolve(layout.liveRepoDir) === path.resolve(layout.cwd)) return checkouts;
-  checkouts.push({
-    role: 'live',
-    dir: layout.liveRepoDir,
-    git: liveGit ?? readGit(layout.liveRepoDir),
-  });
-  return checkouts;
-}
-
 function readSummary(file: string): RunSummary | null {
   if (!fs.existsSync(file)) return null;
   try {
@@ -682,44 +647,6 @@ function readSummary(file: string): RunSummary | null {
   } catch {
     return null;
   }
-}
-
-function readProc(root: string): ProcessSnapshot[] {
-  if (!fs.existsSync(root)) return [];
-  let names: string[] = [];
-  try {
-    names = fs.readdirSync(root);
-  } catch {
-    return [];
-  }
-  const out: ProcessSnapshot[] = [];
-  for (const name of names) {
-    if (!/^\d+$/.test(name)) continue;
-    const pid = Number(name);
-    let cmd = '';
-    try {
-      cmd = fs.readFileSync(path.join(root, name, 'cmdline'), 'utf8').replace(/\0/g, ' ').trim();
-    } catch {
-      continue;
-    }
-    if (!cmd || !relevantProcess(cmd)) continue;
-    let env: Record<string, string> | undefined;
-    try {
-      env = parseEnviron(fs.readFileSync(path.join(root, name, 'environ')));
-    } catch {
-      env = undefined;
-    }
-    out.push({ pid, cmd, env });
-  }
-  return out;
-}
-
-function parseLstart(text: string): number | undefined {
-  const match = /^(\w{3})\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/.exec(text.trim());
-  if (!match) return undefined;
-  const month = MONTHS[match[2]];
-  if (month === undefined) return undefined;
-  return Date.UTC(Number(match[7]), month, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]));
 }
 
 function mtimeIfExists(file: string): number | null {
