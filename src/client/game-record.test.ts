@@ -413,6 +413,7 @@ describe('BattleDriver game record', () => {
     });
     const ended = new Promise<import('./game-record.js').LadderGameRecord>(resolve => driver.on('gameEnd', resolve));
     const room = 'battle-gen9randombattle-9';
+    socket.emit('line', room, '|init|battle');
     socket.emit('line', room, '|player|p1|BotAlpha|1|1185');
     socket.emit('line', room, '|player|p2|Rival|2|1400');
     socket.emit('line', room, '|turn|4');
