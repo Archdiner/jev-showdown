@@ -1,5 +1,7 @@
 /** Parsers for ladder JSONL, `[ladder]` lines, and ops live/heartbeat JSONL. */
 
+import { isLocalLiveGame, isPhantomRecord } from '../client/game-record.js';
+
 export type EndReason =
   | 'ko'
   | 'opponent-forfeit'
@@ -186,9 +188,14 @@ export function parseJsonRecord(row: Record<string, unknown>, hint: { source: st
     if (typeof row.engine === 'string') hint.engines.set(battleId, row.engine);
     return { opened: battleId };
   }
+  if (isPhantomRecord(row)) return null;
   const outcome = outcomeOf(str(row.outcome) || str(row.winner));
-  const isGame = kind === 'result' || kind === 'live-game' || kind === 'game';
+  const isGame = kind === 'result' || kind === 'live-game' || kind === 'ladder-game' || kind === 'game';
   if (!isGame || !outcome) return null;
+  const local = isLocalLiveGame({
+    localServer: row.localServer === true,
+    replayStatus: str(row.replayStatus),
+  });
   const engine = str(row.engine) || (battleId ? hint.engines.get(battleId) ?? null : null);
   const durationSec = num(row.durationSec) ?? num(row.durationSeconds);
   return {
@@ -199,9 +206,9 @@ export function parseJsonRecord(row: Record<string, unknown>, hint: { source: st
       outcome,
       opponent: str(row.opponent) || str(row.opponentName),
       opponentRating: num(row.opponentRating) ?? num(row.opponentElo),
-      ratingBefore: num(row.ratingBefore) ?? num(row.eloBefore) ?? num(row.ourRatingBefore),
-      ratingAfter: num(row.ratingAfter) ?? num(row.eloAfter) ?? num(row.ourRatingAfter) ?? num(row.rating) ?? num(row.elo),
-      gxe: num(row.gxe),
+      ratingBefore: local ? null : (num(row.ratingBefore) ?? num(row.eloBefore) ?? num(row.ourRatingBefore)),
+      ratingAfter: local ? null : (num(row.ratingAfter) ?? num(row.eloAfter) ?? num(row.ourRatingAfter) ?? num(row.rating) ?? num(row.elo)),
+      gxe: local ? null : num(row.gxe),
       replayUrl: replayUrl(row.replayUrl, row.replayId) || replayUrl(row.replay, null),
       endReason: normalizeEndReason(str(row.endReason) || str(row.end_reason) || str(row.ended), outcome),
       durationMs: num(row.durationMs) ?? num(row.duration) ?? (durationSec === null ? null : durationSec * 1000),

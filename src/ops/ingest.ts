@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { isLocalLiveGame, isPhantomRecord } from '../client/game-record.js';
 import { inputLogFromTranscript } from './sim-bridge.js';
 
 export type Seat = 'p1' | 'p2';
@@ -89,6 +90,11 @@ export function readCompleteChunk(file: string, offset: number): { text: string;
 export function gameFromRow(row: unknown, sourcePath: string): AnalystGame | null {
   if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
   const record = row as Record<string, unknown>;
+  if (isPhantomRecord(record)) return null;
+  if (isLocalLiveGame({
+    localServer: record.localServer === true,
+    replayStatus: typeof record.replayStatus === 'string' ? record.replayStatus : null,
+  })) return null;
   if (!isGameRecord(record)) return null;
   const id = gameId(record);
   if (!id) return null;

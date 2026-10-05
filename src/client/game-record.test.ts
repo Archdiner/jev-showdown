@@ -10,6 +10,7 @@ import {
   currentGitSha,
   factsFromTranscript,
   gxeOf,
+  isPhantomRecord,
   latencyFields,
   percentile,
   replayIdFromBattle,
@@ -173,6 +174,30 @@ describe('ladder game records', () => {
       minTimerMarginSec: 12,
       lines,
     })).minTimerMarginSec).toBe(12);
+  });
+
+  it('flags a 0-turn disconnect with no winner as a phantom', () => {
+    const ghost = buildLadderGameRecord(input({
+      turns: 0,
+      winner: null,
+      lines: ['|init|battle'],
+      disconnected: true,
+      latencies: [],
+    }));
+    expect(ghost.phantom).toBe(true);
+    expect(ghost.outcome).toBe('tie');
+    expect(ghost.endReason).toBe('disconnect');
+    expect(isPhantomRecord(ghost)).toBe(true);
+    expect(isPhantomRecord({
+      turns: 0,
+      outcome: 'tie',
+      endReason: 'disconnect',
+      winner: null,
+    })).toBe(true);
+    const played = buildLadderGameRecord(input());
+    expect(played.phantom).toBeUndefined();
+    expect(isPhantomRecord(played)).toBe(false);
+    expect(isPhantomRecord({ turns: 0, outcome: 'win', endReason: 'opponent-forfeit', winner: 'BotAlpha' })).toBe(false);
   });
 
   it('reads opponent, timer, and rating from a transcript without inventing defaults', () => {
@@ -354,5 +379,90 @@ describe('BattleDriver game record', () => {
     expect(summary.localReplayPath).toEqual(expect.stringMatching(/\.log$/));
     expect(fs.existsSync(summary.localReplayPath as string)).toBe(true);
     await driver.stop();
+  });
+
+  it('stores a passworded replay popup on the game record', async () => {
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-replay-pw-'));
+    const socket = new EventEmitter();
+    const client = Object.assign(socket, {
+      choose: () => true,
+      saveReplay: () => true,
+      enableBattleTimer: () => true,
+      trackRoom: () => undefined,
+      untrackRoom: () => undefined,
+      isReady: () => true,
+    }) as unknown as ShowdownClient;
+    const driver = new BattleDriver({
+      client,
+      username: 'BotAlpha',
+      format: gen9RandomBattle,
+      engineName: 'search',
+      decisions: {
+        openBattle() { /* unused */ },
+        closeBattle() { /* unused */ },
+        async stop() { /* unused */ },
+        async decide() {
+          return { action: { type: 'move' as const, moveIndex: 1 }, score: 1, timeMs: 1, fallback: true, reason: 'engine timeout' };
+        },
+      } as unknown as DecisionClient,
+      logDir,
+      decisionTimeoutMs: 1000,
+      settleMs: 0,
+    });
+    const ended = new Promise<import('./game-record.js').LadderGameRecord>(resolve => driver.on('gameEnd', resolve));
+    const room = 'battle-gen9randombattle-9';
+    socket.emit('line', room, '|player|p1|BotAlpha|1|1185');
+    socket.emit('line', room, '|player|p2|Rival|2|1400');
+    socket.emit('line', room, '|turn|4');
+    socket.emit('popup', 'uploaded https://replay.pokemonshowdown.com/gen9randombattle-9-vf14y87snr046p0x7g86l2ffrf1912epw');
+    socket.emit('line', room, `|request|${JSON.stringify({
+      rqid: 2,
+      side: { id: 'p1', pokemon: [{ ident: 'p1: A', details: 'A', condition: '100/100', active: true }] },
+      active: [{ moves: [{ move: 'Tackle', id: 'tackle', pp: 35, maxpp: 35, target: 'normal', disabled: false }] }],
+    })}`);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    socket.emit('line', room, '|win|BotAlpha');
+    const summary = await ended;
+    expect(summary.replayUrl).toBe('https://replay.pokemonshowdown.com/gen9randombattle-9-vf14y87snr046p0x7g86l2ffrf1912epw');
+    expect(summary.replayId).toBe('gen9randombattle-9');
+    expect(summary.replayStatus).toBe('confirmed');
+    expect(summary.fallbacks).toBe(1);
+    expect(summary.phantom).toBeUndefined();
+    await driver.stop();
+  });
+
+  it('does not count a ghost room that disconnects before any turn', async () => {
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-phantom-'));
+    const socket = new EventEmitter();
+    const client = Object.assign(socket, {
+      choose: () => true,
+      saveReplay: () => true,
+      enableBattleTimer: () => true,
+      trackRoom: () => undefined,
+      untrackRoom: () => undefined,
+      isReady: () => true,
+    }) as unknown as ShowdownClient;
+    const driver = new BattleDriver({
+      client,
+      username: 'BotAlpha',
+      format: gen9RandomBattle,
+      engineName: 'search',
+      decisions: {
+        openBattle() { /* unused */ },
+        closeBattle() { /* unused */ },
+        async stop() { /* unused */ },
+      } as unknown as DecisionClient,
+      logDir,
+      decisionTimeoutMs: 1000,
+      settleMs: 0,
+    });
+    const ended = new Promise<import('./game-record.js').LadderGameRecord>(resolve => driver.on('gameEnd', resolve));
+    socket.emit('line', 'battle-gen9randombattle-ghost', '|init|battle');
+    const summary = await driver.stop().then(() => ended);
+    expect(summary.phantom).toBe(true);
+    expect(summary.turns).toBe(0);
+    expect(summary.endReason).toBe('disconnect');
+    const stored = JSON.parse(fs.readFileSync(path.join(logDir, 'games.jsonl'), 'utf8')) as { phantom?: boolean };
+    expect(stored.phantom).toBe(true);
   });
 });

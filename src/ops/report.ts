@@ -1,4 +1,4 @@
-import { recordedElo, recordedOutcome } from '../client/game-record.js';
+import { isLocalLiveGame, recordedElo, recordedOutcome } from '../client/game-record.js';
 import { openDb } from './db.js';
 import { readJsonl, type OpsPaths } from './paths.js';
 import { listJobs } from './queue.js';
@@ -10,6 +10,8 @@ interface LiveRow {
   outcome?: 'win' | 'loss' | 'tie';
   rating?: number | null;
   eloAfter?: number | null;
+  localServer?: boolean;
+  replayStatus?: string | null;
 }
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -40,16 +42,23 @@ export function dailyReport(paths: OpsPaths, now = Date.now()): string {
   if (games.length === 0) {
     sentences.push('No live games were recorded in the last day.');
   } else {
-    const rated = games
+    const ladderGames = games.filter(game => !isLocalLiveGame(game));
+    const localCount = games.length - ladderGames.length;
+    if (localCount > 0) {
+      sentences.push(`${localCount} local ${localCount === 1 ? 'game is' : 'games are'} not a ladder rating.`);
+    }
+    const rated = ladderGames
       .map(game => recordedElo(game))
       .filter((value): value is number => value !== null);
-    if (rated.length === 0) {
-      sentences.push(`No rating was reported across ${games.length} live games.`);
+    if (ladderGames.length === 0) {
+      // Local games were already described. Do not invent a ladder move.
+    } else if (rated.length === 0) {
+      sentences.push(`No rating was reported across ${ladderGames.length} live games.`);
     } else {
       const first = rated[0];
       const last = rated[rated.length - 1];
       const direction = last > first ? 'up' : last < first ? 'down' : 'flat';
-      sentences.push(`Rating moved ${direction} from ${first} to ${last} across ${games.length} live games.`);
+      sentences.push(`Rating moved ${direction} from ${first} to ${last} across ${ladderGames.length} live games.`);
     }
   }
 
