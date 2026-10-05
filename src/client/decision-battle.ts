@@ -291,6 +291,11 @@ export function buildDecisionBattle(position: LivePosition): Battle | null {
 
     const force = isForceSwitch(request) || !!active.fainted;
     if (force) active.switchFlag = true;
+    // A lock, Struggle, or an already-used Tera omits canTerastallize. The
+    // fresh pokemon would still offer it, and the server would reject the choice.
+    if (!request.active?.[0]?.canTerastallize) {
+      for (const mon of battle.p1.pokemon) mon.canTerastallize = null;
+    }
     battle.makeRequest(force ? 'switch' : 'move');
     if (typeof position.turn === 'number' && Number.isFinite(position.turn)) battle.turn = position.turn;
     if (legalChoices(battle, 'p1').length === 0) return null;

@@ -264,6 +264,28 @@ describe('live request tera type', () => {
     expect(locked?.p1.active[0].canTerastallize).toBeNull();
   });
 
+  it('does not offer Tera when the live request omitted it', () => {
+    const battle = open(7);
+    const request = JSON.parse(JSON.stringify(battle.p1.activeRequest));
+    delete request.active[0].canTerastallize;
+    const foe = battle.p2.active[0];
+    const built = buildDecisionBattle({
+      request,
+      foeActive: {
+        species: foe.species.name,
+        level: foe.level,
+        hp: foe.hp,
+        maxhp: foe.maxhp,
+        moves: foe.moveSlots.map(slot => slot.id),
+      },
+      foeBench: [],
+    });
+    expect(built).not.toBeNull();
+    const again = built?.p1.activeRequest as { active?: Array<{ canTerastallize?: string }> };
+    expect(again.active?.[0]?.canTerastallize).toBeFalsy();
+    expect(legalChoices(built!, 'p1', { tera: true }).some(choice => choice.includes('terastallize'))).toBe(false);
+  });
+
   it('parses a terastallize choice and keeps the champion ladder policy', () => {
     expect(actionFromChoice('move 2 terastallize')).toEqual({ type: 'move', moveIndex: 2, terastallize: true });
     expect(ladderPolicy('search')).toEqual(specFromId('champion-exact-1ply'));
