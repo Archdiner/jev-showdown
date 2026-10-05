@@ -8,7 +8,7 @@ import {
 } from '../../engine/exact/battle-utils.js';
 import { maxDamageChoice } from '../../engine/exact/max-damage.js';
 import { decide as legacyDecide } from '../../engine/exact/policies.js';
-import { exactSearch, searchBudgetExpired, type ExactConfig } from '../../engine/exact/search.js';
+import { EXACT_1PLY_QW, QUICK_WIN_SEARCH_ID, exactSearch, searchBudgetExpired, type ExactConfig } from '../../engine/exact/search.js';
 import { register } from '../registry.js';
 import { SearchParamsSchema, type SearchParams } from '../schema.js';
 import { z } from 'zod';
@@ -43,7 +43,7 @@ export interface SearchImpl {
   search(battle: Battle, side: SideId, ctx: SearchCtx): Promise<SearchTrace>;
 }
 
-const ALGORITHMS = ['greedy-1ply', 'expectimax', 'depth-n', 'mcts-stub', 'random', 'max-damage', 'legacy'] as const;
+const ALGORITHMS = ['greedy-1ply', 'expectimax', 'depth-n', 'mcts-stub', 'random', 'max-damage', 'legacy', QUICK_WIN_SEARCH_ID] as const;
 
 export const SelectiveParamsSchema = SearchParamsSchema.extend({
   topN: z.number().int().min(1).max(12).default(3),
@@ -123,6 +123,18 @@ async function runSearch(
   if (id === 'max-damage') {
     const choice = maxDamageChoice(battle, side, legal);
     return { choice, scores: [{ choice, score: 1 }] };
+  }
+  if (id === QUICK_WIN_SEARCH_ID) {
+    const model = ctx.behavior.exactModel || (params.opponentModel === 'uniform' ? 'uniform' : 'max-damage');
+    const trace = exactSearch(battle, side, {
+      ...EXACT_1PLY_QW,
+      depth: params.depth,
+      samples: params.samples,
+      opponentModel: model,
+      evalMode: evalModeOf(ctx),
+      deadlineMs: ctx.deadlineMs,
+    });
+    return trace;
   }
   if (id === 'legacy') {
     const decision = await legacyDecide({ kind: 'legacy' }, battle, side, ctx.rng);

@@ -2,7 +2,7 @@ import { Battle, PRNG } from '@pkmn/sim';
 import { Action } from '../../types/index.js';
 import { SideId, legalChoices, moveSlotIndex } from './battle-utils.js';
 import { maxDamageChoice } from './max-damage.js';
-import { EXACT_1PLY, ExactConfig, FITTED_1PLY, FITTED_DEPTH2, SWITCH_DEPTH2, ScoredChoice, battleToState, exactSearch } from './search.js';
+import { EXACT_1PLY, EXACT_1PLY_QW, ExactConfig, FITTED_1PLY, FITTED_DEPTH2, QUICK_WIN_POLICY_ID, SWITCH_DEPTH2, ScoredChoice, battleToState, exactSearch } from './search.js';
 
 export type PolicySpec =
   | { kind: 'random' }
@@ -73,11 +73,9 @@ async function legacyChoice(battle: Battle, side: SideId, legal: string[]): Prom
 
 function choiceToAction(choice: string): Action {
   if (choice.startsWith('switch')) return { type: 'switch', switchIndex: Number(choice.slice(7)) };
-  return {
-    type: 'move',
-    moveIndex: moveSlotIndex(choice) + 1,
-    terastallize: choice.includes('terastallize'),
-  };
+  const action: Action = { type: 'move', moveIndex: moveSlotIndex(choice) + 1 };
+  if (choice.includes('terastallize')) action.terastallize = true;
+  return action;
 }
 
 function actionToChoice(action: Action): string {
@@ -102,6 +100,8 @@ export function specFromId(id: string): PolicySpec {
     case 'challenger-exact-1ply':
     case 'champion-exact-1ply':
       return { kind: 'exact', config: EXACT_1PLY };
+    case QUICK_WIN_POLICY_ID:
+      return { kind: 'exact', config: EXACT_1PLY_QW };
     case 'switch-depth2':
     case 'challenger-switch-depth2':
       return { kind: 'exact', config: SWITCH_DEPTH2 };

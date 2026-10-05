@@ -10,7 +10,7 @@ import {
 } from './battle-utils.js';
 import { maxDamageChoice } from './max-damage.js';
 import { damagingImmune, randbatsSpeciesCount, revealOnly } from './public.js';
-import { EXACT_1PLY, EXACT_1PLY_PREVIOUS, exactSearch } from './search.js';
+import { EXACT_1PLY, EXACT_1PLY_QW, exactSearch } from './search.js';
 
 /**
  * Positions are taken from seeded gen9randombattle games. The label is a
@@ -81,8 +81,8 @@ describe('ladder quick wins on generated positions', () => {
       }
       if (!teraChoice || bestTera < bestPlain + 1.5) continue;
       found++;
-      const previous = exactSearch(battle, 'p1', EXACT_1PLY_PREVIOUS);
-      const next = exactSearch(battle, 'p1', EXACT_1PLY);
+      const previous = exactSearch(battle, 'p1', EXACT_1PLY);
+      const next = exactSearch(battle, 'p1', EXACT_1PLY_QW);
       expect(previous.choice.includes('terastallize')).toBe(false);
       expect(next.choice.includes('terastallize')).toBe(true);
       expect(legalChoices(battle, 'p1', { tera: true })).toContain(next.choice);
@@ -112,8 +112,8 @@ describe('ladder quick wins on generated positions', () => {
       battle.makeRequest('move');
       const refreshed = legalChoices(battle, 'p1').filter(choice => choice.startsWith('move '));
       if (!refreshed.includes(immune) || !refreshed.includes(hits)) continue;
-      const previous = exactSearch(battle, 'p1', EXACT_1PLY_PREVIOUS);
-      const next = exactSearch(battle, 'p1', EXACT_1PLY);
+      const previous = exactSearch(battle, 'p1', EXACT_1PLY);
+      const next = exactSearch(battle, 'p1', EXACT_1PLY_QW);
       if (damagingImmune(moveId(battle, previous.choice), foe)) {
         found++;
         expect(damagingImmune(moveId(battle, next.choice), foe)).toBe(false);
@@ -150,8 +150,8 @@ describe('ladder quick wins on generated positions', () => {
       foe.boosts.spe = 6;
       battle.makeRequest('move');
       const hidden = revealOnly(battle, 'p1');
-      const previous = exactSearch(hidden, 'p1', { ...EXACT_1PLY_PREVIOUS, samples: 1 });
-      const next = exactSearch(hidden, 'p1', { ...EXACT_1PLY, samples: 1 });
+      const previous = exactSearch(hidden, 'p1', { ...EXACT_1PLY, samples: 1 });
+      const next = exactSearch(hidden, 'p1', { ...EXACT_1PLY_QW, samples: 1 });
       if (previous.choice !== setup) continue;
       found++;
       expect(next.choice).not.toBe(setup);

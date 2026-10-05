@@ -40,6 +40,10 @@ describe('choice validation', () => {
     const legal = strictLegalActions(request());
     expect(legal).toEqual([
       { type: 'move', moveIndex: 1 },
+      { type: 'switch', switchIndex: 2 },
+    ]);
+    expect(strictLegalActions(request(), { tera: true })).toEqual([
+      { type: 'move', moveIndex: 1 },
       { type: 'move', moveIndex: 1, terastallize: true },
       { type: 'switch', switchIndex: 2 },
     ]);

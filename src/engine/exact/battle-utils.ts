@@ -145,7 +145,7 @@ export function hpEval(battle: Battle, sideId: SideId): number {
 }
 
 export function safeChoose(battle: Battle, sideId: SideId, choice: string): boolean {
-  const legal = legalChoices(battle, sideId, { tera: true });
+  const legal = legalChoices(battle, sideId, { tera: choice.includes('terastallize') });
   if (legal.length === 0) return true;
   const pick = legal.includes(choice) ? choice : legal[0];
   try {

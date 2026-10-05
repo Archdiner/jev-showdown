@@ -1,9 +1,11 @@
 import { createHash } from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import { loadConfig, toSpec, type LoadedConfig } from '../config/load.js';
 import type { BotSpec } from '../config/interfaces.js';
 import type { GameResult } from '../bench/game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
-import type { ExactConfig } from '../engine/exact/search.js';
+import { EXACT_1PLY_QW, QUICK_WIN_SEARCH_ID, type ExactConfig } from '../engine/exact/search.js';
 import { playPaired } from '../exp/play.js';
 import { recordPromoted, recordRejected } from './cycle.js';
 import { openDb } from './db.js';
@@ -12,6 +14,7 @@ import { writeChampion, writeLiveApproved } from './labels.js';
 import type { OpsPaths } from './paths.js';
 import { listProposals, completeJob, type Proposal } from './queue.js';
 import { countableGameRows } from '../client/game-integrity.js';
+import { readLabels } from './labels-read.js';
 import { sprt, tallySide } from './sprt.js';
 
 export { sprt } from './sprt.js';
@@ -25,7 +28,7 @@ export function ladderGamesForGate<T extends object>(rows: readonly T[]): T[] {
   return countableGameRows(rows);
 }
 
-const EXACT_SEARCHES = new Set(['greedy-1ply', 'depth-n', 'expectimax', 'mcts-stub']);
+const EXACT_SEARCHES = new Set(['greedy-1ply', 'depth-n', 'expectimax', 'mcts-stub', QUICK_WIN_SEARCH_ID]);
 const DEFAULT_MAX_GAMES = 1200;
 const DEFAULT_BATCH = 50;
 
@@ -58,12 +61,14 @@ export interface Verdict {
 export function exactDiagnosticsConfig(loaded: LoadedConfig): ExactConfig | null {
   if (!EXACT_SEARCHES.has(loaded.config.search.id)) return null;
   const params = loaded.config.search.params;
+  const base = loaded.config.search.id === QUICK_WIN_SEARCH_ID ? EXACT_1PLY_QW : null;
   return {
     depth: params.depth,
     samples: params.samples,
-    opponentModel: params.opponentModel,
+    opponentModel: params.opponentModel === 'uniform' ? 'uniform' : 'max-damage',
     evalMode: params.evalMode,
     errorAsLoss: false,
+    ...(base ? { tera: base.tera, progress: base.progress, foePrior: base.foePrior } : {}),
   };
 }
 
@@ -236,17 +241,296 @@ export async function reviewProposals(paths: OpsPaths, opts: ReviewOptions = {})
   return verdicts;
 }
 
+/** Factory evidence the gatekeeper can label without replaying the games. */
+export interface RecordedScreen {
+  policyId: string;
+  searchId?: string;
+  configPath: string;
+  action: 'live-approved';
+  opponent: string;
+  information: string;
+  seed: number;
+  samples: number;
+  games: number;
+  wins: number;
+  losses: number;
+  ties: number;
+  invalid: number;
+  crashes: number;
+  viewMiss: number;
+  p99ms?: number;
+  maxMs?: number;
+  wilson95: [number, number];
+}
+
+export function recordedEvidenceDir(cwd = process.cwd()): string {
+  return path.join(cwd, 'state', 'ops', 'recorded');
+}
+
+/**
+ * Reads `state/ops/recorded/*.json` and writes a Result, a finished Experiment
+ * (proposal plus decisionId, so reviewProposals does not replay it), a Decision,
+ * and a live-approved label. SPRT is stored as computed. A recorded screen may
+ * be labeled for A/B while SPRT is still `continue`. It never writes champion.
+ * A decision that already exists is not diagnosed again.
+ */
+export function ingestRecordedEvidence(
+  paths: OpsPaths,
+  opts: { dir?: string; diagnostics?: (loaded: LoadedConfig) => DiagnosticReport } = {},
+): Verdict[] {
+  const dir = opts.dir ?? recordedEvidenceDir();
+  if (!fs.existsSync(dir)) return [];
+  const diagnostics = opts.diagnostics ?? diagnosticsForConfig;
+  const verdicts: Verdict[] = [];
+  for (const name of fs.readdirSync(dir).filter(file => file.endsWith('.json')).sort()) {
+    const screen = readRecordedScreen(path.join(dir, name));
+    if (!screen) continue;
+    verdicts.push(recordScreen(paths, screen, diagnostics));
+  }
+  return verdicts;
+}
+
+function recordScreen(
+  paths: OpsPaths,
+  screen: RecordedScreen,
+  diagnostics: (loaded: LoadedConfig) => DiagnosticReport,
+): Verdict {
+  const key = createHash('sha256').update(screen.configPath).digest('hex').slice(0, 12);
+  const decisionId = `decision-recorded-${key}`;
+  const db = openDb(paths);
+  try {
+    const existing = db.getNode(decisionId);
+    if (existing?.type === 'Decision') {
+      const labeled = existing.status === 'done' && existing.decision === 'live-approved';
+      if (labeled && !hasLiveApproval(db, screen.configPath)) writeLiveApproved(db, screen.configPath);
+      return {
+        labeled,
+        reason: existing.description || '',
+        decisionId,
+        sprt: storedSprt(existing.metadata),
+      };
+    }
+  } finally {
+    db.close();
+  }
+
+  const loaded = loadConfig(screen.configPath);
+  const report = diagnostics(loaded);
+  const sprtVerdict = sprt(screen.wins, screen.losses);
+  const diagnosticsPass = report.total > 0 && report.failed === 0;
+  const guardrailsPass = screen.invalid === 0 && screen.crashes === 0 && (screen.viewMiss ?? 0) === 0;
+  const counted = screen.wins + screen.losses + screen.ties === screen.games;
+  const searchOk = !screen.searchId || loaded.config.search.id === screen.searchId;
+  const labeled = diagnosticsPass && guardrailsPass && counted && searchOk && screen.games > 0;
+  const reason = labeled
+    ? `recorded screen ${screen.wins}-${screen.losses}-${screen.ties} accepted for live A/B; SPRT ${sprtVerdict}; diagnostics ${report.passed}/${report.total}`
+    : !searchOk
+      ? `search id ${loaded.config.search.id} does not match recorded ${screen.searchId}`
+      : !counted
+        ? `recorded games ${screen.games} do not equal ${screen.wins}-${screen.losses}-${screen.ties}`
+        : !diagnosticsPass
+          ? `diagnostics ${report.passed}/${report.total}, need 100%`
+          : `guardrails failed: invalid=${screen.invalid} crashes=${screen.crashes} viewMiss=${screen.viewMiss}`;
+
+  const now = Date.now();
+  const jobId = `ops-job-recorded-${key}`;
+  const resultId = `result-recorded-${key}`;
+  const hypothesisId = `hypothesis-recorded-${key}`;
+  const proposal: Proposal = {
+    action: 'live-approved',
+    configPath: screen.configPath,
+    configId: loaded.configId,
+    summary: `${screen.wins}-${screen.losses}-${screen.ties} / ${screen.games}, SPRT ${sprtVerdict}`,
+  };
+  const writer = openDb(paths);
+  try {
+    writer.addNode({
+      id: hypothesisId,
+      type: 'Hypothesis',
+      status: 'done',
+      title: `${screen.policyId} recorded screen`,
+      description: reason,
+      created_at: now,
+      updated_at: now,
+      rationale: 'Owner-accepted hidden-info screen of the quick-win 1-ply against the champion 1-ply.',
+      expected_effect: 'A live A/B share, not a champion promotion.',
+      test_plan: `${screen.games} ${screen.information} games, seed ${screen.seed}, ${screen.samples} samples, opponent ${screen.opponent}.`,
+    });
+    writer.addNode({
+      id: resultId,
+      type: 'Result',
+      status: 'done',
+      title: `factory challenger ${screen.policyId}`,
+      description: `${screen.wins}/${screen.games} wins, invalid ${screen.invalid}`,
+      created_at: now,
+      updated_at: now,
+      win_rate: screen.games > 0 ? screen.wins / screen.games : 0,
+      game_count: screen.games,
+      avg_latency_ms: screen.p99ms,
+      confidence_interval: screen.wilson95,
+      metrics: {
+        wins: screen.wins,
+        losses: screen.losses,
+        ties: screen.ties,
+        games: screen.games,
+        invalid: screen.invalid,
+        crashes: screen.crashes,
+        viewMiss: screen.viewMiss,
+        p99ms: screen.p99ms ?? null,
+        maxMs: screen.maxMs ?? null,
+        wilson95: screen.wilson95,
+        information: screen.information,
+        seed: screen.seed,
+        samples: screen.samples,
+        opponent: screen.opponent,
+        policyId: screen.policyId,
+      },
+      metadata: { idempotencyKey: key, kind: 'challenger', source: 'recorded-screen' },
+    });
+    writer.addNode({
+      id: jobId,
+      type: 'Experiment',
+      status: 'done',
+      title: `ops challenger ${screen.policyId}`,
+      description: screen.configPath,
+      created_at: now,
+      updated_at: now,
+      config_path: screen.configPath,
+      hypothesis_id: hypothesisId,
+      metadata: {
+        ops: {
+          spec: {
+            kind: 'challenger',
+            challenger: screen.configPath,
+            games: screen.games,
+            opponent: screen.opponent,
+          },
+          idempotencyKey: key,
+          resultId,
+          decisionId,
+          proposal,
+        },
+      },
+    });
+    writer.addEdge({
+      id: `${jobId}-produced-${resultId}`,
+      from_node: jobId,
+      to_node: resultId,
+      type: 'produced',
+      created_at: now,
+    });
+    writer.addNode({
+      id: decisionId,
+      type: 'Decision',
+      status: labeled ? 'done' : 'rejected',
+      title: labeled ? 'live-approved' : 'rejected',
+      description: reason,
+      created_at: now,
+      updated_at: now,
+      context: `live-approved ${screen.configPath}`,
+      decision: labeled ? 'live-approved' : 'rejected',
+      consequences: reason,
+      metadata: {
+        opsKind: 'gate',
+        source: 'recorded-screen',
+        sprt: sprtVerdict,
+        evidence: {
+          configPath: screen.configPath,
+          action: 'live-approved',
+          wins: screen.wins,
+          losses: screen.losses,
+          invalid: screen.invalid,
+          crashes: screen.crashes,
+          diagnostics: report,
+          recorded: true,
+          sprt: sprtVerdict,
+          wilson95: screen.wilson95,
+          p99ms: screen.p99ms ?? null,
+          maxMs: screen.maxMs ?? null,
+          games: screen.games,
+          ties: screen.ties,
+          viewMiss: screen.viewMiss,
+          policyId: screen.policyId,
+          opponent: screen.opponent,
+          information: screen.information,
+          seed: screen.seed,
+          samples: screen.samples,
+        },
+      },
+    });
+    if (labeled) writeLiveApproved(writer, screen.configPath);
+  } finally {
+    writer.close();
+  }
+  return { labeled, reason, decisionId, sprt: sprtVerdict };
+}
+
+function hasLiveApproval(db: ReturnType<typeof openDb>, configPath: string): boolean {
+  return readLabels(db).some(item => item.configPath === configPath && item.labels.includes('live-approved'));
+}
+
+function storedSprt(metadata: Record<string, unknown> | undefined): Verdict['sprt'] {
+  const value = metadata?.sprt;
+  return value === 'promote' || value === 'reject' || value === 'continue' ? value : 'continue';
+}
+
+function readRecordedScreen(file: string): RecordedScreen | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  if (row.action !== 'live-approved') return null;
+  if (typeof row.configPath !== 'string' || typeof row.policyId !== 'string') return null;
+  if (typeof row.wins !== 'number' || typeof row.losses !== 'number' || typeof row.games !== 'number') return null;
+  if (typeof row.invalid !== 'number' || typeof row.crashes !== 'number') return null;
+  if (!Array.isArray(row.wilson95) || row.wilson95.length !== 2) return null;
+  const low = Number(row.wilson95[0]);
+  const high = Number(row.wilson95[1]);
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
+  return {
+    policyId: row.policyId,
+    searchId: typeof row.searchId === 'string' ? row.searchId : undefined,
+    configPath: row.configPath,
+    action: 'live-approved',
+    opponent: typeof row.opponent === 'string' ? row.opponent : 'EXACT_1PLY',
+    information: typeof row.information === 'string' ? row.information : 'hidden',
+    seed: typeof row.seed === 'number' ? row.seed : 1,
+    samples: typeof row.samples === 'number' ? row.samples : 8,
+    games: row.games,
+    wins: row.wins,
+    losses: row.losses,
+    ties: typeof row.ties === 'number' ? row.ties : 0,
+    invalid: row.invalid,
+    crashes: row.crashes,
+    viewMiss: typeof row.viewMiss === 'number' ? row.viewMiss : 0,
+    p99ms: typeof row.p99ms === 'number' ? row.p99ms : undefined,
+    maxMs: typeof row.maxMs === 'number' ? row.maxMs : undefined,
+    wilson95: [low, high],
+  };
+}
+
 export async function runGatekeeper(
   paths: OpsPaths,
   opts: { once?: boolean; pairs?: number; bootstrap?: boolean; diagnostics?: () => DiagnosticReport } = {}
 ): Promise<void> {
   beat(paths, 'gatekeeper', 'ok', 'up');
+  const recordedDiagnostics = opts.diagnostics
+    ? () => opts.diagnostics!()
+    : undefined;
   do {
     if (opts.bootstrap) {
       const verdict = bootstrapChampion(paths, 'configs/champion.yaml', opts.diagnostics);
       beat(paths, 'gatekeeper', 'ok', verdict.reason);
     }
-    const verdicts = await reviewProposals(paths, { pairs: opts.pairs, diagnostics: opts.diagnostics });
+    const recorded = ingestRecordedEvidence(paths, recordedDiagnostics ? { diagnostics: recordedDiagnostics } : {});
+    const verdicts = [
+      ...recorded,
+      ...await reviewProposals(paths, { pairs: opts.pairs, diagnostics: opts.diagnostics }),
+    ];
     beat(paths, 'gatekeeper', 'ok', verdicts.length ? verdicts.map(item => item.reason).join('; ') : 'idle');
     if (opts.once) break;
     await new Promise(resolve => setTimeout(resolve, 2000));

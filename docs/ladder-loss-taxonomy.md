@@ -46,19 +46,19 @@ The three that a 1-ply search can change without a species rule, a deeper tree, 
 
 Switch prediction (26 turns) needs the existing switch model and another ply. That is a different experiment (`SWITCH_DEPTH2`), not a leaf penalty. Inactivity losses are real and are not fixed by scoring more lines.
 
-## What the 1-ply engine does now
+## What the quick-win challenger does
 
-`EXACT_1PLY` still searches one ply, eight samples, max-damage foe, HP eval. Three flags are on:
+`EXACT_1PLY` is the live champion and is unchanged: one ply, eight samples, max-damage foe, HP eval, no tera line, no progress penalty, no foe prior. The same three fixes are a separate policy, `EXACT_1PLY_QW`, loaded from `configs/exact-1ply-qw.yaml` (search id `exact-1ply-qw`, config id `84dc826f07afa6c2`). Live A/B: `npm run ladder -- --ab configs/exact-1ply-qw.yaml:0.5`.
 
-- `tera`: root choices include `move N terastallize` when the request still allows it. The ladder action list and `buildDecisionBattle` carry the same type.
+- `tera`: root choices include `move N terastallize` when the request still allows it. The ladder action list and `buildDecisionBattle` carry the same type only for this search id.
 - `progress`: an immune damaging move loses 1.1, a status move loses 0.9 when the foe's current moves KO us before we move, and a Choice item loses 0.5 when a benched foe walls the lock and another move hits the active. A faint is 2, so a line that actually survives still outranks a penalty.
 - `foePrior`: a foe with fewer than four moves, or fewer than two real damaging moves, is given one randbats set that contains every move already on the board. A complete set is left alone, so a full-info battle does not grow extra coverage. The pool has 508 species.
 
-`EXACT_1PLY_PREVIOUS` is the old object (no tera, no penalty, no prior) and is what the screen calls `previous`.
+Shared helpers (`legalChoices`, the live request list, the decision battle) stay on the champion path unless the caller is this id.
 
 ## Info-honest screen
 
-Both players decide from `ladderDecisionBattle`: the same hidden view the live ladder searches (revealed moves only; an empty list is Tackle). The real battle still resolves the turn. That is the bench default (`information=hidden`). The new policy is `EXACT_1PLY`. The opponent is `EXACT_1PLY_PREVIOUS` (the same 1-ply with tera, the progress penalty, and the foe prior off). 100 seeds, sides swapped, **200 games**, seed 1, eight samples each. Win rate is wins/games. Ties stay in the denominator. The interval is a 95% Wilson score.
+Both players decide from `ladderDecisionBattle`: the same hidden view the live ladder searches (revealed moves only; an empty list is Tackle). The real battle still resolves the turn. That is the bench default (`information=hidden`). The challenger is `EXACT_1PLY_QW`. The opponent is `EXACT_1PLY`. 100 seeds, sides swapped, **200 games**, seed 1, eight samples each. Win rate is wins/games. Ties stay in the denominator. The interval is a 95% Wilson score.
 
 | | |
 | --- | --- |

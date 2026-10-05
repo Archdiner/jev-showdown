@@ -77,7 +77,7 @@ describe('ladder hidden information', () => {
     expect(viewed.p1.active[0]?.moveSlots.map(slot => slot.id)).toEqual(
       battle.p1.active[0]?.moveSlots.map(slot => slot.id),
     );
-    expect(legalChoices(viewed, 'p1', { tera: true })).toEqual(legalChoices(battle, 'p1', { tera: true }));
+    expect(legalChoices(viewed, 'p1')).toEqual(legalChoices(battle, 'p1'));
   });
 
   it('keeps request indexes legal as reveals arrive', () => {
@@ -92,7 +92,7 @@ describe('ladder hidden information', () => {
         const viewed = ladderDecisionBattle(battle, side);
         expect(viewed).not.toBeNull();
         if (!viewed) continue;
-        expect(legalChoices(viewed, 'p1', { tera: true })).toEqual(legalChoices(battle, side, { tera: true }));
+        expect(legalChoices(viewed, 'p1')).toEqual(legal);
 
         const foeId: SideId = side === 'p1' ? 'p2' : 'p1';
         const seen = speciesIn(battle.log, foeId);
@@ -163,7 +163,7 @@ describe('ladder hidden information', () => {
           const legal = legalChoices(battle, side, { tera: true });
           if (!legal.some(choice => choice.startsWith('move'))) continue;
           if (legal.some(choice => choice.includes('terastallize'))) continue;
-          const viewed = ladderDecisionBattle(battle, side);
+          const viewed = ladderDecisionBattle(battle, side, { quickWins: true });
           expect(viewed).not.toBeNull();
           if (!viewed) continue;
           const viewedLegal = legalChoices(viewed, 'p1', { tera: true });

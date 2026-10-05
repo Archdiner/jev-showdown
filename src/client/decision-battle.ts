@@ -57,11 +57,9 @@ const STATS = ['atk', 'def', 'spa', 'spd', 'spe'] as const;
 export function actionFromChoice(choice: string): Action | null {
   const move = /^move (\d+)/.exec(choice);
   if (move) {
-    return {
-      type: 'move',
-      moveIndex: Number(move[1]),
-      terastallize: choice.includes('terastallize'),
-    };
+    const action: Action = { type: 'move', moveIndex: Number(move[1]) };
+    if (choice.includes('terastallize')) action.terastallize = true;
+    return action;
   }
   const swapped = /^switch (\d+)/.exec(choice);
   if (swapped) return { type: 'switch', switchIndex: Number(swapped[1]) };
@@ -146,7 +144,7 @@ function applyBoosts(mon: any, boosts: StatBoosts | undefined): void {
   }
 }
 
-function ourSets(request: any): PokemonSet[] | null {
+function ourSets(request: any, quickWins: boolean): PokemonSet[] | null {
   const slots: any[] = request?.side?.pokemon || [];
   if (slots.length === 0) return null;
   const activeMoves: any[] = request?.active?.[0]?.moves || [];
@@ -157,14 +155,16 @@ function ourSets(request: any): PokemonSet[] | null {
       ? activeMoves.map((move: any) => move.id || move.move)
       : [];
     const moves = fromActive.length ? fromActive : (slot.moves || []);
-    const teraType = slot.teraType || (i === 0 ? request?.active?.[0]?.canTerastallize : undefined);
+    const rawTera = quickWins
+      ? slot.teraType || (i === 0 ? request?.active?.[0]?.canTerastallize : undefined)
+      : undefined;
     const set = toSet(
       speciesOf(slot.details, slot.ident),
       moves,
       levelOf(slot.details, slot.level || 80),
       slot.ability || slot.baseAbility,
       slot.item,
-      typeof teraType === 'string' ? teraType : undefined,
+      typeof rawTera === 'string' ? rawTera : undefined,
     );
     // Dropping a slot would renumber `switch N`. Fail the build instead.
     if (!set) return null;
@@ -201,10 +201,11 @@ function foeSets(foes: FoeMon[]): { sets: PokemonSet[]; kept: FoeMon[] } {
  * A @pkmn/sim battle whose `move N` / `switch N` indexes match the live request.
  * Slot 0 is the active pokemon. That is the same indexing the server uses.
  */
-export function buildDecisionBattle(position: LivePosition): Battle | null {
+export function buildDecisionBattle(position: LivePosition, options?: { quickWins?: boolean }): Battle | null {
   const request = position.request;
   if (!request || request.wait || request.teamPreview) return null;
-  const ours = ourSets(request);
+  const quickWins = options?.quickWins === true;
+  const ours = ourSets(request, quickWins);
   const foe = foeSets(knownFoes(position));
   if (!ours || foe.sets.length === 0) return null;
 
@@ -228,10 +229,12 @@ export function buildDecisionBattle(position: LivePosition): Battle | null {
       if (hp) applyFraction(mon, Number(hp[1]), Number(hp[2]), fainted);
       else if (fainted) applyFraction(mon, 0, 1, true);
       applyStatus(mon, condition, undefined);
-      const already = slots[i]?.terastallized;
-      if (typeof already === 'string' && already) mon.terastallized = already;
+      if (quickWins) {
+        const already = slots[i]?.terastallized;
+        if (typeof already === 'string' && already) mon.terastallized = already;
+      }
     });
-    if (slots.some(slot => typeof slot?.terastallized === 'string' && slot.terastallized)) {
+    if (quickWins && slots.some(slot => typeof slot?.terastallized === 'string' && slot.terastallized)) {
       for (const mon of battle.p1.pokemon) mon.canTerastallize = null;
     }
 
@@ -267,13 +270,15 @@ export function buildDecisionBattle(position: LivePosition): Battle | null {
       }
     }
 
-    // The fresh sim offers Tera whenever the set has a type. The live request
-    // is the rule: once this side has terastallized, canTerastallize is gone.
-    const liveCanTera = request.active?.[0]?.canTerastallize;
-    if (typeof liveCanTera === 'string' && liveCanTera) {
-      if (!active.terastallized) active.canTerastallize = liveCanTera;
-    } else {
-      for (const mon of battle.p1.pokemon) mon.canTerastallize = null;
+    if (quickWins) {
+      // The fresh sim offers Tera whenever the set has a type. The live request
+      // is the rule: once this side has terastallized, canTerastallize is gone.
+      const liveCanTera = request.active?.[0]?.canTerastallize;
+      if (typeof liveCanTera === 'string' && liveCanTera) {
+        if (!active.terastallized) active.canTerastallize = liveCanTera;
+      } else {
+        for (const mon of battle.p1.pokemon) mon.canTerastallize = null;
+      }
     }
 
     const force = isForceSwitch(request) || !!active.fainted;
@@ -297,6 +302,8 @@ export interface LiveConfigPlayer {
     battle: Battle;
     side: 'p1';
   }): Promise<{ choice: string; scores?: Array<{ choice: string; score: number }> }>;
+  /** Exact 1-ply quick wins. The champion player leaves this unset. */
+  quickWins?: boolean;
 }
 
 /**
@@ -311,7 +318,7 @@ export async function chooseLive(
   player?: LiveConfigPlayer | null,
 ): Promise<{ action: Action; score: number | null }> {
   if (!position) throw new Error('missing live position');
-  const battle = buildDecisionBattle(position);
+  const battle = buildDecisionBattle(position, { quickWins: player?.quickWins === true });
   if (!battle) throw new Error('could not build a sim battle');
   const decision = player
     ? await player.decide({ battle, side: 'p1' })

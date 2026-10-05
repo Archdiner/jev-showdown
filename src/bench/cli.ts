@@ -2,7 +2,7 @@ import { informationMode, type InformationMode } from '../client/hidden-info.js'
 import { specForAlias } from '../config/aliases.js';
 import { BenchPlayer, GameJob, GameResult, playerId } from './game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
-import { EXACT_1PLY, EXACT_1PLY_PREVIOUS, ExactConfig, FITTED_1PLY, FITTED_DEPTH2, SWITCH_DEPTH2 } from '../engine/exact/search.js';
+import { EXACT_1PLY, EXACT_1PLY_QW, ExactConfig, FITTED_1PLY, FITTED_DEPTH2, SWITCH_DEPTH2 } from '../engine/exact/search.js';
 import { assertRandbatsSpecies, randbatsSpeciesCount, statsFileSpeciesCount } from '../engine/exact/team-features.js';
 import { wilson } from '../dashboard/stats.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
@@ -21,7 +21,7 @@ function policy(name: string): BenchPlayer {
   if (name === 'exact') return { kind: 'exact', config: EXACT_1PLY };
   if (name === 'fitted' || name === 'fitted-1ply') return { kind: 'exact', config: FITTED_1PLY };
   if (name === 'fitted-depth2' || name === 'fitted-d2') return { kind: 'exact', config: FITTED_DEPTH2 };
-  if (name === 'previous' || name === 'exact-previous') return { kind: 'exact', config: EXACT_1PLY_PREVIOUS };
+  if (name === 'qw' || name === 'exact-qw') return { kind: 'exact', config: EXACT_1PLY_QW };
   if (name === 'switch') return { kind: 'exact', config: SWITCH_DEPTH2 };
   if (name.startsWith('exact')) {
     const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',');

@@ -35,7 +35,7 @@ A ladder loss used to write a hypothesis and then stop. Per-battle logs have no 
 
 ## Exact 1-ply uses Tera, skips immune locks, and fills a hidden foe
 
-Archinder's public gen9randombattle replays (62 games on 2026-10-05) were 21-41. The account never Terastallized. It also clicked immunities, including a Choice lock, and set up into KOs the revealed board did not show. `EXACT_1PLY` now searches `move N terastallize`, demotes an immune or Choice-locked attack and a status move that dies before it acts, and gives an incomplete foe one randbats set. The decision battle copies Tera only while the live request still allows it. The previous policy is `EXACT_1PLY_PREVIOUS`. An info-honest 200-game screen (hidden ladder view, seed 1, sides swapped) was 115-85, Wilson 95% CI [50.6%, 64.1%], with 0 invalid moves. The taxonomy is in `docs/ladder-loss-taxonomy.md`.
+Archinder's public gen9randombattle replays (62 games on 2026-10-05) were 21-41. The account never Terastallized. It also clicked immunities, including a Choice lock, and set up into KOs the revealed board did not show. The champion constant `EXACT_1PLY` is unchanged. Those three fixes live on `EXACT_1PLY_QW` (`configs/exact-1ply-qw.yaml`, search id `exact-1ply-qw`): search `move N terastallize`, demote an immune or Choice-locked attack and a status move that dies before it acts, and give an incomplete foe one randbats set. Shared helpers take that path only when the caller asks for it. An info-honest 200-game screen against `EXACT_1PLY` (hidden ladder view, seed 1, sides swapped) was 115-85, Wilson 95% CI [50.6%, 64.1%], with 0 invalid moves. The taxonomy is in `docs/ladder-loss-taxonomy.md`.
 
 ## Live opponent beliefs
 

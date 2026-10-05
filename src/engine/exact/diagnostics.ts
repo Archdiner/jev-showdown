@@ -8,6 +8,8 @@ interface Position {
   reason: string;
   battle: Battle;
   expected: string;
+  /** Choice when the search is the quick-win policy (`config.tera`). */
+  qwExpected?: string;
   /** When set, the @smogon/calc max-damage line must make this choice too. */
   calcExpected?: string;
 }
@@ -766,7 +768,8 @@ export function buildPositions(): Position[] {
       name: '22-dragon-claw-not-stone-edge',
       reason: 'Dragon Claw is STAB and always hits for 101-121. Stone Edge is 84-100 at 80% and has no STAB. Earthquake is immune on Levitate. Terastallizing raises that same STAB from 1.5x to 2x.',
       battle,
-      expected: canTera ? tera : claw,
+      expected: claw,
+      qwExpected: canTera ? tera : claw,
       calcExpected: claw,
     });
   }
@@ -779,9 +782,10 @@ export function runDiagnosticSuite(config: ExactConfig = EXACT_1PLY): { passed: 
   let passed = 0;
   let failed = 0;
   for (const position of positions) {
-    const legal = legalChoices(position.battle, 'p1', { tera: true });
-    if (!legal.includes(position.expected)) {
-      console.log(`✗ ${position.name} FIXTURE: expected ${position.expected} is not legal (${legal.join(', ')})`);
+    const expected = config.tera && position.qwExpected ? position.qwExpected : position.expected;
+    const legal = legalChoices(position.battle, 'p1', { tera: config.tera === true });
+    if (!legal.includes(expected)) {
+      console.log(`✗ ${position.name} FIXTURE: expected ${expected} is not legal (${legal.join(', ')})`);
       failed++;
       continue;
     }
@@ -790,13 +794,13 @@ export function runDiagnosticSuite(config: ExactConfig = EXACT_1PLY): { passed: 
       ? maxDamageChoice(position.battle, 'p1', legal.filter(choice => !choice.includes('terastallize')))
       : undefined;
     const calcOk = !position.calcExpected || calcChoice === position.calcExpected;
-    if (trace.choice === position.expected && calcOk) {
+    if (trace.choice === expected && calcOk) {
       console.log(`✓ ${position.name}`);
       passed++;
     } else {
       console.log(`✗ ${position.name}`);
       console.log(`  reason: ${position.reason}`);
-      console.log(`  expected ${position.expected}`);
+      console.log(`  expected ${expected}`);
       console.log(`  got      ${trace.choice}`);
       if (!calcOk) console.log(`  calc got ${calcChoice}, expected ${position.calcExpected}`);
       const ranked = [...trace.scores].sort((a, b) => b.score - a.score).slice(0, 6);

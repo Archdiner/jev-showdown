@@ -12,6 +12,7 @@ import {
 } from '../engine/exact/battle-utils.js';
 import { informationMode, ladderDecisionBattle, type InformationMode } from '../client/hidden-info.js';
 import { decide, type PolicySpec } from '../engine/exact/policies.js';
+import { QUICK_WIN_SEARCH_ID } from '../engine/exact/search.js';
 
 /** A config bot (buildBot) or an engine policy (exact / switch / random). */
 export type BenchPlayer = BotSpec | PolicySpec;
@@ -168,8 +169,8 @@ export async function runGame(job: GameJob): Promise<GameResult> {
       loops++;
       observe(battle, result, teraFirst);
       teraFirst = noteTera(battle, teraFirst, result);
-      const p1Legal = legalChoices(battle, 'p1', { tera: true });
-      const p2Legal = legalChoices(battle, 'p2', { tera: true });
+      const p1Legal = legalChoices(battle, 'p1', { tera: allowsTera(job.p1) });
+      const p2Legal = legalChoices(battle, 'p2', { tera: allowsTera(job.p2) });
       if (p1Legal.length === 0 && p2Legal.length === 0) {
         result.crashed = true;
         result.error = `stuck at turn ${battle.turn} request=${battle.requestState}`;
@@ -272,6 +273,11 @@ async function choose(
   }
   const decision = await player.bot!.decide({ battle, side, rng, gameId, seed });
   return decision;
+}
+
+function allowsTera(player: BenchPlayer): boolean {
+  if (isBotSpec(player)) return player.config.search.id === QUICK_WIN_SEARCH_ID;
+  return player.kind === 'exact' && player.config.tera === true;
 }
 
 function emptySituations(): SideSituations {

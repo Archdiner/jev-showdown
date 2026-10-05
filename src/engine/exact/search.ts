@@ -94,7 +94,20 @@ export function searchBudgetExpired(deadlineMs: number | undefined, scored: numb
   return deadlineMs != null && scored > 0 && Date.now() >= deadlineMs;
 }
 
+/** Live champion. Same fields as main. Quick wins are `EXACT_1PLY_QW`. */
 export const EXACT_1PLY: ExactConfig = {
+  depth: 1,
+  opponentModel: 'max-damage',
+  evalMode: 'hp',
+  errorAsLoss: false,
+  samples: 8,
+};
+
+/**
+ * Ladder-loss quick wins: terastallize, skip immune and Choice locks, fill a
+ * hidden foe. Not the champion. Policy id `EXACT_1PLY_QW`.
+ */
+export const EXACT_1PLY_QW: ExactConfig = {
   depth: 1,
   opponentModel: 'max-damage',
   evalMode: 'hp',
@@ -105,14 +118,10 @@ export const EXACT_1PLY: ExactConfig = {
   foePrior: true,
 };
 
-/** Frozen copy of the previous live 1-ply policy, for screens. */
-export const EXACT_1PLY_PREVIOUS: ExactConfig = {
-  depth: 1,
-  opponentModel: 'max-damage',
-  evalMode: 'hp',
-  errorAsLoss: false,
-  samples: 8,
-};
+/** specFromId / factory evidence name for the quick-win policy. */
+export const QUICK_WIN_POLICY_ID = 'EXACT_1PLY_QW';
+/** Config-layer search id used by configs/exact-1ply-qw.yaml. */
+export const QUICK_WIN_SEARCH_ID = 'exact-1ply-qw';
 
 /** Exact 1-ply with the fitted team eval. Same samples and opponent model as EXACT_1PLY. */
 export const FITTED_1PLY: ExactConfig = {
