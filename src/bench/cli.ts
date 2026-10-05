@@ -2,7 +2,7 @@ import { informationMode, type InformationMode } from '../client/hidden-info.js'
 import { specForAlias } from '../config/aliases.js';
 import { BenchPlayer, GameJob, GameResult, playerId } from './game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
-import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2 } from '../engine/exact/search.js';
+import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2, EXACT_DET_1PLY, DetConfig } from '../engine/exact/search.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
 import { p99, runGamesParallel } from './pool.js';
 
@@ -18,6 +18,20 @@ function policy(name: string): BenchPlayer {
   if (name === 'legacy') return { kind: 'legacy' };
   if (name === 'exact') return { kind: 'exact', config: EXACT_1PLY };
   if (name === 'switch') return { kind: 'exact', config: SWITCH_DEPTH2 };
+  if (name === 'exact-det') return { kind: 'exact-det', config: EXACT_DET_1PLY };
+  if (name.startsWith('exact-det:')) {
+    // exact-det:K=16,agg=robust
+    const params = name.slice('exact-det:'.length);
+    const config: DetConfig = { ...EXACT_DET_1PLY };
+    for (const pair of params.split(',')) {
+      const [key, val] = pair.split('=');
+      if (key === 'K') config.worlds = Number(val) || 8;
+      else if (key === 'agg' && (val === 'mean' || val === 'robust' || val === 'band75')) {
+        config.aggregate = val;
+      }
+    }
+    return { kind: 'exact-det', config };
+  }
   if (name.startsWith('exact')) {
     const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',');
     const config: ExactConfig = {
