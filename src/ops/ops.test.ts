@@ -9,7 +9,7 @@ import { runFactory } from './factory.js';
 import { bootstrapChampion, judge, sprt } from './gatekeeper.js';
 import { readLabels } from './labels-read.js';
 import { startLocalServer } from './local-server.js';
-import { runLive } from './live.js';
+import { liveSlotLimit, runLive } from './live.js';
 import { appendJsonl, opsPaths, readJsonl } from './paths.js';
 import { observeLog, emptyCounts, countsToPriors } from './priors.js';
 import { claimNext, completeJob, enqueue, listJobs } from './queue.js';
@@ -259,6 +259,15 @@ describe('local ladder dry run', () => {
       await server.close();
     }
   }, 120_000);
+});
+
+describe('live slots', () => {
+  test('concurrency and runners use the shared limit', () => {
+    expect(liveSlotLimit({})).toBe(1);
+    expect(liveSlotLimit({ concurrency: 3, runners: 2 })).toBe(6);
+    expect(liveSlotLimit({ concurrency: 99 })).toBe(16);
+    expect(liveSlotLimit({ runners: 4 })).toBe(4);
+  });
 });
 
 describe('factory', () => {

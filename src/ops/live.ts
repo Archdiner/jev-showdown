@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import { LadderSession } from '../config/adapters.js';
 import { buildBot } from '../config/bot.js';
+import { resolveConcurrencyLimit } from '../client/concurrency-config.js';
 import { ShowdownClient } from '../client/showdown-client.js';
 import { allocate, nextCircuit, type Allocatable, type CircuitState, clampExplore } from './allocate.js';
 import { openDb } from './db.js';
@@ -74,7 +75,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   }
 
   const target = opts.games ?? (opts.once ? 1 : Number.POSITIVE_INFINITY);
-  const slots = Math.max(1, (opts.runners ?? 1) * (opts.concurrency ?? 1));
+  const slots = liveSlotLimit(opts);
   const exploreRate = clampExplore(opts.exploreRate ?? 0.15);
   const limits = { maxLosses: opts.maxLosses ?? 5, maxDrop: opts.maxDrop ?? 40, window: opts.window ?? 10 };
   const circuits = readCircuits(paths);
@@ -225,6 +226,20 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   client.disconnect();
   beat(paths, 'live', 'stopped', `games ${summary.games}`);
   return summary;
+}
+
+/**
+ * One login, many approved configs, so this is not an engine profile.
+ * `--concurrency` replaces the default of 1, `--runners` multiplies it, and the
+ * result is clamped to the absolute max.
+ */
+export function liveSlotLimit(opts: { concurrency?: number; runners?: number }): number {
+  return resolveConcurrencyLimit({
+    engine: 'ops',
+    useEngineProfile: false,
+    concurrency: opts.concurrency ?? null,
+    runners: opts.runners ?? null,
+  }).limit;
 }
 
 function approvedConfigs(paths: OpsPaths): Allocatable[] {
