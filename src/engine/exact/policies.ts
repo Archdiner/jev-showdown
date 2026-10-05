@@ -1,5 +1,6 @@
 import { Battle, PRNG } from '@pkmn/sim';
 import { jevDecide } from '../../llm/jev-turn.js';
+import { simVeto } from '../../llm/sim-veto.js';
 import { strategistDecide } from '../../llm/strategist.js';
 import { Action } from '../../types/index.js';
 import { SideId, legalChoices } from './battle-utils.js';
@@ -12,7 +13,8 @@ export type PolicySpec =
   | { kind: 'exact'; config: ExactConfig }
   | { kind: 'legacy' }
   | { kind: 'strategist'; timeoutMs?: number }
-  | { kind: 'jev'; timeoutMs?: number };
+  | { kind: 'jev'; timeoutMs?: number }
+  | { kind: 'sim'; margin?: number };
 
 export interface Decision {
   choice: string;
@@ -21,7 +23,7 @@ export interface Decision {
   predictedSwitch?: boolean;
   answersPredictedSwitch?: boolean;
   /** Who produced the choice when a model was asked. Search is the fallback. */
-  source?: 'grok' | 'jev' | 'search';
+  source?: 'grok' | 'jev' | 'search' | 'sim' | 'veto';
 }
 
 export async function decide(spec: PolicySpec, battle: Battle, side: SideId, rng: PRNG): Promise<Decision> {
@@ -53,6 +55,16 @@ export async function decide(spec: PolicySpec, battle: Battle, side: SideId, rng
   if (spec.kind === 'jev') {
     const result = await jevDecide({ battle, side, timeoutMs: spec.timeoutMs });
     return { choice: result.choice ?? legal[0], ms: Date.now() - started, source: result.source };
+  }
+
+  if (spec.kind === 'sim') {
+    const result = simVeto(battle, side, spec.margin ?? 1);
+    return {
+      choice: result.choice,
+      ms: Date.now() - started,
+      scores: result.scores,
+      source: result.veto ? 'veto' : 'sim',
+    };
   }
 
   const trace = exactSearch(battle, side, spec.config);
@@ -120,6 +132,8 @@ export function specFromId(id: string): PolicySpec {
       return { kind: 'strategist' };
     case 'jev':
       return { kind: 'jev' };
+    case 'sim':
+      return { kind: 'sim' };
     default:
       if (id.startsWith('exact:')) {
         const [, depth, model, evalMode] = id.split(':');

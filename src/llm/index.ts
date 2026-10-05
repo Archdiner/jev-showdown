@@ -17,6 +17,8 @@ export { strategistDecide, strategistChoices, parseStrategist, STRATEGIST_TIMEOU
 export type { GamePlan, StrategistDecision } from './strategist.js';
 export { scoreWithJev, jevDecide, jevChoices, JEV_TIMEOUT_MS } from './jev-turn.js';
 export type { JevTurnScore } from './jev-turn.js';
+export { simVeto, verifyChoices, vetoChoice, simValue } from './sim-veto.js';
+export type { SimScore, Veto } from './sim-veto.js';
 export type { ContextBrief, BriefSection } from './context-brief.js';
 export { DEFAULT_BLEND_CONFIG } from './types.js';
 export type { BlendConfig, BlendMode, BlendOutcome, CandidateSearch, ScoredAction } from './types.js';

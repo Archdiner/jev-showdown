@@ -32,6 +32,12 @@ Jev scores the situation brief for each legal action, including switches and Ter
 
 Screen on a machine with `VERCEL_AI_GATEWAY_KEY`: `npx tsx src/llm/jev-turn-screen.ts 20`
 
+## Simulator veto
+
+A max-damage proposal is checked by stepping the live `@pkmn/sim` battle. Switches are scored by the position after the switch-in is hit. Status, setup, and Protect get one more ply, so a move that deals no damage is not scored as nothing. The proposal is replaced only when the best sim line leads by more than 1 point of the HP-and-faint score. This does not call a model.
+
+Screen: `npx tsx src/llm/sim-veto-screen.ts 20`
+
 ## Operations layer
 
 Four long-running commands share the graph and the logs: `npm run ops -- factory`, `gatekeeper`, `live`, and `analyst`. The factory runs queued simulations and may propose a config. The gatekeeper is the only command that writes `champion` or `live-approved`, and only after SPRT and a 100% diagnostic pass. Live plays those configs on one Showdown login, gives the champion most of the games, and pulls a config after a loss streak or a rating drop. The analyst turns a live loss into a general hypothesis and a factory job. `status`, `report --daily`, and `supervise` read the same store. `deploy/jev-ops.service` is the systemd unit.
