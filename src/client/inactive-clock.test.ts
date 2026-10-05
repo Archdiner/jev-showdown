@@ -109,16 +109,17 @@ describe('ladder timer request', () => {
       timeMs: 1,
       fallback: false,
     });
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-inactive-clock-'));
     const driver = new BattleDriver({
       client,
       username: 'BotAlpha',
       format: gen9RandomBattle,
       engineName: 'search',
       decisions,
-      logDir: path.join(os.tmpdir(), 'jev-inactive-clock'),
+      logDir,
       decisionTimeoutMs: 500,
     });
-    return { sent, client, driver };
+    return { sent, client, driver, logDir };
   }
 
   const request = {
@@ -138,7 +139,7 @@ describe('ladder timer request', () => {
   };
 
   it('turns the timer on at battle start and records the clock on the decision', async () => {
-    const { sent, client, driver } = harness();
+    const { sent, client, driver, logDir } = harness();
     const decisions: Array<{ secondsLeft: number | null }> = [];
     driver.on('decision', (sample: { secondsLeft: number | null }) => {
       decisions.push(sample);
@@ -157,5 +158,11 @@ describe('ladder timer request', () => {
     client.emit('line', room, '|win|BotAlpha');
     await new Promise(resolve => setTimeout(resolve, 2100));
     await driver.stop();
+
+    const battleLog = fs.readFileSync(path.join(logDir, 'botalpha-battle-gen9randombattle-1.jsonl'), 'utf8');
+    const turns = battleLog.trim().split('\n').map(line => JSON.parse(line) as { type?: string; secondsLeft?: number | null });
+    expect(turns.find(row => row.type === 'turn')?.secondsLeft).toBe(42);
+    const stored = JSON.parse(fs.readFileSync(path.join(logDir, 'games.jsonl'), 'utf8')) as { minTimerMarginSec: number | null };
+    expect(stored.minTimerMarginSec).toBe(42);
   }, 10_000);
 });
