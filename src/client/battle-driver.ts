@@ -7,7 +7,7 @@ import { Dex } from '@pkmn/dex';
 import { Format } from '../types/format.js';
 import { Action, GameState } from '../types/index.js';
 import { StateMismatch } from '../types/format.js';
-import { ShowdownClient, ReplayNotice, parseRatingLine, parseReplayUrl } from './showdown-client.js';
+import { ShowdownClient, ReplayNotice, parseRatingLine, parseReplayUrl, replayMatchesRoom } from './showdown-client.js';
 import { DecisionClient } from './decision-client.js';
 import { OpponentTracker } from './opponent-tracker.js';
 import { GameLog, openGameLog } from './game-log.js';
@@ -66,6 +66,8 @@ interface RoomState {
   lastLegal: Action[];
   lastChoice: Action | null;
   lastChoiceText: string | null;
+  /** Choice the server has not confirmed with a new turn or request. */
+  unconfirmed: { choice: string; rqid: number | null; turn: number; resends: number } | null;
   pendingDelivery: number | null;
   choiceDeliveryFailures: number;
   noLegalRetries: number;
@@ -98,6 +100,8 @@ export interface BattleDriverOptions {
 }
 
 const DELIVERY_ATTEMPTS = 3;
+/** Resends of one choice while the turn clock ticks and the turn does not advance. */
+const WATCHDOG_RESENDS = 8;
 
 /**
  * One user's battle loop: protocol state, request reconciliation,
@@ -105,6 +109,8 @@ const DELIVERY_ATTEMPTS = 3;
  */
 export class BattleDriver extends EventEmitter {
   private readonly rooms = new Map<string, RoomState>();
+  /** Room ids that already wrote a result. Later lines must not open them again. */
+  private readonly closedRooms = new Set<string>();
   private readonly gens = new Generations(Dex);
   private stopped = false;
 
@@ -148,6 +154,7 @@ export class BattleDriver extends EventEmitter {
 
   private onLine(roomId: string, line: string): void {
     if (this.stopped || !roomId.startsWith('battle-')) return;
+    if (this.closedRooms.has(roomId)) return;
     let room = this.rooms.get(roomId);
     if (!room) room = this.openRoom(roomId);
     if (room.finalized) return;
@@ -172,6 +179,7 @@ export class BattleDriver extends EventEmitter {
 
     if (line.startsWith('|turn|')) {
       room.turns = Number(line.slice('|turn|'.length)) || room.turns;
+      if (room.unconfirmed && room.turns !== room.unconfirmed.turn) room.unconfirmed = null;
     }
 
     if (line.startsWith('|inactive|') || line.startsWith('|inactiveoff|')) {
@@ -197,6 +205,7 @@ export class BattleDriver extends EventEmitter {
         raw: line,
         tight: aboutUs && room.secondsLeft !== null && room.secondsLeft <= 4,
       });
+      if (typeof clock === 'number') this.resendUnconfirmed(room);
     }
 
     const rating = parseRatingLine(line);
@@ -226,6 +235,7 @@ export class BattleDriver extends EventEmitter {
     }
 
     if (line.startsWith('|request|')) {
+      room.unconfirmed = null;
       room.secondsLeft = null;
       const raw = line.slice('|request|'.length);
       if (!raw) return;
@@ -300,6 +310,7 @@ export class BattleDriver extends EventEmitter {
       lastLegal: [],
       lastChoice: null,
       lastChoiceText: null,
+      unconfirmed: null,
       pendingDelivery: null,
       choiceDeliveryFailures: 0,
       noLegalRetries: 0,
@@ -508,10 +519,28 @@ export class BattleDriver extends EventEmitter {
     action: Action | null,
     preview: boolean,
     attempt: number,
+    source: 'choose' | 'watchdog' = 'choose',
+    watchdogResends = 0,
   ): void {
     if (this.stopped || room.finalized || room.ended) return;
+    if (!this.rqidCurrent(room, rqid)) {
+      room.pendingDelivery = null;
+      room.log.write({
+        type: 'choice-delivery',
+        kind: 'choice-delivery',
+        battleId: room.roomId,
+        rqid,
+        choice,
+        sent: false,
+        cause: 'stale-rqid',
+        serverLine: null,
+        retry: attempt,
+        replacement: null,
+      });
+      return;
+    }
     if (!this.options.client.isReady()) {
-      this.failDelivery(room, choice, rqid, action, preview, attempt, 'socket-closed', null);
+      this.failDelivery(room, choice, rqid, action, preview, attempt, 'socket-closed', null, source, watchdogResends);
       return;
     }
     let sent = false;
@@ -522,17 +551,23 @@ export class BattleDriver extends EventEmitter {
       room.crashes += 1;
       const message = `send failed: ${safeError(err)}`;
       room.log.write({ type: 'crash', kind: 'crash', battleId: room.roomId, message });
-      this.failDelivery(room, choice, rqid, action, preview, attempt, 'send-threw', message);
+      this.failDelivery(room, choice, rqid, action, preview, attempt, 'send-threw', message, source, watchdogResends);
       return;
     }
     if (!sent) {
-      this.failDelivery(room, choice, rqid, action, preview, attempt, 'socket-closed', null);
+      this.failDelivery(room, choice, rqid, action, preview, attempt, 'socket-closed', null, source, watchdogResends);
       return;
     }
     if (rqid !== null) room.answered.add(rqid);
     room.pendingDelivery = null;
     room.lastChoice = action;
     room.lastChoiceText = choice;
+    room.unconfirmed = {
+      choice,
+      rqid,
+      turn: room.turns,
+      resends: source === 'watchdog' ? watchdogResends : 0,
+    };
     room.log.write({
       type: 'choice-delivery',
       kind: 'choice-delivery',
@@ -540,9 +575,9 @@ export class BattleDriver extends EventEmitter {
       rqid,
       choice,
       sent: true,
-      cause: 'sent',
+      cause: source === 'watchdog' ? 'unconfirmed' : 'sent',
       serverLine: null,
-      retry: attempt,
+      retry: source === 'watchdog' ? watchdogResends : attempt,
       replacement: null,
     });
     if (preview) {
@@ -559,6 +594,8 @@ export class BattleDriver extends EventEmitter {
     attempt: number,
     cause: 'socket-closed' | 'send-threw',
     serverLine: string | null,
+    source: 'choose' | 'watchdog' = 'choose',
+    watchdogResends = 0,
   ): void {
     const exhausted = attempt + 1 >= DELIVERY_ATTEMPTS;
     room.choiceDeliveryFailures += 1;
@@ -582,8 +619,34 @@ export class BattleDriver extends EventEmitter {
     if (room.deliveryTimer) clearTimeout(room.deliveryTimer);
     room.deliveryTimer = setTimeout(() => {
       room.deliveryTimer = undefined;
-      this.deliver(room, choice, rqid, action, preview, attempt + 1);
+      this.deliver(room, choice, rqid, action, preview, attempt + 1, source, watchdogResends);
     }, this.options.deliveryRetryMs ?? 25);
+  }
+
+  /**
+   * `/choose` returned true and the turn has not moved. The next clock line
+   * for us means the server still has not applied that choice, so send the
+   * same string, including the same rqid, to this room again.
+   */
+  private resendUnconfirmed(room: RoomState): void {
+    const pending = room.unconfirmed;
+    if (!pending || room.ended || room.finalized || this.stopped) return;
+    if (room.turns !== pending.turn) {
+      room.unconfirmed = null;
+      return;
+    }
+    if (room.pendingDelivery !== null || room.deliveryTimer) return;
+    if (pending.resends >= WATCHDOG_RESENDS) return;
+    const resends = pending.resends + 1;
+    pending.resends = resends;
+    this.deliver(room, pending.choice, pending.rqid, room.lastChoice, false, 0, 'watchdog', resends);
+  }
+
+  private rqidCurrent(room: RoomState, rqid: number | null): boolean {
+    if (rqid === null) return true;
+    const current = typeof room.lastRequest?.rqid === 'number' ? room.lastRequest.rqid : null;
+    if (current === null) return true;
+    return current === rqid;
   }
 
   private async retryChoice(room: RoomState, errorLine: string): Promise<void> {
@@ -679,6 +742,7 @@ export class BattleDriver extends EventEmitter {
   private onPopup(message: string): void {
     const open = [...this.rooms.values()].filter(room => !room.finalized);
     const attribution = attributePopup(message, open.map(room => room.roomId));
+    if (attribution.attribution === 'elsewhere') return;
     if (attribution.attribution === 'ambiguous') {
       for (const room of open) {
         room.ambiguousPopups += 1;
@@ -708,11 +772,7 @@ export class BattleDriver extends EventEmitter {
   }
 
   private onReplay(replay: ReplayNotice): void {
-    const target = [...this.rooms.values()].find(room =>
-      room.roomId === replay.id
-      || room.roomId === `battle-${replay.id}`
-      || room.roomId.endsWith(replay.id),
-    );
+    const target = [...this.rooms.values()].find(room => replayMatchesRoom(room.roomId, replay.id));
     if (!target || target.finalized) return;
     target.replay = replay;
     if (!target.ended) return;
@@ -734,6 +794,7 @@ export class BattleDriver extends EventEmitter {
   private async finalize(room: RoomState): Promise<void> {
     if (room.finalized) return;
     room.finalized = true;
+    this.closedRooms.add(room.roomId);
     const opponentSide = room.ourSide === 'p1' ? 'p2' : room.ourSide === 'p2' ? 'p1' : null;
     const opponent = opponentSide ? room.players[opponentSide] ?? null : null;
     const eloBefore = room.elo?.before ?? (room.ourSide ? room.preRating[room.ourSide] ?? null : null);
