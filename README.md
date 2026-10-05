@@ -166,6 +166,29 @@ npm run ladder
 
 Connects to Pokemon Showdown, logs in, and searches for rated Gen 9 Random Battle games. Uses MCTS with 5s search time per turn.
 
+```bash
+./run-live.sh --games 10 --engine search --concurrency 3
+```
+
+`run-live.sh` is the live runner. It calls the ladder client.
+
+### Graceful drain
+
+Use a drain to swap engines in the middle of a batch. The runner stops starting new ladder searches, lets games already in progress finish, writes `logs/ladder/summary.json` (`drained` and `drainReason`), and exits. It never sends `/forfeit`.
+
+At startup it prints the pid and run id. From another shell:
+
+```bash
+kill -USR1 <pid>
+kill -TERM <pid>
+touch state/DRAIN
+touch live-runs/<runId>.drain
+```
+
+Any one of those is enough. Delete `state/DRAIN` before the next run or the new process will drain immediately and not search. A second `SIGTERM` or `SIGUSR1` exits without waiting; that drops the socket and still does not send `/forfeit`. `SIGINT` disconnects immediately.
+
+`ops live` should use the same `LiveDrain` (`src/client/drain.ts`): skip new `client.search()` calls while `isDraining`, call `cancelSearch()`, and return once no games are left.
+
 **Bot Account Best Practices:**
 - Use a clearly labeled bot account (e.g., username ending in "Bot")
 - Set profile to indicate it's a bot

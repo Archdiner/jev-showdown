@@ -38,6 +38,7 @@ export class LadderQueue {
   private readonly active = new Set<string>();
   private searching = false;
   private stopped = false;
+  private draining = false;
   private backoffMs = 1000;
   private timer: NodeJS.Timeout | null = null;
   private lastSearchAt = 0;
@@ -58,12 +59,16 @@ export class LadderQueue {
     return this.concurrency;
   }
 
+  get isDraining(): boolean {
+    return this.draining;
+  }
+
   noteBattle(roomId: string): void {
     if (!roomId || this.active.has(roomId)) return;
     this.active.add(roomId);
     this.searching = false;
     this.backoffMs = 1000;
-    if (this.autoSearch) this.fill();
+    if (this.autoSearch && !this.draining) this.fill();
   }
 
   noteEnd(roomId: string): void {
@@ -89,11 +94,11 @@ export class LadderQueue {
     const formatId = toID(this.format);
     const queued = update.searching.some(format => toID(format) === formatId);
     this.searching = queued;
-    if (this.autoSearch && !queued && this.active.size < this.concurrency) this.fill();
+    if (this.autoSearch && !this.draining && !queued && this.active.size < this.concurrency) this.fill();
   }
 
   fill(): void {
-    if (!this.autoSearch || this.stopped || this.searching || this.timer) return;
+    if (!this.autoSearch || this.stopped || this.draining || this.searching || this.timer) return;
     if (this.client.isBlocked()) {
       this.stopped = true;
       return;
@@ -122,10 +127,26 @@ export class LadderQueue {
     }
   }
 
+  /**
+   * Stop queueing new games. Battles already in `active` keep running.
+   * This never sends /forfeit.
+   */
+  drain(): void {
+    if (this.stopped || this.draining) return;
+    this.draining = true;
+    this.cancelOutstanding();
+  }
+
   stop(): void {
     this.stopped = true;
+    this.draining = true;
+    this.cancelOutstanding();
+  }
+
+  private cancelOutstanding(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.searching = false;
     if (!this.client.isReady()) return;
     try {
       this.client.cancelSearch();
@@ -135,7 +156,7 @@ export class LadderQueue {
   }
 
   private schedule(delayMs: number): void {
-    if (this.stopped || this.timer || this.client.isBlocked()) {
+    if (this.stopped || this.draining || this.timer || this.client.isBlocked()) {
       if (this.client.isBlocked()) this.stopped = true;
       return;
     }
