@@ -4,7 +4,8 @@ import { legalChoices, startRandomBattle, teamsForSeed } from './exact/battle-ut
 import { strictLegalActions } from '../client/choice.js';
 import { buildDecisionBattle, chooseLive, LivePosition } from '../client/decision-battle.js';
 import { loadConfig } from '../config/load.js';
-import { battleWithFoePriors, foePriorsEnabled } from '../client/decision-battle.js';
+import { battleWithFoePriors, foePriorsApplyInDecide, foePriorsEnabled } from '../client/decision-battle.js';
+import { ladderDecisionBattle } from '../client/hidden-info.js';
 import { completeFoeTeam, FOE_PRIOR_MIN_BUDGET_MS } from './foe-prior.js';
 import { compareFoePriors } from './foe-prior-compare.js';
 
@@ -167,6 +168,21 @@ describe('decision battle priors', () => {
     if (!built) return;
     expect(built.p2.pokemon).toHaveLength(1);
     expect(built.p2.active[0].moveSlots.map(slot => slot.id)).toEqual(['tackle']);
+  });
+
+  it('fills the hidden self-play view when that view is given a table', () => {
+    const battle = openedBattle();
+    const foe = battle.p2.active[0];
+    const stats = { ...GARCHOMP, [foe.species.name]: GARCHOMP.Garchomp };
+    const plain = ladderDecisionBattle(battle, 'p1');
+    const filled = ladderDecisionBattle(battle, 'p1', { speciesStats: stats });
+    expect(plain?.p2.pokemon).toHaveLength(1);
+    expect(plain?.p2.active[0].moveSlots.map(slot => slot.id)).toEqual(['tackle']);
+    expect(filled?.p2.pokemon).toHaveLength(6);
+    expect(foePriorsApplyInDecide(battle, true)).toBe(true);
+    expect(filled && foePriorsApplyInDecide(filled, true)).toBe(false);
+    expect(foePriorsApplyInDecide(battle, undefined, 'foe-priors')).toBe(true);
+    expect(foePriorsApplyInDecide(battle, false)).toBe(false);
   });
 
   it('fills a sim battle when the caller passes the table', () => {

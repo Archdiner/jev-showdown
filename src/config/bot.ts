@@ -1,5 +1,5 @@
 import { PRNG, type Battle } from '@pkmn/sim';
-import { battleWithFoePriors, foePriorsEnabled } from '../client/decision-battle.js';
+import { battleWithFoePriors, foePriorsApplyInDecide } from '../client/decision-battle.js';
 import { legalChoices, type SideId } from '../engine/exact/battle-utils.js';
 import { randbatsForPriors } from '../engine/foe-prior.js';
 import { battleToState } from '../engine/exact/search.js';
@@ -127,7 +127,7 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
       const plan = await planFor(active, activeConfig, input, client, spend, runtime);
       const legal = legalChoices(input.battle, input.side);
       const budget = Math.min(activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs);
-      const priorStats = legal.length > 0 && foePriorsEnabled(activeConfig.search.params.foePriors, input.variantId)
+      const priorStats = legal.length > 0 && foePriorsApplyInDecide(input.battle, activeConfig.search.params.foePriors, input.variantId)
         ? randbatsForPriors()
         : null;
       const modeled = priorStats ? battleWithFoePriors(input.battle, input.side, priorStats) : null;

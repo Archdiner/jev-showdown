@@ -367,6 +367,20 @@ export function foePriorsEnabled(flag: boolean | undefined, variantId?: string):
 }
 
 /**
+ * `gen9customgame` battles are the ones `buildDecisionBattle` already built.
+ * Filling them again would read a fresh sim log and drop the revealed moves.
+ * A real random battle, or a server input log, still gets a hidden copy here.
+ */
+export function foePriorsApplyInDecide(
+  battle: Battle,
+  flag: boolean | undefined,
+  variantId?: string,
+): boolean {
+  if (!foePriorsEnabled(flag, variantId)) return false;
+  return battle.format?.id !== 'gen9customgame';
+}
+
+/**
  * What a full sim battle has revealed in its log, shaped like a ladder position.
  * The search still sees our real request. Unrevealed foe slots stay empty.
  */

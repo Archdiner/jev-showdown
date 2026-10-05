@@ -2,7 +2,7 @@
 
 ## Foe-set priors are opt-in
 
-The live search still plays the revealed foe unless a run asks for randbats priors. `npm run ladder -- --foe-priors` turns them on. A config sets `search.params.foePriors: true` (`configs/examples/foe-priors.yaml`), and the live variant id `foe-priors` does the same for one game. The champion file does not set the flag. Factory and gatekeeper load that example like any other config. A one-species stats file is not used as the table.
+The live search still plays the revealed foe unless a run asks for randbats priors. `npm run ladder -- --foe-priors` turns them on. A config sets `search.params.foePriors: true` (`configs/examples/foe-priors.yaml`), and the live variant id `foe-priors` does the same for one game. The champion file does not set the flag. Factory and gatekeeper load that example like any other config: hidden self-play passes the flag into the same decision battle the ladder builds, and a battle that was already built that way is not filled a second time. A one-species stats file is not used as the table.
 
 ## Live search fills hidden foe sets from randbats
 
