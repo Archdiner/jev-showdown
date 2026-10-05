@@ -5,4 +5,5 @@ search:
   params:
     samples: 8
     endgameMonThreshold: 4
-    endgameDepth: 3
+    endgameDepth: 2
+    endgameSamples: 4

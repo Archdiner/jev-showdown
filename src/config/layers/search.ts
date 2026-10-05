@@ -119,6 +119,7 @@ export function exactConfig(
     deadlineMs,
     endgameMonThreshold: params.endgameMonThreshold,
     endgameDepth: params.endgameDepth,
+    endgameSamples: params.endgameSamples,
   };
 }
 

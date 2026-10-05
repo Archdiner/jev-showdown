@@ -63,6 +63,7 @@ export const SearchParamsSchema = z.object({
   evalMode: z.enum(['hp', 'full']).default('hp'),
   endgameMonThreshold: z.number().int().min(2).max(6).optional(),
   endgameDepth: z.number().int().min(2).max(4).optional(),
+  endgameSamples: z.number().int().min(1).max(8).optional(),
 }).strict();
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
 

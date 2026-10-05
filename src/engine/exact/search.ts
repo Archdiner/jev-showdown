@@ -43,6 +43,8 @@ export interface ExactConfig {
   endgameMonThreshold?: number;
   /** Depth to use in endgame (when threshold is met) */
   endgameDepth?: number;
+  /** Samples to use in endgame (reduces branching factor) */
+  endgameSamples?: number;
 }
 
 /** True when the deadline has passed and the search already has a score to return. */
@@ -201,17 +203,21 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
   if (mine.length === 0) return { choice: 'default', scores: [] };
   if (mine.length === 1) return { choice: mine[0], scores: [{ choice: mine[0], score: 0 }] };
 
-  // Check for endgame condition and adjust depth if configured
-  let effectiveDepth = config.depth;
+  // Check for endgame condition and adjust depth/samples if configured
+  let effectiveConfig = config;
   if (config.endgameMonThreshold !== undefined && config.endgameDepth !== undefined) {
     const remaining = totalRemainingMons(battle);
     if (remaining <= config.endgameMonThreshold && remaining > 0) {
-      effectiveDepth = config.endgameDepth;
+      effectiveConfig = {
+        ...config,
+        depth: config.endgameDepth,
+        samples: config.endgameSamples ?? config.samples,
+      };
     }
   }
 
   const snap = snapshot(battle);
-  const replies = opponentDistribution(battle, otherSide(sideId), config);
+  const replies = opponentDistribution(battle, otherSide(sideId), effectiveConfig);
   const switchReply = replies.find(reply => reply.choice.startsWith('switch')) || null;
   const modal = replies.reduce<WeightedChoice | null>((best, reply) => {
     if (!best || reply.prob > best.prob) return reply;
@@ -226,8 +232,8 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
   let bestAgainstSwitch = -Infinity;
 
   for (const choice of mine) {
-    if (searchBudgetExpired(config.deadlineMs, scores.length)) break;
-    const parts = scoreChoice(snap, sideId, choice, effectiveDepth, config, config.samples ?? 1, replies, switchReply?.choice || null);
+    if (searchBudgetExpired(effectiveConfig.deadlineMs, scores.length)) break;
+    const parts = scoreChoice(snap, sideId, choice, effectiveConfig.depth, effectiveConfig, effectiveConfig.samples ?? 1, replies, switchReply?.choice || null);
     scores.push({ choice, score: parts.mean });
     if (parts.mean > bestScore) {
       bestScore = parts.mean;
