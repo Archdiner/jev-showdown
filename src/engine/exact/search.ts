@@ -36,6 +36,13 @@ export interface ExactConfig {
   minReplyProb?: number;
   /** Own actions below the root. The root always sees every legal switch. */
   deeperChoices?: number;
+  /** Stop once this time has passed and at least one score exists. */
+  deadlineMs?: number;
+}
+
+/** True when the deadline has passed and the search already has a score to return. */
+export function searchBudgetExpired(deadlineMs: number | undefined, scored: number): boolean {
+  return deadlineMs != null && scored > 0 && Date.now() >= deadlineMs;
 }
 
 export const EXACT_1PLY: ExactConfig = {
@@ -184,6 +191,7 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
   let bestAgainstSwitch = -Infinity;
 
   for (const choice of mine) {
+    if (searchBudgetExpired(config.deadlineMs, scores.length)) break;
     const parts = scoreChoice(snap, sideId, choice, config.depth, config, config.samples ?? 1, replies, switchReply?.choice || null);
     scores.push({ choice, score: parts.mean });
     if (parts.mean > bestScore) {
@@ -233,7 +241,9 @@ function scoreChoice(
   let againstSwitch: number | null = null;
   let switchWeight = 0;
   for (let sample = 0; sample < draws; sample++) {
+    if (searchBudgetExpired(config.deadlineMs, weight)) break;
     for (const reply of used) {
+      if (searchBudgetExpired(config.deadlineMs, weight)) break;
       const battle = cloneFromSnapshot(snap);
       reseed(battle, sample);
       const value = rollout(battle, sideId, myChoice, reply.choice || undefined, depth, config);

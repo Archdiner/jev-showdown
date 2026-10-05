@@ -6,6 +6,8 @@ agent:
     preview: heuristic
 search:
   id: greedy-1ply
+  params:
+    samples: 8
 evaluator:
   id: hp-fraction
 opponentModel:
