@@ -128,7 +128,10 @@ export function snapshotProcesses(input: ProcessScanInput = {}): { processes: Pr
   const readTable = input.readTable ?? input.ps;
   if (readTable) {
     try {
-      const procs = parseProcessTable(readTable()).filter(proc => relevantProcess(proc.cmd));
+      let procs = parseProcessTable(readTable()).filter(proc => relevantProcess(proc.cmd));
+      if (fs.existsSync(root)) {
+        procs = procs.map(proc => augmentWithEnv(proc, root));
+      }
       return { processes: procs, scanned: true };
     } catch {
       return { processes: [], scanned: false };
@@ -144,6 +147,19 @@ export function snapshotProcesses(input: ProcessScanInput = {}): { processes: Pr
 
 export function scanProcesses(input: ProcessScanInput = {}): ProcessSnapshot[] {
   return snapshotProcesses(input).processes;
+}
+
+function augmentWithEnv(proc: ProcessSnapshot, procRoot: string): ProcessSnapshot {
+  try {
+    const environPath = path.join(procRoot, String(proc.pid), 'environ');
+    if (fs.existsSync(environPath)) {
+      const env = parseEnviron(fs.readFileSync(environPath));
+      return { ...proc, env };
+    }
+  } catch {
+    // If we can't read environ, just return the process without env
+  }
+  return proc;
 }
 
 const MONTHS: Record<string, number> = {
