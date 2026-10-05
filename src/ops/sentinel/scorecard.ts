@@ -41,6 +41,7 @@ export interface Scorecard {
     regressions: string[];
   };
   openIncidents: Array<{ id: string; severity: string; status: string; count: number; title: string; detail: string }>;
+  omittedOpen: number;
   notes: string[];
 }
 
@@ -62,6 +63,7 @@ export function buildScorecard(ctx: SentinelContext, incidents: Incident[], even
     .map(event => event.episodeOpenedAt === undefined ? null : event.ts - event.episodeOpenedAt)
     .filter((value): value is number => value !== null && value >= 0);
   const open = incidents.filter(item => actionable(item.status)).sort(compareIncidents);
+  const listed = previewIncidents(open);
   const graph = readGraph(ctx, since);
   const batches = batchRows(ctx, counted);
   const variants = variantRows(counted);
@@ -113,7 +115,7 @@ export function buildScorecard(ctx: SentinelContext, incidents: Incident[], even
       rejected: graph.rejected,
       regressions: graph.regressions,
     },
-    openIncidents: previewIncidents(open).map(item => ({
+    openIncidents: listed.map(item => ({
       id: item.id,
       severity: item.severity,
       status: item.status,
@@ -121,6 +123,7 @@ export function buildScorecard(ctx: SentinelContext, incidents: Incident[], even
       title: item.title,
       detail: item.detail,
     })),
+    omittedOpen: open.length - listed.length,
     notes,
   };
 }
@@ -143,7 +146,11 @@ export function formatScorecard(card: Scorecard, style: 'text' | 'md' = 'text'):
   if (card.openIncidents.length) {
     lines.push('  open incidents:');
     for (const incident of card.openIncidents) {
-      lines.push(`    ${incident.severity} ${incident.status} x${incident.count} ${incident.title}`);
+      lines.push(`    ${incident.severity} ${incident.status} x${incident.count} ${incident.title} — ${incident.detail}`);
+    }
+    if (card.omittedOpen > 0) {
+      const noun = card.omittedOpen === 1 ? 'incident' : 'incidents';
+      lines.push(`    ${card.omittedOpen} lower-severity ${noun} not listed on this screen`);
     }
   }
   lines.push('');
