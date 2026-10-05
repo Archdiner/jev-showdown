@@ -13,6 +13,12 @@ function boostsOf(mon: ClientPokemon): StatBoosts {
   };
 }
 
+/** Public evidence the pokemon has Terastallized. The client also stores an unused tera type in `terastallized`. */
+function revealedTera(mon: ClientPokemon): string | undefined {
+  const marked = /, tera:([A-Za-z]+)/.exec(mon.details || '');
+  return marked?.[1];
+}
+
 function snap(mon: ClientPokemon): FoeMon | null {
   const species = mon.speciesForme || '';
   if (!species) return null;
@@ -27,6 +33,7 @@ function snap(mon: ClientPokemon): FoeMon | null {
     moves: [...(mon.moves || [])],
     boosts: boostsOf(mon),
     fainted: mon.fainted || mon.hp <= 0,
+    terastallized: revealedTera(mon),
   };
 }
 
@@ -55,5 +62,6 @@ export function livePositionFromClient(
     foeBench,
     ourBoosts: ours?.active?.[0] ? boostsOf(ours.active[0]) : undefined,
     weather: weather ? String(weather) : undefined,
+    turn: battle.turn,
   };
 }

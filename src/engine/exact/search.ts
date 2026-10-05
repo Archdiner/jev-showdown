@@ -3,8 +3,10 @@ import { Evaluator } from '../evaluator.js';
 import { GameState } from '../../types/index.js';
 import {
   SideId,
+  appendTeraChoices,
   cloneFromSnapshot,
   hpEval,
+  isTeraChoice,
   legalChoices,
   otherSide,
   playChoices,
@@ -38,7 +40,33 @@ export interface ExactConfig {
   deeperChoices?: number;
   /** Stop once this time has passed and at least one score exists. */
   deadlineMs?: number;
+  /**
+   * Score `move N terastallize` beside each legal move. Off on the champion.
+   * The opponent's replies stay non-Tera: we do not guess a hidden Tera type.
+   */
+  tera?: boolean;
+  /**
+   * HP-eval points a Tera line must gain over the best non-Tera line once the
+   * early hold has expired and the opponent has already Terastallized.
+   * One mon of HP is 1. A faint is 2. Default is half a mon.
+   */
+  teraMargin?: number;
+  /** Before this turn, Tera is kept unless it changes a KO or a survival. */
+  teraHoldTurn?: number;
+  /**
+   * Margin used after `teraHoldTurn` while the opponent still has Tera.
+   * Default is one mon of HP, stricter than `teraMargin`.
+   */
+  teraUnspentMargin?: number;
 }
+
+/** A Tera line changes the KO in at least half the sampled replies. */
+export const TERA_KO_FLIP = 0.5;
+/** A Tera line changes our survival in at least half the sampled replies. */
+export const TERA_SURVIVAL_FLIP = 0.5;
+const DEFAULT_TERA_MARGIN = 0.5;
+const DEFAULT_TERA_HOLD_TURN = 10;
+const DEFAULT_TERA_UNSPENT_MARGIN = 1;
 
 /** True when the deadline has passed and the search already has a score to return. */
 export function searchBudgetExpired(deadlineMs: number | undefined, scored: number): boolean {
@@ -52,6 +80,76 @@ export const EXACT_1PLY: ExactConfig = {
   errorAsLoss: false,
   samples: 8,
 };
+
+/** Same search as the champion, plus our own Tera choices and the hold gate. */
+export const EXACT_TERA_1PLY: ExactConfig = {
+  ...EXACT_1PLY,
+  tera: true,
+  teraMargin: DEFAULT_TERA_MARGIN,
+  teraHoldTurn: DEFAULT_TERA_HOLD_TURN,
+  teraUnspentMargin: DEFAULT_TERA_UNSPENT_MARGIN,
+};
+
+export interface TeraLine {
+  choice: string;
+  score: number;
+  koRate: number;
+  survivalRate: number;
+  playedRate: number;
+}
+
+export interface TeraSituation {
+  turn: number;
+  opponentTerastallized: boolean;
+}
+
+/**
+ * Keep Tera in pocket unless it flips a KO or a survival this turn, or the
+ * searched gain clears the margin. Before `teraHoldTurn` only a flip counts.
+ * After that, an opponent who has not Terastallized requires the larger margin.
+ */
+export function teraHoldChoice(lines: TeraLine[], situation: TeraSituation, config: ExactConfig): string {
+  const best = bestLine(lines);
+  if (!best) return 'default';
+  if (!config.tera) return best.choice;
+  const plain = bestLine(lines.filter(line => !isTeraChoice(line.choice)));
+  if (!plain) return best.choice;
+  const passing = lines.filter(line => isTeraChoice(line.choice) && teraPaysOff(line, plain, situation, config));
+  return bestLine(passing)?.choice ?? plain.choice;
+}
+
+function bestLine(lines: TeraLine[]): TeraLine | null {
+  let best: TeraLine | null = null;
+  for (const line of lines) {
+    if (!best || line.score > best.score) best = line;
+  }
+  return best;
+}
+
+function teraPaysOff(tera: TeraLine, plain: TeraLine, situation: TeraSituation, config: ExactConfig): boolean {
+  if (tera.playedRate < 1) return false;
+  if (tera.koRate - plain.koRate >= TERA_KO_FLIP) return true;
+  if (tera.survivalRate - plain.survivalRate >= TERA_SURVIVAL_FLIP) return true;
+  const turn = situation.turn || 0;
+  if (turn < (config.teraHoldTurn ?? DEFAULT_TERA_HOLD_TURN)) return false;
+  const base = config.teraMargin ?? DEFAULT_TERA_MARGIN;
+  const margin = situation.opponentTerastallized
+    ? base
+    : Math.max(base, config.teraUnspentMargin ?? DEFAULT_TERA_UNSPENT_MARGIN);
+  return tera.score - plain.score >= margin;
+}
+
+function faintCount(battle: Battle, sideId: SideId): number {
+  let count = 0;
+  for (const mon of battle.getSide(sideId).pokemon) {
+    if (mon && (mon.fainted || mon.hp <= 0)) count++;
+  }
+  return count;
+}
+
+function foeHasTerastallized(battle: Battle, sideId: SideId): boolean {
+  return battle.getSide(otherSide(sideId)).pokemon.some(mon => Boolean(mon?.terastallized));
+}
 
 export const SWITCH_DEPTH2: ExactConfig = switchProfile as SearchProfile;
 
@@ -134,7 +232,8 @@ function evaluate(battle: Battle, sideId: SideId, config: ExactConfig): number {
 }
 
 function opponentDistribution(battle: Battle, opp: SideId, config: ExactConfig): WeightedChoice[] {
-  const legal = legalChoices(battle, opp);
+  // Hidden opponent Tera is not sampled. A revealed Tera is already on the battle.
+  const legal = legalChoices(battle, opp).filter(choice => !isTeraChoice(choice));
   if (legal.length === 0) return [];
   if (config.opponentModel === 'switch') {
     return pruneReplies(
@@ -152,7 +251,8 @@ function opponentDistribution(battle: Battle, opp: SideId, config: ExactConfig):
 }
 
 function ownChoices(battle: Battle, sideId: SideId, config: ExactConfig, atRoot: boolean): string[] {
-  const legal = legalChoices(battle, sideId);
+  const base = legalChoices(battle, sideId);
+  const legal = config.tera && atRoot ? appendTeraChoices(battle, sideId, base) : base;
   const cap = config.deeperChoices ?? 0;
   if (atRoot || cap <= 0 || legal.length <= cap) return legal;
   const moves = legal.filter(choice => choice.startsWith('move '));
@@ -184,31 +284,37 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
   }, null);
   const predictedSwitch = Boolean(modal?.choice.startsWith('switch'));
 
+  const lines: TeraLine[] = [];
   const scores: ScoredChoice[] = [];
-  let best = mine[0];
-  let bestScore = -Infinity;
   let answer = mine[0];
   let bestAgainstSwitch = -Infinity;
 
   for (const choice of mine) {
     if (searchBudgetExpired(config.deadlineMs, scores.length)) break;
     const parts = scoreChoice(snap, sideId, choice, config.depth, config, config.samples ?? 1, replies, switchReply?.choice || null);
+    lines.push({
+      choice,
+      score: parts.mean,
+      koRate: parts.koRate,
+      survivalRate: parts.survivalRate,
+      playedRate: parts.playedRate,
+    });
     scores.push({ choice, score: parts.mean });
-    if (parts.mean > bestScore) {
-      bestScore = parts.mean;
-      best = choice;
-    }
     if (parts.againstSwitch != null && parts.againstSwitch > bestAgainstSwitch) {
       bestAgainstSwitch = parts.againstSwitch;
       answer = choice;
     }
   }
 
+  const choice = config.tera
+    ? teraHoldChoice(lines, { turn: battle.turn, opponentTerastallized: foeHasTerastallized(battle, sideId) }, config)
+    : (bestLine(lines)?.choice ?? mine[0]);
+
   return {
-    choice: best,
+    choice,
     scores,
     predictedSwitch,
-    answersPredictedSwitch: predictedSwitch && best === answer,
+    answersPredictedSwitch: predictedSwitch && choice === answer,
   };
 }
 
@@ -220,6 +326,9 @@ function reseed(battle: Battle, sample: number): void {
 interface ChoiceScore {
   mean: number;
   againstSwitch: number | null;
+  koRate: number;
+  survivalRate: number;
+  playedRate: number;
 }
 
 function scoreChoice(
@@ -240,17 +349,28 @@ function scoreChoice(
   let weight = 0;
   let againstSwitch: number | null = null;
   let switchWeight = 0;
+  let koWeighted = 0;
+  let survivalWeighted = 0;
+  let playedWeighted = 0;
+  const foe = otherSide(sideId);
   for (let sample = 0; sample < draws; sample++) {
     if (searchBudgetExpired(config.deadlineMs, weight)) break;
     for (const reply of used) {
       if (searchBudgetExpired(config.deadlineMs, weight)) break;
       const battle = cloneFromSnapshot(snap);
       reseed(battle, sample);
-      const value = rollout(battle, sideId, myChoice, reply.choice || undefined, depth, config);
-      weighted += reply.prob * value;
+      const beforeUs = faintCount(battle, sideId);
+      const beforeThem = faintCount(battle, foe);
+      const result = rollout(battle, sideId, myChoice, reply.choice || undefined, depth, config);
+      weighted += reply.prob * result.value;
       weight += reply.prob;
+      if (result.played) {
+        playedWeighted += reply.prob;
+        if (faintCount(battle, foe) > beforeThem) koWeighted += reply.prob;
+        if (faintCount(battle, sideId) === beforeUs) survivalWeighted += reply.prob;
+      }
       if (switchReply && reply.choice === switchReply) {
-        againstSwitch = (againstSwitch ?? 0) + value;
+        againstSwitch = (againstSwitch ?? 0) + result.value;
         switchWeight++;
       }
     }
@@ -258,7 +378,15 @@ function scoreChoice(
   return {
     mean: weight > 0 ? weighted / weight : 0,
     againstSwitch: switchWeight > 0 && againstSwitch != null ? againstSwitch / switchWeight : null,
+    koRate: weight > 0 ? koWeighted / weight : 0,
+    survivalRate: weight > 0 ? survivalWeighted / weight : 0,
+    playedRate: weight > 0 ? playedWeighted / weight : 0,
   };
+}
+
+interface Rollout {
+  value: number;
+  played: boolean;
 }
 
 function rollout(
@@ -268,15 +396,15 @@ function rollout(
   oppChoice: string | undefined,
   depth: number,
   config: ExactConfig,
-): number {
+): Rollout {
   const ok = playChoices(battle, sideId, myChoice, oppChoice);
   if (!ok) {
-    return config.errorAsLoss ? -10000 : evaluate(battle, sideId, config);
+    return { played: false, value: config.errorAsLoss ? -10000 : evaluate(battle, sideId, config) };
   }
-  if (battle.ended || depth <= 1) return evaluate(battle, sideId, config);
+  if (battle.ended || depth <= 1) return { played: true, value: evaluate(battle, sideId, config) };
 
   const next = ownChoices(battle, sideId, config, false);
-  if (next.length === 0) return evaluate(battle, sideId, config);
+  if (next.length === 0) return { played: true, value: evaluate(battle, sideId, config) };
 
   const snap = snapshot(battle);
   let best = -Infinity;
@@ -284,5 +412,5 @@ function rollout(
     const score = scoreChoice(snap, sideId, choice, depth - 1, config, 1, null, null).mean;
     if (score > best) best = score;
   }
-  return best;
+  return { played: true, value: best };
 }

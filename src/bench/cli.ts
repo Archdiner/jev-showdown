@@ -2,7 +2,7 @@ import { informationMode, type InformationMode } from '../client/hidden-info.js'
 import { specForAlias } from '../config/aliases.js';
 import { BenchPlayer, GameJob, GameResult, playerId } from './game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
-import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2 } from '../engine/exact/search.js';
+import { EXACT_1PLY, EXACT_TERA_1PLY, ExactConfig, SWITCH_DEPTH2 } from '../engine/exact/search.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
 import { p99, runGamesParallel } from './pool.js';
 
@@ -17,6 +17,7 @@ function policy(name: string): BenchPlayer {
   if (name === 'maxdamage') return { kind: 'maxdamage' };
   if (name === 'legacy') return { kind: 'legacy' };
   if (name === 'exact') return { kind: 'exact', config: EXACT_1PLY };
+  if (name === 'exact-tera' || name === 'exact-tera-1ply') return { kind: 'exact', config: EXACT_TERA_1PLY };
   if (name === 'switch') return { kind: 'exact', config: SWITCH_DEPTH2 };
   if (name.startsWith('exact')) {
     const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',');

@@ -12,6 +12,7 @@ export const ENGINE_CONCURRENCY_LIMITS: Record<string, number> = {
   search: 3,
   'max-damage': 4,
   grok: 1,
+  'exact-tera': 3,
 };
 
 export const DEFAULT_CONCURRENCY_CONFIG = path.resolve('configs/live/concurrency.json');
@@ -29,19 +30,22 @@ export function clampLimit(value: number): number {
 }
 
 export function selectLiveEngine(name: string): {
-  engine: 'search' | 'max-damage';
+  engine: 'search' | 'max-damage' | 'exact-tera';
   profile: string;
   useLLMPrior: boolean;
 } {
   const id = name.trim().toLowerCase();
   if (id === 'grok' || id === 'llm') return { engine: 'search', profile: 'grok', useLLMPrior: true };
+  if (id === 'exact-tera' || id === 'exact-tera-1ply') {
+    return { engine: 'exact-tera', profile: 'exact-tera', useLLMPrior: false };
+  }
   if (id === 'search' || id === 'exact' || id === 'exact-1ply' || id === 'robust' || id === 'champion') {
     return { engine: 'search', profile: 'search', useLLMPrior: false };
   }
   if (id === 'max-damage' || id === 'maxdamage' || id === 'maxdamage-v1') {
     return { engine: 'max-damage', profile: 'max-damage', useLLMPrior: false };
   }
-  throw new Error(`Unknown engine "${name}". Use search, exact, max-damage, or grok.`);
+  throw new Error(`Unknown engine "${name}". Use search, exact, exact-tera, max-damage, or grok.`);
 }
 
 /**
@@ -61,7 +65,7 @@ export function resolveConcurrencyLimit(input: {
   if (input.useEngineProfile) {
     const builtin = ENGINE_CONCURRENCY_LIMITS[profile];
     if (builtin === undefined) {
-      throw new Error(`No concurrency profile for "${input.engine}". Use search, max-damage, or grok.`);
+      throw new Error(`No concurrency profile for "${input.engine}". Use search, max-damage, grok, or exact-tera.`);
     }
     limit = builtin;
   }

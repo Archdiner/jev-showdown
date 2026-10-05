@@ -71,6 +71,7 @@ describe('concurrency limit', () => {
     expect(selectLiveEngine('exact')).toEqual({ engine: 'search', profile: 'search', useLLMPrior: false });
     expect(selectLiveEngine('exact-1ply')).toEqual({ engine: 'search', profile: 'search', useLLMPrior: false });
     expect(selectLiveEngine('maxdamage').engine).toBe('max-damage');
+    expect(selectLiveEngine('exact-tera')).toEqual({ engine: 'exact-tera', profile: 'exact-tera', useLLMPrior: false });
     expect(() => selectLiveEngine('stockfish')).toThrow(/Unknown engine/);
   });
 });

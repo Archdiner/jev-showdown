@@ -110,7 +110,22 @@ export function exactConfig(
   depth: number,
   deadlineMs?: number,
 ): ExactConfig {
-  return { depth, opponentModel, evalMode, errorAsLoss: false, samples: params.samples, deadlineMs };
+  return {
+    depth,
+    opponentModel,
+    evalMode,
+    errorAsLoss: false,
+    samples: params.samples,
+    deadlineMs,
+    ...(params.tera
+      ? {
+        tera: true,
+        teraMargin: params.teraMargin,
+        teraHoldTurn: params.teraHoldTurn,
+        teraUnspentMargin: params.teraUnspentMargin,
+      }
+      : {}),
+  };
 }
 
 function outlined(battle: Battle, side: SideId, params: SearchParams, ctx: SearchCtx, depth: number): SearchTrace {

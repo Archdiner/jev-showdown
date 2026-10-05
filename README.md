@@ -174,7 +174,7 @@ Connects to Pokemon Showdown, logs in, and searches for rated Gen 9 Random Battl
 
 `--labeled-champion` plays the gatekeeper's current champion file for the whole batch. It is off unless you pass it. `--rollback` keeps the builtin `--engine` policy. The process logs `config live` with the config id, content hash, and commit before searching, and writes those three fields on every finished game. A promotion does not swap the engine until the next batch.
 
-Concurrency is 1 unless you pass `--concurrency K` (absolute max 16). `--use-engine-profile` uses `configs/live/concurrency.json` (search 3, max-damage 4, grok 1). `--concurrency-config FILE` replaces those numbers. `--runners N` multiplies the limit. Grok (`--engine grok`) is the search engine with an LLM prior and stays at 1 game because a call is about 25 seconds. `ops live --runners=N --concurrency=K` uses the same limit: default 1, then those flags, clamped at 16. It does not pick an engine profile, because one login plays whichever config the gatekeeper approved.
+Concurrency is 1 unless you pass `--concurrency K` (absolute max 16). `--use-engine-profile` uses `configs/live/concurrency.json` (search 3, max-damage 4, grok 1, exact-tera 3). `--engine exact-tera` is the Terastallize variant. `--engine search` stays the champion. `--concurrency-config FILE` replaces those numbers. `--runners N` multiplies the limit. Grok (`--engine grok`) is the search engine with an LLM prior and stays at 1 game because a call is about 25 seconds. `ops live --runners=N --concurrency=K` uses the same limit: default 1, then those flags, clamped at 16. It does not pick an engine profile, because one login plays whichever config the gatekeeper approved.
 
 ### Graceful drain
 
