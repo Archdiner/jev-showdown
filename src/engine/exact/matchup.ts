@@ -64,6 +64,8 @@ export function estimatedMaxHp(species: string, level: number): number {
 }
 
 const damageCache = new Map<string, number>();
+/** Pure memo keyed on exact HP; bounded so long runs cannot exhaust memory. */
+const DAMAGE_CACHE_CAP = 200_000;
 
 function synth(species: string, level: number, hpFrac: number): any {
   const name = Dex.species.get(species).name || species;
@@ -91,6 +93,7 @@ export function cachedDamage(attacker: any, defender: any, move: string, weather
   const hit = damageCache.get(key);
   if (hit !== undefined) return hit;
   const damage = expectedDamage(attacker, defender, move, weather);
+  if (damageCache.size >= DAMAGE_CACHE_CAP) damageCache.clear();
   damageCache.set(key, damage);
   return damage;
 }
