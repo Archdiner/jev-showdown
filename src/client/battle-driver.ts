@@ -383,11 +383,13 @@ export class BattleDriver extends EventEmitter {
   }
 
   private sendChoice(room: RoomState, choice: string, rqid: number | null, action: Action | null, preview: boolean): void {
+    if (this.stopped) return;
     if (rqid !== null) room.answered.add(rqid);
     room.lastChoice = action;
     try {
       this.options.client.choose(room.roomId, choice);
     } catch (err) {
+      if (this.stopped) return;
       room.crashes += 1;
       room.log.write({ type: 'crash', battleId: room.roomId, message: `send failed: ${safeError(err)}` });
       return;

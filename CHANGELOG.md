@@ -21,7 +21,7 @@ Search stays in charge. Two models sit beside it and can be turned off:
 
 ## Live ladder client
 
-`npm run ladder -- --games N --format gen9randombattle --engine search --concurrency K` plays the real ladder with `SHOWDOWN_USERNAME` and `SHOWDOWN_PASSWORD`. `--engine` is `search` or `max-damage`. `--concurrency` (default 1, max 5) runs that many battles on one login, each with its own state, worker, and JSONL file. `npm run ladder -- --local --games N --concurrency K` plays two clients on a local MIT Pokémon Showdown server. See AGENTS.md for the exact commands. Search and eval were not changed.
+`npm run ladder -- --games N --format gen9randombattle --engine search --concurrency K` plays the real ladder with `SHOWDOWN_USERNAME` and `SHOWDOWN_PASSWORD`. `--engine max-damage` is the default (it won a local head-to-head against `search`). `--engine search` still calls `Bot.selectAction`. `--concurrency` (default 1, max 5) runs that many battles on one login, each with its own state, worker, and JSONL file. `npm run ladder -- --local --games N --concurrency K` plays two clients on a local MIT Pokémon Showdown server. See AGENTS.md for the exact commands. Search and eval were not changed.
 
 ---
 

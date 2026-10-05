@@ -44,7 +44,7 @@ function parseArgs(argv: string[]): LadderOptions {
     searchMs: null,
     decisionMs: null,
     logDir: 'logs/ladder',
-    engine: 'search',
+    engine: 'max-damage',
     opponentEngine: null,
     concurrency: 1,
     help: false,
@@ -83,13 +83,13 @@ function parseArgs(argv: string[]): LadderOptions {
 
 function printHelp(): void {
   console.log(`Usage:
-  npm run ladder -- --games N --format gen9randombattle --engine search
+  npm run ladder -- --games N --format gen9randombattle --engine max-damage
   npm run ladder -- --local --games N --concurrency K --engine max-damage
 
 Real ladder (this process never stores the password):
-  SHOWDOWN_USERNAME=bot SHOWDOWN_PASSWORD=secret npm run ladder -- --games 10 --format gen9randombattle --engine search --concurrency 1
+  SHOWDOWN_USERNAME=bot SHOWDOWN_PASSWORD=secret npm run ladder -- --games 10 --format gen9randombattle --engine max-damage --concurrency 1
 
-Engines: search (current Bot.selectAction) or max-damage.
+Engines: max-damage (default; won a local head-to-head) or search (Bot.selectAction).
 --concurrency K keeps up to K battles on one login (default 1, max ${MAX_LADDER_CONCURRENCY}).
 
 Local server, two clients, N games:
@@ -202,13 +202,20 @@ async function playSeries(
         `fallbacks=${summary.fallbacks} elo=${summary.eloAfter ?? 'n/a'}`,
       );
       if (finished.size >= games) {
-        clearTimeout(timer);
         for (const player of players) player.queue.stop();
-        resolve([...finished.values()]);
+        finishIfDrained();
         return;
       }
       for (const player of players) player.queue.fill();
       onContinue?.();
+    };
+
+    const finishIfDrained = () => {
+      if (finished.size < games) return;
+      if (players.some(player => player.queue.activeBattles > 0)) return;
+      clearTimeout(timer);
+      for (const player of players) player.queue.stop();
+      resolve([...finished.values()]);
     };
 
     for (const player of players) {
@@ -216,6 +223,7 @@ async function playSeries(
         player.queue.noteEnd(summary.battleId);
         if (finished.has(summary.battleId)) {
           if (finished.size < games) player.queue.fill();
+          else finishIfDrained();
           return;
         }
         consider(summary);
@@ -268,10 +276,10 @@ async function runLocalSeries(opts: LadderOptions): Promise<GameSummary[]> {
       opts.concurrency,
     );
 
-    alpha.client.disconnect();
-    bravo.client.disconnect();
     await alpha.driver.stop();
     await bravo.driver.stop();
+    alpha.client.disconnect();
+    bravo.client.disconnect();
     return summaries;
   } finally {
     await shutdown();
@@ -305,8 +313,10 @@ async function runRemote(opts: LadderOptions): Promise<GameSummary[]> {
   if (opts.accept) watchChallenges(player.client, player.queue, opts.challenge);
   process.once('SIGINT', () => {
     console.log('\n[ladder] disconnecting without forfeit');
-    player.client.disconnect();
-    void player.driver.stop().finally(() => process.exit(0));
+    void player.driver.stop().finally(() => {
+      player.client.disconnect();
+      process.exit(0);
+    });
   });
 
   const summaries = await playSeries(
@@ -318,8 +328,8 @@ async function runRemote(opts: LadderOptions): Promise<GameSummary[]> {
       : undefined,
   );
 
-  player.client.disconnect();
   await player.driver.stop();
+  player.client.disconnect();
   return summaries;
 }
 
