@@ -143,6 +143,7 @@ export const ChampionNode = BaseNode.extend({
     // Core metrics
     win_rate_vs_random: z.number().optional(),
     win_rate_vs_maxdamage: z.number().optional(),
+    win_rate_vs_champion: z.number().optional(),
     elo_vs_random: z.number().optional(),
     elo_vs_maxdamage: z.number().optional(),
     

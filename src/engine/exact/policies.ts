@@ -2,7 +2,7 @@ import { Battle, PRNG } from '@pkmn/sim';
 import { Action } from '../../types/index.js';
 import { SideId, legalChoices } from './battle-utils.js';
 import { maxDamageChoice } from './max-damage.js';
-import { EXACT_1PLY, ExactConfig, ScoredChoice, battleToState, exactSearch } from './search.js';
+import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2, ScoredChoice, battleToState, exactSearch } from './search.js';
 
 export type PolicySpec =
   | { kind: 'random' }
@@ -14,6 +14,8 @@ export interface Decision {
   choice: string;
   ms: number;
   scores?: ScoredChoice[];
+  predictedSwitch?: boolean;
+  answersPredictedSwitch?: boolean;
 }
 
 export async function decide(spec: PolicySpec, battle: Battle, side: SideId, rng: PRNG): Promise<Decision> {
@@ -38,7 +40,13 @@ export async function decide(spec: PolicySpec, battle: Battle, side: SideId, rng
   }
 
   const trace = exactSearch(battle, side, spec.config);
-  return { choice: trace.choice, ms: Date.now() - started, scores: trace.scores };
+  return {
+    choice: trace.choice,
+    ms: Date.now() - started,
+    scores: trace.scores,
+    predictedSwitch: trace.predictedSwitch,
+    answersPredictedSwitch: trace.answersPredictedSwitch,
+  };
 }
 
 let legacySearch: { search: (state: any, actions: Action[]) => Promise<Action> } | null = null;
@@ -87,7 +95,11 @@ export function specFromId(id: string): PolicySpec {
       return { kind: 'legacy' };
     case 'exact-1ply':
     case 'challenger-exact-1ply':
+    case 'champion-exact-1ply':
       return { kind: 'exact', config: EXACT_1PLY };
+    case 'switch-depth2':
+    case 'challenger-switch-depth2':
+      return { kind: 'exact', config: SWITCH_DEPTH2 };
     default:
       if (id.startsWith('exact:')) {
         const [, depth, model, evalMode] = id.split(':');
@@ -109,4 +121,40 @@ export const POLICY_IDS = {
   random: 'random-v1',
   maxdamage: 'maxdamage-v1',
   exact1: 'challenger-exact-1ply',
+  switch2: 'challenger-switch-depth2',
 } as const;
+
+export interface ChampionBlueprint {
+  id: string;
+  version: string;
+  title: string;
+  description: string;
+  config_path: string;
+}
+
+const CHAMPION_BLUEPRINTS: Record<string, ChampionBlueprint> = {
+  'challenger-exact-1ply': {
+    id: 'champion-exact-1ply',
+    version: 'exact-1ply',
+    title: 'Champion: exact 1-ply HP search',
+    description: '1-ply exact @pkmn/sim battle clone. Opponent line is the accuracy-weighted max-damage move. Eight RNG draws are averaged. Eval is HP fraction plus faint counts.',
+    config_path: 'src/engine/exact/search.ts',
+  },
+  'challenger-switch-depth2': {
+    id: 'champion-switch-depth2',
+    version: 'switch-depth2',
+    title: 'Champion: depth-2 switch search',
+    description: 'Depth-2 exact battle clone. Opponent replies mix staying to attack and switching, fit on high-Elo replays. Eval scores both teams. Every legal switch is scored at the root.',
+    config_path: 'experiments/switch-depth2/config.json',
+  },
+};
+
+export function championBlueprint(challengerId: string): ChampionBlueprint {
+  return CHAMPION_BLUEPRINTS[challengerId] || {
+    id: `champion-${challengerId}`,
+    version: challengerId,
+    title: `Champion: ${challengerId}`,
+    description: 'Promoted through the gate.',
+    config_path: 'src/engine/exact/search.ts',
+  };
+}
