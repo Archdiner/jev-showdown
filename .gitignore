@@ -16,3 +16,4 @@ live-runs/
 state/DRAIN
 state/ladder-*.lock
 state/ladder-*.lock.*
+state/pids/

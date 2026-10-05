@@ -1,5 +1,9 @@
 # Changelog
 
+## Stack supervisor
+
+`scripts/stack.sh start|stop|status|restart` runs ladder, the four ops roles, and the dashboard as separate process groups. The pgid is `state/pids/<component>.pid`. Logs are `logs/stack/<component>.log`. `LADDER_LOG_DIR` and `LIVE_RUNS_DIR` are set. `stop` signals the group with SIGINT, then SIGTERM, then SIGKILL, and then any leftover process with that component's command line. `status` exits non-zero when a component is missing, duplicated, or orphaned. `start ladder` runs live preflight before the client, which records the account lock. See `OPERATIONS.md`.
+
 ## Development constraints
 
 Unit tests write sets and stats under `JEV_DATA_DIR` (a temp directory) and set `JEV_ALLOW_SMALL_DATA=1`. The data guard fails the run if anything under `data/` changes. The loader throws when it sees fewer than 500 species unless that test-only flag is set. Live preflight ignores the flag. Benchmarks and self-play print `data species=N hash=H` and write those fields on the results file.
