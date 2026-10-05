@@ -92,6 +92,17 @@ describe('ladder engine factory', () => {
 
     const damage = await chooseLive('max-damage', position, legal);
     expect(damage.action).toEqual(actionFromChoice(maxDamageChoice(cloneBattle(built), 'p1')));
+
+    const steered = legal[legal.length - 1];
+    const steeredChoice = steered.type === 'switch' ? `switch ${steered.switchIndex}` : `move ${steered.moveIndex}`;
+    const fromConfig = await chooseLive('search', position, legal, {
+      decide: async () => ({ choice: steeredChoice, scores: [{ choice: steeredChoice, score: 3 }] }),
+    });
+    expect(fromConfig.action).toEqual(steered);
+    expect(fromConfig.score).toBe(3);
+    await expect(chooseLive('search', position, legal, {
+      decide: async () => ({ choice: 'move 99' }),
+    })).rejects.toThrow(/not legal/);
   });
 
   it('answers a knockout with a switch', async () => {

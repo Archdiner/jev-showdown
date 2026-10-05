@@ -16,6 +16,8 @@ export interface InitRequest {
   type: 'init';
   config: BotConfig;
   engine: EngineName;
+  /** Gatekeeper champion file for this batch. Absent means the builtin policy. */
+  championConfigPath?: string | null;
 }
 
 export interface OpenBattleRequest {
