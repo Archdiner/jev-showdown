@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "exported_at": 1791158863681,
+  "exported_at": 1791160488073,
   "nodes": [
     {
       "id": "goal-ladder-1",
@@ -14,28 +14,6 @@
         "target_metric": "ladder_elo",
         "target_value": 1900
       }
-    },
-    {
-      "id": "champion-v0",
-      "type": "Champion",
-      "status": "active",
-      "title": "Champion v0: Exact Sim",
-      "description": "3-ply expectiminimax with 0% fallback, exact @pkmn/sim mechanics",
-      "commit": "f209c86",
-      "created_at": 1791152884349,
-      "updated_at": 1791152884349,
-      "metrics": {
-        "win_rate_vs_random": 1,
-        "invalid_choices": 0,
-        "crashes": 0,
-        "timeouts": 0,
-        "p99_turn_time_ms": 1500,
-        "fallback_rate": 0,
-        "state_mismatches": 0
-      },
-      "version": "v0",
-      "config_path": "src/bot/bot.ts",
-      "promoted_at": 1791152884349
     },
     {
       "id": "decision-typescript-pkmn",
@@ -410,6 +388,88 @@
       ]
     },
     {
+      "id": "result-challenger-exact-1ply-1791160362753",
+      "type": "Result",
+      "status": "done",
+      "title": "Gate: promoted",
+      "description": "+448.0 avg Elo vs panel (2/2 improved). held-out forced-win 0/0, deep agreement 37.8% vs max-damage 21.2% (17 replay positions)",
+      "created_at": 1791160362753,
+      "updated_at": 1791160362753,
+      "metrics": {
+        "verdict": "promoted",
+        "games": 600,
+        "panel_results": [
+          {
+            "opponent": "random-v1",
+            "challenger_elo": 2176.0784320114053,
+            "champion_elo": 1500,
+            "elo_diff": 676.0784320114053,
+            "win_rate": 0.98,
+            "ci_lower": 0.9570598132699448,
+            "ci_upper": 0.9908024939322289,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          },
+          {
+            "opponent": "maxdamage-v1",
+            "challenger_elo": 1719.8687687473098,
+            "champion_elo": 1500,
+            "elo_diff": 219.8687687473098,
+            "win_rate": 0.78,
+            "ci_lower": 0.7297464012422271,
+            "ci_upper": 0.8231732779590409,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          }
+        ],
+        "guardrails": {
+          "passed": true,
+          "invalid_choices": 0,
+          "crashes": 0,
+          "timeouts": 0,
+          "p99_turn_time_ms": 190,
+          "fallback_rate": 0,
+          "state_mismatches": 0
+        },
+        "held_out": {
+          "ok": true,
+          "reason": "held-out forced-win 0/0, deep agreement 37.8% vs max-damage 21.2% (17 replay positions)",
+          "positions": 217,
+          "replay_positions": 17,
+          "forced_win_hit": 0,
+          "forced_win_total": 0,
+          "deep_hit": 82,
+          "deep_total": 217,
+          "max_damage_deep_hit": 46,
+          "max_damage_deep_total": 217
+        }
+      }
+    },
+    {
+      "id": "champion-v0",
+      "type": "Champion",
+      "status": "superseded",
+      "title": "Champion v0: Exact Sim",
+      "description": "3-ply expectiminimax with 0% fallback, exact @pkmn/sim mechanics",
+      "commit": "f209c86",
+      "created_at": 1791152884349,
+      "updated_at": 1791160362780,
+      "metrics": {
+        "win_rate_vs_random": 1,
+        "invalid_choices": 0,
+        "crashes": 0,
+        "timeouts": 0,
+        "p99_turn_time_ms": 1500,
+        "fallback_rate": 0,
+        "state_mismatches": 0
+      },
+      "version": "v0",
+      "config_path": "src/bot/bot.ts",
+      "promoted_at": 1791152884349
+    },
+    {
       "id": "datasource-vercel-ai-gateway-models",
       "type": "DataSource",
       "status": "active",
@@ -571,9 +631,183 @@
         "games": 15
       },
       "game_count": 15
+    },
+    {
+      "id": "challenger-exact-1ply",
+      "type": "Experiment",
+      "status": "done",
+      "title": "Exact 1-ply HP search",
+      "description": "Clone the live battle with toJSON/fromJSON. Opponent line is the @smogon/calc max-damage move. Eval is HP fraction plus faint counts. Terminal win is +1000.",
+      "commit": "fcd9c92",
+      "created_at": 1791157782966,
+      "updated_at": 1791160457504,
+      "config_path": "src/engine/exact/search.ts",
+      "hypothesis_id": "hyp-rebuild-scored-as-loss",
+      "predicted_effect": ">=90% vs random and >=70% vs max-damage over 300 paired games, 21/21 diagnostics, 0 invalid.",
+      "kill_condition": "Under 90% vs random or under 70% vs max-damage, or any invalid choice, crash, or turn over 2s."
+    },
+    {
+      "id": "hyp-rebuild-scored-as-loss",
+      "type": "Hypothesis",
+      "status": "done",
+      "title": "Rebuilt battles scored as losses",
+      "description": "The 3-ply search is weak because it rebuilds a battle and scores a rejected choice as a loss, not because HP eval is too small.",
+      "commit": "64c946b",
+      "created_at": 1791157782966,
+      "updated_at": 1791160457508,
+      "rationale": "After a KO the live request is a single switch. BattleStateBuilder starts a new battle, copies HP, and leaves a two-player move request. makeChoices throws Not all choices done. simulateTurn returns terminated with no winner. RobustSearch scores that -10000. A toJSON clone of the same battle accepts the switch.",
+      "expected_effect": "1-ply search on a real battle clone with HP-fraction eval beats random by a wide margin and beats max-damage. Adding depth, a uniform opponent, or the full evaluator does not create the old loss.",
+      "test_plan": "Diagnostics on 21 obvious positions. Paired games, swapped sides, seed 1. Baseline exact:1,max-damage,hp over 150 pairs vs random and vs max-damage. Then uniform, depth 2, depth 3, and full eval on the same seeds. Kill the clone engine if it is under 90% vs random or under 70% vs max-damage."
+    },
+    {
+      "id": "champion-exact-1ply",
+      "type": "Champion",
+      "status": "active",
+      "title": "Champion: exact 1-ply HP search",
+      "description": "1-ply exact @pkmn/sim battle clone. Opponent line is the accuracy-weighted max-damage move. Eight RNG draws are averaged. Eval is HP fraction plus faint counts.",
+      "created_at": 1791160362784,
+      "updated_at": 1791160457509,
+      "metrics": {
+        "win_rate_vs_random": 0.98,
+        "win_rate_vs_maxdamage": 0.78,
+        "invalid_choices": 0,
+        "crashes": 0,
+        "timeouts": 0,
+        "p99_turn_time_ms": 190,
+        "fallback_rate": 0,
+        "state_mismatches": 0
+      },
+      "version": "exact-1ply",
+      "config_path": "src/engine/exact/search.ts",
+      "promoted_at": 1791160362784
+    },
+    {
+      "id": "result-ablation-exact-search",
+      "type": "Result",
+      "status": "done",
+      "title": "Ablation of exact battle-clone search",
+      "description": "Same seed start 1. Champion row is 150 pairs. Other rows are smaller samples of the same harness. Full eval before the 0 HP fix is the row that collapses.",
+      "commit": "fcd9c92",
+      "created_at": 1791160457504,
+      "updated_at": 1791160457504,
+      "metrics": {
+        "rows": [
+          {
+            "name": "1-ply max-damage HP, 8 samples",
+            "vs_random": "98.0% (294-5-1/300)",
+            "vs_max": "78.0% (234-66-0/300)",
+            "p99_ms": 190
+          },
+          {
+            "name": "1-ply max-damage HP, 1 sample",
+            "vs_random": "98.8% (79-0-1/80)",
+            "vs_max": "82.5% (66-14-0/80)",
+            "p99_ms": 60
+          },
+          {
+            "name": "1-ply uniform HP, 1 sample",
+            "vs_random": "97.5% (78-1-1/80)",
+            "vs_max": "67.5% (54-26-0/80)",
+            "p99_ms": 198
+          },
+          {
+            "name": "2-ply max-damage HP, 1 sample",
+            "vs_random": "96.7% (29-1-0/30)",
+            "vs_max": "80.0% (24-6-0/30)",
+            "p99_ms": 333
+          },
+          {
+            "name": "3-ply max-damage HP, 1 sample",
+            "vs_random": "100% (8-0-0/8)",
+            "vs_max": "not run",
+            "p99_ms": 2400
+          },
+          {
+            "name": "1-ply full eval before 0 HP fix",
+            "vs_random": "72.5% (29-11-0/40)",
+            "vs_max": "5.0% (2-38-0/40)",
+            "p99_ms": 50
+          },
+          {
+            "name": "1-ply full eval after 0 HP fix",
+            "vs_random": "100% (40-0-0/40)",
+            "vs_max": "77.5% (31-9-0/40)",
+            "p99_ms": 98
+          }
+        ]
+      },
+      "win_rate": 0.98,
+      "game_count": 300
+    },
+    {
+      "id": "hyp-fainted-hp-scored-full",
+      "type": "Hypothesis",
+      "status": "done",
+      "title": "0 HP was scored as a full health bar",
+      "description": "The full evaluator treated a falsy currentHp as unknown and assumed 100% HP.",
+      "commit": "fcd9c92",
+      "created_at": 1791160457504,
+      "updated_at": 1791160457504,
+      "rationale": "Full-eval 1-ply lost to max-damage 2-38 over 40 games while HP-fraction eval won. Fainted Pokemon have currentHp 0.",
+      "expected_effect": "Counting 0 HP as fainted restores full-eval win rate to the same range as the HP eval.",
+      "test_plan": "Replay 20 paired seeds against random and against max-damage before and after the truthiness fix."
+    },
+    {
+      "id": "learning-fainted-hp",
+      "type": "Learning",
+      "status": "active",
+      "title": "0 HP is a faint",
+      "description": "Do not use a truthiness check on current HP.",
+      "commit": "fcd9c92",
+      "created_at": 1791160463725,
+      "updated_at": 1791160463725,
+      "insight": "A fainted Pokemon at 0 HP was scored as full health, so the full evaluator avoided knockouts.",
+      "evidence": "Before: 5.0% vs max-damage (2W-38L/40) and 72.5% vs random (29W-11L/40). After: 77.5% (31W-9L/40) and 100% (40W-0L/40). Seed 1. Commit fcd9c92.",
+      "confidence": "high"
+    },
+    {
+      "id": "learning-rebuild-scored-as-loss",
+      "type": "Learning",
+      "status": "active",
+      "title": "Search the live battle clone",
+      "description": "A rebuilt battle that rejects the live choice is not a loss.",
+      "commit": "fcd9c92",
+      "created_at": 1791160463725,
+      "updated_at": 1791160463725,
+      "insight": "The old search rebuilt a battle that still had a move request after a KO, rejected the legal switch, and scored that rejection as a loss.",
+      "evidence": "src/engine/exact/legacy-repro.ts. The clone search is 98.0% vs random and 78.0% vs max-damage over 300 paired games, gate promoted, commit fcd9c92.",
+      "confidence": "high"
     }
   ],
   "edges": [
+    {
+      "id": "challenger-exact-1ply-tests-hyp-rebuild-scored-as-loss",
+      "from_node": "challenger-exact-1ply",
+      "to_node": "hyp-rebuild-scored-as-loss",
+      "type": "tests",
+      "created_at": 1791157782966
+    },
+    {
+      "id": "challenger-exact-1ply-produced-result-challenger-exact-1ply-1791160362753",
+      "from_node": "challenger-exact-1ply",
+      "to_node": "result-challenger-exact-1ply-1791160362753",
+      "type": "produced",
+      "created_at": 1791160362764
+    },
+    {
+      "id": "champion-exact-1ply-supersedes-champion-v0",
+      "from_node": "champion-exact-1ply",
+      "to_node": "champion-v0",
+      "type": "supersedes",
+      "created_at": 1791160362792
+    },
+    {
+      "id": "challenger-exact-1ply-supersedes-champion-v0",
+      "from_node": "challenger-exact-1ply",
+      "to_node": "champion-v0",
+      "type": "supersedes",
+      "created_at": 1791160362794
+    },
     {
       "id": "decision-typescript-pkmn-supports-goal-ladder-1",
       "from_node": "decision-typescript-pkmn",
@@ -755,6 +989,41 @@
       "to_node": "goal-ladder-1",
       "type": "supports",
       "created_at": 1791158863402
+    },
+    {
+      "id": "challenger-exact-1ply-produced-result-ablation-exact-search",
+      "from_node": "challenger-exact-1ply",
+      "to_node": "result-ablation-exact-search",
+      "type": "produced",
+      "created_at": 1791160457504
+    },
+    {
+      "id": "hyp-fainted-hp-scored-full-derived-from-learning-fainted-hp",
+      "from_node": "hyp-fainted-hp-scored-full",
+      "to_node": "learning-fainted-hp",
+      "type": "derived_from",
+      "created_at": 1791160463725
+    },
+    {
+      "id": "learning-fainted-hp-supports-goal-ladder-1",
+      "from_node": "learning-fainted-hp",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791160463725
+    },
+    {
+      "id": "learning-rebuild-scored-as-loss-supports-goal-ladder-1",
+      "from_node": "learning-rebuild-scored-as-loss",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791160463725
+    },
+    {
+      "id": "hyp-rebuild-scored-as-loss-derived-from-learning-rebuild",
+      "from_node": "hyp-rebuild-scored-as-loss",
+      "to_node": "learning-rebuild-scored-as-loss",
+      "type": "derived_from",
+      "created_at": 1791160463725
     }
   ]
 }

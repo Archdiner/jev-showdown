@@ -19,12 +19,15 @@ function status(): void {
   const champions = db.getNodesByType('Champion', 'active');
   if (champions.length > 0) {
     const champ = champions[0] as any;
+    const metrics = champ.metrics || {};
+    const vsRandom = champ.win_rate_vs_random ?? metrics.win_rate_vs_random;
+    const vsMax = champ.win_rate_vs_maxdamage ?? metrics.win_rate_vs_maxdamage;
     console.log(`Current Champion: ${champ.version}`);
-    if (champ.win_rate_vs_random) {
-      console.log(`  vs Random: ${(champ.win_rate_vs_random * 100).toFixed(1)}%`);
+    if (typeof vsRandom === 'number') {
+      console.log(`  vs Random: ${(vsRandom * 100).toFixed(1)}%`);
     }
-    if (champ.win_rate_vs_maxdamage) {
-      console.log(`  vs Max-Damage: ${(champ.win_rate_vs_maxdamage * 100).toFixed(1)}%`);
+    if (typeof vsMax === 'number') {
+      console.log(`  vs Max-Damage: ${(vsMax * 100).toFixed(1)}%`);
     }
     console.log('');
   }
