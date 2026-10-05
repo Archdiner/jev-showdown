@@ -177,6 +177,7 @@ function opsBundle(root: string, graph: string): OpsPaths {
     liveGames: path.join(root, 'live-games.jsonl'),
     circuits: path.join(root, 'circuits.json'),
     analystOffset: path.join(root, 'analyst.offset'),
+    analystFiles: path.join(root, 'analyst-files.json'),
     seenGames: path.join(root, 'analyst-seen.json'),
     regressionSuite: path.join(root, 'regression-suite.jsonl'),
     priors: path.join(root, 'behavior.json'),

@@ -35,13 +35,13 @@ describe('jsonl tail', () => {
 
       fs.writeFileSync(paths.liveGames, '{"id":"ok","winner":"win"}\n{bad\n{"id":"tail"');
       fs.writeFileSync(paths.analystOffset, '0');
-      expect(await runAnalyst(paths, { once: true })).toBe(1);
+      expect(await runAnalyst(paths, { once: true, ladderDirs: [] })).toBe(1);
       const offset = Number(fs.readFileSync(paths.analystOffset, 'utf8'));
       expect(offset).toBe(Buffer.byteLength('{"id":"ok","winner":"win"}\n{bad\n'));
       expect(fs.readFileSync(paths.heartbeats, 'utf8')).toContain('log-corrupt');
 
       fs.appendFileSync(paths.liveGames, ',"winner":"loss"}\n');
-      expect(await runAnalyst(paths, { once: true })).toBe(1);
+      expect(await runAnalyst(paths, { once: true, ladderDirs: [] })).toBe(1);
     } finally {
       if (priorOps === undefined) delete process.env.OPS_DIR;
       else process.env.OPS_DIR = priorOps;

@@ -8,6 +8,7 @@ export interface OpsPaths {
   liveGames: string;
   circuits: string;
   analystOffset: string;
+  analystFiles: string;
   seenGames: string;
   regressionSuite: string;
   priors: string;
@@ -33,6 +34,7 @@ export function opsPaths(root = process.env.OPS_DIR || DEFAULT_ROOT): OpsPaths {
     liveGames: path.join(root, 'live-games.jsonl'),
     circuits: path.join(root, 'circuits.json'),
     analystOffset: path.join(root, 'analyst.offset'),
+    analystFiles: path.join(root, 'analyst-files.json'),
     seenGames: path.join(root, 'analyst-seen.json'),
     regressionSuite: path.join(root, 'regression-suite.jsonl'),
     priors,

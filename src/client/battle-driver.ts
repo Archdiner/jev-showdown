@@ -807,6 +807,7 @@ export class BattleDriver extends EventEmitter {
       latencies: room.latencies,
       minTimerMarginSec: room.minTimerMarginSec,
       engine: this.options.engineName,
+      ourSide: room.ourSide,
       configId: this.options.configId ?? null,
       configHash: this.options.configHash ?? null,
       gitSha: this.options.gitSha ?? null,

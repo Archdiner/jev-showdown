@@ -1,5 +1,11 @@
 # Changelog
 
+## The analyst reads ladder games and the foe's real seat
+
+`npm run ops -- analyst` tails `state/ops/live-games.jsonl` and the JSONL under `logs/ladder` and `live-runs` (per-battle files, `games.jsonl`, and copies dropped in a live-runs directory). A ladder loss becomes the same hypothesis and factory job as an ops-live loss. The protocol text comes from the row's `log` or from `localReplayPath`. `metrics.jsonl` is not a game log.
+
+Priors count the opponent's moves and switches. The seat is `ourSide` on the row, or the `|player|` line that matches `username`. When we are p1 the foe is p2, and when we are p2 the foe is p1. A row that names neither seat is skipped for priors instead of being treated as one side. A scraped public replay counts both players. Mined regression positions use that same seat. `ops live` still sends a move as p1 when the request and the player line both omit the seat, and that guess is not written on the game row.
+
 ## Ladder games name the config that played them
 
 Every finished ladder game stores `configId`, `configHash`, and the git commit of the config chosen when the batch started. The default is still the builtin policy: `champion-exact-1ply` for `--engine search` / `exact`, and `maxdamage-v1` for `--engine max-damage`. The hash is the policy itself, not the turn time limit.

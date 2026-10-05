@@ -77,6 +77,8 @@ export interface LadderGameRecord {
   replayUploaded: boolean;
   replayStatus: 'confirmed' | 'unconfirmed' | 'local-only';
   logPath: string;
+  /** Seat we occupied. Absent when the protocol never named us. */
+  ourSide?: 'p1' | 'p2';
   /** Present on `ops live` rows. The ladder client leaves these off. */
   configPath?: string;
   variantId?: string;
@@ -220,6 +222,7 @@ export interface LadderGameInput {
   localServer: boolean;
   disconnected: boolean;
   logPath: string;
+  ourSide?: 'p1' | 'p2' | null;
   pid?: number;
   id?: string;
   source?: 'ladder' | 'ops';
@@ -275,6 +278,7 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     replayUploaded: replay.replayUploaded,
     replayStatus: replay.replayStatus,
     logPath: input.logPath,
+    ...(input.ourSide === 'p1' || input.ourSide === 'p2' ? { ourSide: input.ourSide } : {}),
     ...(input.configPath ? { configPath: input.configPath } : {}),
     ...(input.variantId ? { variantId: input.variantId } : {}),
     ...(input.inputLog !== undefined ? { inputLog: input.inputLog } : {}),
@@ -344,6 +348,7 @@ export function recordedElo(game: { eloAfter?: number | null; rating?: number | 
 }
 
 export interface TranscriptFacts {
+  ourSide: 'p1' | 'p2' | null;
   opponent: string | null;
   opponentRating: number | null;
   eloBefore: number | null;
@@ -424,6 +429,7 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
   }
 
   return {
+    ourSide: ourSide === 'p1' || ourSide === 'p2' ? ourSide : null,
     opponent,
     opponentRating,
     eloBefore,

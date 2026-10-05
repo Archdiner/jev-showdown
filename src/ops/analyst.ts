@@ -7,38 +7,37 @@ import { GatewayClient } from '../llm/gateway-client.js';
 import { LossReviewer, writeFindingAsHypothesis, type LossFinding } from '../llm/loss-reviewer.js';
 import { openDb } from './db.js';
 import { beat } from './heartbeat.js';
+import { defaultAnalystDirs, gameFromRow, listGameJsonl, type AnalystGame } from './ingest.js';
 import { appendJsonl, consumeJsonl, type OpsPaths } from './paths.js';
 import { observeLog, readCounts, scrapeReplay, writePriors } from './priors.js';
 import { enqueue } from './queue.js';
 
-interface LiveGame {
-  id: string;
-  winner?: string | null;
-  outcome?: 'win' | 'loss' | 'tie';
-  log?: string;
-  inputLog?: string;
-  configId?: string;
-}
-
-export async function runAnalyst(paths: OpsPaths, opts: { once?: boolean; replay?: string } = {}): Promise<number> {
+export async function runAnalyst(
+  paths: OpsPaths,
+  opts: { once?: boolean; replay?: string; ladderDirs?: string[] } = {},
+): Promise<number> {
   beat(paths, 'analyst', 'ok', 'up');
   if (opts.replay) {
     const log = await scrapeReplay(opts.replay);
     const counts = readCounts(paths);
-    observeLog(log, counts);
+    observeLog(log, counts, 'each');
     writePriors(paths, counts);
   }
+  const ladderDirs = opts.ladderDirs ?? defaultAnalystDirs();
   let reviewed = 0;
   do {
-    const batch = unreadGames(paths);
+    const batch = unreadGames(paths, ladderDirs);
     if (batch.corrupt > 0) beat(paths, 'analyst', 'error', `log-corrupt ${batch.corrupt}`);
+    const seenIds = new Set(readSeen(paths));
     for (const game of batch.games) {
-      if (!game?.id || seen(paths, game.id)) continue;
+      if (!game.id || seenIds.has(game.id)) continue;
+      seenIds.add(game.id);
       await reviewGame(paths, game);
       markSeen(paths, game.id);
       reviewed += 1;
     }
-    writeOffset(paths, batch.next);
+    writeOffset(paths, batch.liveNext);
+    writeFileOffsets(paths, batch.files);
     beat(paths, 'analyst', 'ok', `reviewed ${reviewed}`);
     if (opts.once) break;
     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -47,12 +46,13 @@ export async function runAnalyst(paths: OpsPaths, opts: { once?: boolean; replay
   return reviewed;
 }
 
-async function reviewGame(paths: OpsPaths, game: LiveGame): Promise<void> {
-  const counts = readCounts(paths);
-  observeLog(game.log || '', counts);
-  writePriors(paths, counts);
-  const outcome = game.outcome ?? game.winner;
-  if (outcome !== 'loss') return;
+async function reviewGame(paths: OpsPaths, game: AnalystGame): Promise<void> {
+  if (game.foeSide) {
+    const counts = readCounts(paths);
+    observeLog(game.log || '', counts, game.foeSide);
+    writePriors(paths, counts);
+  }
+  if (game.outcome !== 'loss') return;
 
   const mined = mineCritical(paths, game);
   const calcText = mined
@@ -62,9 +62,9 @@ async function reviewGame(paths: OpsPaths, game: LiveGame): Promise<void> {
   const db = openDb(paths);
   try {
     writeFindingAsHypothesis(db, generalizeFinding(finding), {
-      model: process.env.AI_GATEWAY_API_KEY ? 'xai/grok-4.7' : 'local-fallback',
+      model: process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_AI_GATEWAY_KEY ? 'xai/grok-4.7' : 'local-fallback',
       battleId: game.id,
-      sourcePath: paths.liveGames,
+      sourcePath: game.sourcePath,
     });
   } finally {
     db.close();
@@ -78,11 +78,12 @@ async function reviewGame(paths: OpsPaths, game: LiveGame): Promise<void> {
   }
 }
 
-function mineCritical(paths: OpsPaths, game: LiveGame): PositionRecord | null {
-  if (!game.inputLog?.includes('>start')) return null;
+function mineCritical(paths: OpsPaths, game: AnalystGame): PositionRecord | null {
+  const inputLog = game.inputLog.includes('>start') ? game.inputLog : '';
+  if (!inputLog || !game.ourSide) return null;
   try {
-    const battle = battleFromInputLog(game.inputLog);
-    const mined = minePosition({ battle, side: 'p1', seed: 1, labelDepth: 2, outPath: paths.pool });
+    const battle = battleFromInputLog(inputLog);
+    const mined = minePosition({ battle, side: game.ourSide, seed: 1, labelDepth: 2, outPath: paths.pool });
     appendJsonl(paths.regressionSuite, mined);
     return mined;
   } catch {
@@ -90,13 +91,13 @@ function mineCritical(paths: OpsPaths, game: LiveGame): PositionRecord | null {
   }
 }
 
-async function reviewLoss(paths: OpsPaths, game: LiveGame, calcText: string): Promise<LossFinding> {
+async function reviewLoss(paths: OpsPaths, game: AnalystGame, calcText: string): Promise<LossFinding> {
   if (process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_AI_GATEWAY_KEY) {
     const reviewer = new LossReviewer(new GatewayClient());
     const result = await reviewer.review(game.log || '', {
       calcText,
       battleId: game.id,
-      sourcePath: paths.liveGames,
+      sourcePath: game.sourcePath,
     });
     if (result.ok && result.finding) return result.finding;
   }
@@ -114,20 +115,56 @@ async function reviewLoss(paths: OpsPaths, game: LiveGame, calcText: string): Pr
   };
 }
 
-function unreadGames(paths: OpsPaths): { games: LiveGame[]; next: number; corrupt: number } {
-  if (!fs.existsSync(paths.liveGames)) return { games: [], next: 0, corrupt: 0 };
-  const size = fs.statSync(paths.liveGames).size;
-  const offset = Math.min(readOffset(paths), size);
-  const fd = fs.openSync(paths.liveGames, 'r');
+function unreadGames(paths: OpsPaths, ladderDirs: string[]): {
+  games: AnalystGame[];
+  liveNext: number;
+  files: Record<string, number>;
+  corrupt: number;
+} {
+  const live = readFileGames(paths.liveGames, readOffset(paths));
+  const files = readFileOffsets(paths);
+  const games = [...live.games];
+  let corrupt = live.corrupt;
+  const liveReal = fs.existsSync(paths.liveGames) ? safeReal(paths.liveGames) : '';
+  const roots = new Set<string>();
+  for (const dir of ladderDirs) {
+    for (const file of listGameJsonl(dir)) {
+      const resolved = safeReal(file);
+      if (liveReal && resolved === liveReal) continue;
+      if (roots.has(resolved)) continue;
+      roots.add(resolved);
+      const chunk = readFileGames(resolved, files[resolved] ?? 0);
+      games.push(...chunk.games);
+      corrupt += chunk.corrupt;
+      files[resolved] = chunk.next;
+    }
+  }
+  return { games, liveNext: live.next, files, corrupt };
+}
+
+function safeReal(file: string): string {
   try {
-    const buf = Buffer.alloc(size - offset);
-    fs.readSync(fd, buf, 0, buf.length, offset);
+    return fs.realpathSync(file);
+  } catch {
+    return file;
+  }
+}
+
+function readFileGames(file: string, offset: number): { games: AnalystGame[]; next: number; corrupt: number } {
+  if (!fs.existsSync(file)) return { games: [], next: 0, corrupt: 0 };
+  const size = fs.statSync(file).size;
+  const start = offset > size ? 0 : Math.max(0, offset);
+  const fd = fs.openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(size - start);
+    fs.readSync(fd, buf, 0, buf.length, start);
     const parsed = consumeJsonl(buf);
-    return {
-      games: parsed.records.filter((row): row is LiveGame => Boolean(row && typeof row === 'object' && 'id' in row)),
-      next: offset + parsed.bytes,
-      corrupt: parsed.corrupt,
-    };
+    const games: AnalystGame[] = [];
+    for (const row of parsed.records) {
+      const game = gameFromRow(row, file);
+      if (game) games.push(game);
+    }
+    return { games, next: start + parsed.bytes, corrupt: parsed.corrupt };
   } finally {
     fs.closeSync(fd);
   }
@@ -142,8 +179,18 @@ function writeOffset(paths: OpsPaths, offset: number): void {
   fs.writeFileSync(paths.analystOffset, String(offset));
 }
 
-function seen(paths: OpsPaths, id: string): boolean {
-  return readSeen(paths).includes(id);
+function readFileOffsets(paths: OpsPaths): Record<string, number> {
+  if (!fs.existsSync(paths.analystFiles)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(paths.analystFiles, 'utf8')) as Record<string, number>;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeFileOffsets(paths: OpsPaths, files: Record<string, number>): void {
+  fs.writeFileSync(paths.analystFiles, JSON.stringify(files));
 }
 
 function markSeen(paths: OpsPaths, id: string): void {
@@ -154,5 +201,10 @@ function markSeen(paths: OpsPaths, id: string): void {
 
 function readSeen(paths: OpsPaths): string[] {
   if (!fs.existsSync(paths.seenGames)) return [];
-  return JSON.parse(fs.readFileSync(paths.seenGames, 'utf8')) as string[];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(paths.seenGames, 'utf8'));
+    return Array.isArray(parsed) ? parsed.filter(id => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
 }

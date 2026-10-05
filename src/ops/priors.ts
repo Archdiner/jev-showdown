@@ -19,14 +19,26 @@ export function emptyCounts(): PriorCounts {
   return { physical: 0, special: 0, status: 0, hazard: 0, setup: 0, priority: 0, switch: 0, games: 0 };
 }
 
-/** Count opponent categories. The result is a weight vector, not a move-id table. */
-export function observeLog(text: string, counts: PriorCounts): void {
+/** Which seat's actions are the opponent's. `each` counts both players, for a scraped replay that is not our game. */
+export type FoeSide = 'p1' | 'p2' | 'each';
+
+function countsSide(side: string, foe: FoeSide): boolean {
+  if (foe === 'each') return side === 'p1' || side === 'p2';
+  return side === foe;
+}
+
+/**
+ * Count opponent categories. The result is a weight vector, not a move-id table.
+ * `foe` is the opponent's seat. This does not assume we are p1 or p2.
+ */
+export function observeLog(text: string, counts: PriorCounts, foe: FoeSide): void {
   counts.games += 1;
   for (const line of text.split('\n')) {
-    if ((line.startsWith('|switch|') || line.startsWith('|drag|')) && line.includes('|p2')) counts.switch += 1;
-    const move = line.match(/^\|move\|p2[^|:]*:\s*([^|]+)/);
-    if (!move) continue;
-    const data = Dex.moves.get(move[1].trim());
+    const switched = line.match(/^\|(?:switch|drag)\|(p[12])[^|:]*/);
+    if (switched && countsSide(switched[1], foe)) counts.switch += 1;
+    const move = line.match(/^\|move\|(p[12])[^|:]*:\s*([^|]+)/);
+    if (!move || !countsSide(move[1], foe)) continue;
+    const data = Dex.moves.get(move[2].trim());
     if (!data.exists) continue;
     if (data.category === 'Physical') counts.physical += 1;
     else if (data.category === 'Special') counts.special += 1;

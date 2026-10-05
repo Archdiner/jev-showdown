@@ -163,6 +163,7 @@ describe('ladder game records', () => {
       '|win|BotAlpha',
     ], 'BotAlpha');
     expect(facts).toMatchObject({
+      ourSide: 'p1',
       opponent: 'Rival',
       opponentRating: 1400,
       eloBefore: 1073,
@@ -268,6 +269,7 @@ describe('BattleDriver game record', () => {
       outcome: 'win',
       endReason: 'opponent-forfeit',
       engine: 'max-damage',
+      ourSide: 'p1',
       configId: 'champion',
       configHash: 'deadbeef',
       gitSha: '87b268f',

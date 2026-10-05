@@ -55,7 +55,8 @@ async function main(): Promise<void> {
     return;
   }
   if (command === 'analyst') {
-    await runAnalyst(paths, { once: flag('once'), replay: opt('replay') });
+    const extra = [opt('ladder-dir'), opt('live-runs')].filter((dir): dir is string => Boolean(dir));
+    await runAnalyst(paths, { once: flag('once'), replay: opt('replay'), ladderDirs: extra.length ? extra : undefined });
     return;
   }
   if (command === 'status') {
@@ -80,6 +81,8 @@ async function main(): Promise<void> {
   live --local uses the local server instead of the ladder
   live --runners=N --concurrency=K
   gatekeeper --bootstrap checks configs/champion.yaml and does not label it without paired games
+  analyst also tails logs/ladder and live-runs JSONL. --ladder-dir and --live-runs replace those defaults.
+  Opponent priors use the foe's seat from ourSide or the |player| line. A scraped replay counts both players.
   report --daily is the plain-English day summary
 Facilities share the graph and the JSONL logs. They do not import each other.`);
 }
