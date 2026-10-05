@@ -20,4 +20,17 @@ export interface SearchProfile {
    * This cap exists so depth 2 stays inside the 2s p99 guardrail.
    */
   deeperChoices: number;
+  /** Game-theoretic solver for simultaneous moves (optional) */
+  solver?: 'none' | 'nash' | 'regret-matching';
+  solverIterations?: number;
+  solverPurificationThreshold?: number;
+  playMixed?: boolean;
+  /** Keep this many damage-ranked replies (optional) */
+  replyCap?: number;
+  /** Tera moves (optional) */
+  tera?: boolean;
+  /** Progress penalty (optional) */
+  progress?: boolean;
+  /** Foe prior (optional) */
+  foePrior?: boolean;
 }

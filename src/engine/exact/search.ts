@@ -22,6 +22,12 @@ import { teamEval } from './team-eval.js';
 import { fittedTeamEval } from './fitted-eval.js';
 import { selectiveDepth2 } from './depth2.js';
 import { createHash } from 'crypto';
+import {
+  PayoffMatrix,
+  regretMatching,
+  nashEquilibrium,
+  sampleStrategy,
+} from './game-solver.js';
 
 export interface SelectiveOptions {
   /** Root moves, ranked by depth 1, that receive a depth-2 look. */
@@ -87,6 +93,19 @@ export interface ExactConfig {
    * rollout. A four-move set is left as it is.
    */
   foePrior?: boolean;
+  /**
+   * Game-theoretic solver for simultaneous moves at the root.
+   * 'none': pick argmax of expected values (default)
+   * 'nash': exact Nash equilibrium via support enumeration
+   * 'regret-matching': CFR-style regret matching
+   */
+  solver?: 'none' | 'nash' | 'regret-matching';
+  /** Number of regret matching iterations (default 1000) */
+  solverIterations?: number;
+  /** Purification threshold: drop actions below this probability (default 0.1) */
+  solverPurificationThreshold?: number;
+  /** If true, play the full mixed strategy; if false, play argmax */
+  playMixed?: boolean;
 }
 
 /** True when the deadline has passed and the search already has a score to return. */
@@ -322,18 +341,61 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
   let answer = mine[0];
   let bestAgainstSwitch = -Infinity;
 
-  for (const choice of mine) {
-    if (searchBudgetExpired(config.deadlineMs, scores.length)) break;
-    const parts = scoreChoice(snap, sideId, choice, config.depth, config, config.samples ?? 1, replies, switchReply?.choice || null);
-    const score = parts.mean - (config.progress ? progressPenalty(working, sideId, choice) : 0);
-    scores.push({ choice, score });
-    if (score > bestScore) {
-      bestScore = score;
-      best = choice;
+  // If solver is enabled, build payoff matrix and solve
+  if ((config.solver === 'nash' || config.solver === 'regret-matching') && replies.length > 0) {
+    const matrix = buildPayoffMatrix(snap, sideId, mine, replies, config);
+    
+    // Solve the game
+    const solution = config.solver === 'nash'
+      ? nashEquilibrium(matrix)
+      : regretMatching(
+          matrix,
+          config.solverIterations ?? 1000,
+          config.solverPurificationThreshold ?? 0.1,
+        );
+
+    // Store scores for all actions
+    for (let i = 0; i < mine.length; i++) {
+      // Expected value of action i under the opponent's best response
+      let expectedVal = 0;
+      for (let j = 0; j < replies.length; j++) {
+        expectedVal += replies[j].prob * matrix.payoffs[i][j];
+      }
+      scores.push({ choice: mine[i], score: expectedVal });
     }
-    if (parts.againstSwitch != null && parts.againstSwitch > bestAgainstSwitch) {
-      bestAgainstSwitch = parts.againstSwitch;
-      answer = choice;
+
+    // Choose action according to strategy
+    if (config.playMixed) {
+      // Sample from mixed strategy using Math.random
+      const actionIndex = sampleStrategy(solution.distribution, () => Math.random());
+      best = mine[actionIndex];
+    } else {
+      // Play argmax of mixed strategy
+      let maxProb = -1;
+      let maxIdx = 0;
+      for (let i = 0; i < solution.distribution.length; i++) {
+        if (solution.distribution[i] > maxProb) {
+          maxProb = solution.distribution[i];
+          maxIdx = i;
+        }
+      }
+      best = mine[maxIdx];
+    }
+  } else {
+    // Original behavior: compute scores and pick argmax
+    for (const choice of mine) {
+      if (searchBudgetExpired(config.deadlineMs, scores.length)) break;
+      const parts = scoreChoice(snap, sideId, choice, config.depth, config, config.samples ?? 1, replies, switchReply?.choice || null);
+      const score = parts.mean - (config.progress ? progressPenalty(working, sideId, choice) : 0);
+      scores.push({ choice, score });
+      if (score > bestScore) {
+        bestScore = score;
+        best = choice;
+      }
+      if (parts.againstSwitch != null && parts.againstSwitch > bestAgainstSwitch) {
+        bestAgainstSwitch = parts.againstSwitch;
+        answer = choice;
+      }
     }
   }
 
@@ -349,6 +411,51 @@ function withFoePrior(battle: Battle, sideId: SideId): Battle {
   const clone = cloneFromSnapshot(snapshot(battle));
   applyFoePrior(clone, sideId);
   return clone;
+}
+
+/**
+ * Build a payoff matrix for simultaneous-move game solving.
+ * Each cell [i][j] is the expected value when we play mine[i] and opponent plays replies[j].
+ */
+function buildPayoffMatrix(
+  snap: string,
+  sideId: SideId,
+  ourActions: string[],
+  oppReplies: WeightedChoice[],
+  config: ExactConfig,
+): PayoffMatrix {
+  const K = ourActions.length;
+  const M = oppReplies.length;
+  const payoffs: number[][] = Array(K).fill(0).map(() => Array(M).fill(0));
+
+  // Compute payoff for each cell
+  for (let i = 0; i < K; i++) {
+    for (let j = 0; j < M; j++) {
+      // Score this action pair across samples
+      const samples = config.samples ?? 1;
+      let totalValue = 0;
+      for (let sample = 0; sample < samples; sample++) {
+        const battle = cloneFromSnapshot(snap);
+        reseed(battle, sample);
+        const value = rollout(battle, sideId, ourActions[i], oppReplies[j].choice, config.depth, config);
+        totalValue += value;
+      }
+      payoffs[i][j] = totalValue / samples;
+      
+      // Apply progress penalty if enabled
+      if (config.progress) {
+        const working = cloneFromSnapshot(snap);
+        const penalty = progressPenalty(working, sideId, ourActions[i]);
+        payoffs[i][j] -= penalty;
+      }
+    }
+  }
+
+  return {
+    ourActions,
+    oppActions: oppReplies.map(r => r.choice),
+    payoffs,
+  };
 }
 
 export interface ChoiceScore {
