@@ -1,0 +1,522 @@
+[
+ {
+  "id": "G01",
+  "topic": "switching",
+  "principle": "Hard switch far more than instinct suggests: top-rated players hard-switch on ~23% of their decisions (32% on turn 1, ~26% midgame) vs ~13% for 1000–1300 players. When your active mon is outclassed and a teammate takes the expected hit well, switching is usually correct.",
+  "when_applies": "Every turn; especially early game and when the current matchup is losing.",
+  "source_url": "https://replay.pokemonshowdown.com/search.json?format=gen9randombattle&sort=rating",
+  "confidence": "medium"
+ },
+ {
+  "id": "G02",
+  "topic": "switching",
+  "principle": "Switch frequency should taper as the game progresses: top players hard-switch ~32% early, ~26% midgame, ~19% after turn 15, because late game each switch-in costs HP that can no longer be recovered and fewer safe pivots remain.",
+  "when_applies": "Calibrating how often to switch by game phase.",
+  "source_url": "https://replay.pokemonshowdown.com/search.json?format=gen9randombattle&sort=rating",
+  "confidence": "medium"
+ },
+ {
+  "id": "G03",
+  "topic": "switching",
+  "principle": "Before switching, verify the switch-in survives not just the obvious STAB but the opponent's best coverage roll for that role (check the role's movepool); losing a healthy mon to a coverage move on the switch is a classic low-ladder loss (low-rated players lose ~27% of fainted mons from >=80% HP vs ~19% at top level).",
+  "when_applies": "Choosing a switch-in.",
+  "source_url": "https://replay.pokemonshowdown.com/search.json?format=gen9randombattle&sort=rating",
+  "confidence": "medium"
+ },
+ {
+  "id": "G04",
+  "topic": "switching",
+  "principle": "When unsure what to do early, pivot or double switch to gather information about what the opponent brings in on each of your mons; their switch-in choices reveal both their checks and which of your mons they fear.",
+  "when_applies": "Early game with low information.",
+  "source_url": "https://www.smogon.com/articles/randbats-guide-gen8",
+  "confidence": "high"
+ },
+ {
+  "id": "G05",
+  "topic": "switching",
+  "principle": "Use U-turn/Volt Switch/Flip Turn/Parting Shot to scout safely: you see the switch-in before committing your next mon, so you can bring in the right answer for free. Avoid electric/water pivots into likely immunities (Ground, Water Absorb/Volt Absorb/Lightning Rod types).",
+  "when_applies": "You hold a pivot move and the opponent is likely to switch.",
+  "source_url": "https://www.smogon.com/articles/randbats-guide-gen8",
+  "confidence": "high"
+ },
+ {
+  "id": "G06",
+  "topic": "switching",
+  "principle": "A double switch (switching to the counter of their expected switch-in) is high-reward but costs a full turn if wrong; reserve it for when the opponent's switch is very likely (their active is clearly threatened) and your double-switch target is not exposed to their current mon's best attack.",
+  "when_applies": "Opponent's active is threatened by your active and they have a revealed or inferred check.",
+  "source_url": "https://www.smogon.com/forums/threads/random-battles-community-interview-2-michaelderbeste2.3710882/",
+  "confidence": "medium"
+ },
+ {
+  "id": "G07",
+  "topic": "switching",
+  "principle": "Sacking (letting a mon faint) gives a free, safe switch-in for your next mon; the best sack fodder is a mon that has already done its job (hazards set, low HP, poisoned/seeded, or outclassed by the opponent's remaining team). Never sack a mon that is your only answer to an unrevealed-but-likely threat.",
+  "when_applies": "Your active is at low HP or has completed its role and switching would cost another mon heavy damage.",
+  "source_url": "https://www.smogon.com/articles/randbats-beginners-guide",
+  "confidence": "high"
+ },
+ {
+  "id": "G08",
+  "topic": "switching",
+  "principle": "Do not throw away mons: with no Team Preview, any of your mons may be the only check to a threat the opponent has not yet revealed. Prefer switching a healthy mon in over sacrificing one unless the sack clearly gains tempo.",
+  "when_applies": "Deciding whether to stay in and die vs switch.",
+  "source_url": "https://www.smogon.com/smog/issue35/randbats-expert",
+  "confidence": "high"
+ },
+ {
+  "id": "G09",
+  "topic": "switching",
+  "principle": "Send in replacements after a KO so the newcomer's weaknesses are covered by a teammate that can switch into the likely response; avoid sending a mon whose best switch-in is already low or gone.",
+  "when_applies": "Choosing which mon to send after a faint.",
+  "source_url": "https://www.reddit.com/r/stunfisk/comments/801dxo/the_ultimate_guide_to_random_battles/",
+  "confidence": "medium"
+ },
+ {
+  "id": "G10",
+  "topic": "prediction",
+  "principle": "Model the opponent as a switcher, not just an attacker: strong opponents switch roughly a quarter of the time, and mostly when their active is threatened by your obvious move. When your obvious move is very strong and they have plausible switch-ins, a coverage move or hazard/status that punishes the switch-in often has higher EV.",
+  "when_applies": "You have a clearly dominant 'obvious' move against their active.",
+  "source_url": "https://www.smogon.com/forums/threads/random-battles-community-interview-2-michaelderbeste2.3710882/",
+  "confidence": "high"
+ },
+ {
+  "id": "G11",
+  "topic": "prediction",
+  "principle": "Over-predicting has costs; at high Elo players will intentionally bait predictions (e.g., stay in when a switch looks forced). Mix strategies: choose the move that is acceptable against both stay-in and switch when one exists (safe-progress move) rather than a pure read.",
+  "when_applies": "Prediction situations against higher-rated opponents.",
+  "source_url": "https://www.reddit.com/r/stunfisk/comments/1ticaz0/recently_hit_2000_elo_heres_some_tips_i_can_give/",
+  "confidence": "medium"
+ },
+ {
+  "id": "G12",
+  "topic": "prediction",
+  "principle": "Read negative information: if the opponent repeatedly sacks or sends non-answers into one of your mons, they probably lack a real check to it; that mon is likely your win condition.",
+  "when_applies": "After observing 2+ opponent responses to the same mon of yours.",
+  "source_url": "https://www.smogon.com/forums/threads/random-battles-community-interview-6-pokeblade101.3717709/",
+  "confidence": "high"
+ },
+ {
+  "id": "G13",
+  "topic": "prediction",
+  "principle": "Desperation is a tell: if the opponent goes out of their way to remove one of your mons early, assume it threatens their unrevealed team and preserve it.",
+  "when_applies": "Opponent focuses attacks/hazard pressure on a specific mon.",
+  "source_url": "https://www.smogon.com/forums/threads/random-battles-community-interview-6-pokeblade101.3717709/",
+  "confidence": "medium"
+ },
+ {
+  "id": "G14",
+  "topic": "prediction",
+  "principle": "Use team-generation constraints on the opponent's unrevealed slots: at most 2 mons per type, at most 3 weak to any type, at most 1 sharing a 4x weakness, at most 1 level-100 mon, at most 1 Tera Blast user. E.g., if 3 revealed mons are weak to a type, the rest cannot be.",
+  "when_applies": "Inferring the remaining (unrevealed) opponent mons.",
+  "source_url": "https://www.smogon.com/forums/threads/questions-about-how-random-battles-formats-work-read-here.3712694/",
+  "confidence": "high"
+ },
+ {
+  "id": "G15",
+  "topic": "tera",
+  "principle": "Default to holding Tera: top-rated players Tera a median of turn 20 (~68% through the game) vs turn 12 (~48% through) for low-rated players, and the player who Teras first wins only ~40% of top-level games where both Tera. Spend it early only to stop an immediate game-losing threat or to secure a near-certain sweep.",
+  "when_applies": "Any turn where Tera is available.",
+  "source_url": "https://replay.pokemonshowdown.com/search.json?format=gen9randombattle&sort=rating",
+  "confidence": "medium"
+ },
+ {
+  "id": "G16",
+  "topic": "tera",
+  "principle": "Tera second when possible: once the opponent has spent Tera, their type matchups are fixed and your Tera becomes an unanswerable trump card in the endgame.",
+  "when_applies": "Opponent has not yet Terastallized and the position is not critical.",
+  "source_url": "https://www.reddit.com/r/stunfisk/comments/1ticaz0/recently_hit_2000_elo_heres_some_tips_i_can_give/",
+  "confidence": "medium"
+ },
+ {
+  "id": "G17",
+  "topic": "tera",
+  "principle": "Roughly half of top-level Teras are not STAB-boosting attacks (defensive Teras or Teras with setup/utility). Consider defensive Tera to flip a losing matchup (survive a revenge kill, turn a weakness into a resistance/immunity) for your win condition, not to extend a position you are already winning.",
+  "when_applies": "Your win condition faces a super-effective hit or revenge killer.",
+  "source_url": "https://replay.pokemonshowdown.com/search.json?format=gen9randombattle&sort=rating",
+  "confidence": "medium"
+ },
+ {
+  "id": "G18",
+  "topic": "tera",
+  "principle": "Before committing to a KO line, enumerate the opponent's possible Tera types for that role (each role has a fixed teraTypes list, often 2–3 options) and prefer moves that still KO or do heavy damage through every plausible Tera.",
+  "when_applies": "Planning a KO on a mon that has not Terastallized while the opponent still has Tera.",
+  "source_url": "https://raw.githubusercontent.com/smogon/pokemon-showdown/master/data/random-battles/gen9/sets.json",
+  "confidence": "high"
+ },
+ {
+  "id": "G19",
+  "topic": "tera",
+  "principle": "Anticipate the opponent's Tera when they leave in or bring in a mon that 'makes no sense' against your boosted sweeper—this usually signals a planned defensive Tera; pick the move that handles the Tera type.",
+  "when_applies": "You are boosted and the opponent sends in or stays in with an apparent non-answer.",
+  "source_url": "https://www.reddit.com/r/stunfisk/comments/16b2fgy/plateaud_at_1400_in_gen_9_randbats_advice/",
+  "confidence": "medium"
+ },
+ {
+  "id": "G20",
+  "topic": "tera",
+  "principle": "Tera Blast users (at most one per team) and Tera-typed attacks are guaranteed: most roles always carry an attack matching their Tera type, so a set's Tera type predicts one of its moves and vice versa.",
+  "when_applies": "Inferring moves from Tera type or Tera type from moves.",
+  "source_url": "https://www.smogon.com/forums/threads/questions-about-how-random-battles-formats-work-read-here.3712694/",
+  "confidence": "high"
+ },
+ {
+  "id": "G21",
+  "topic": "tera",
+  "principle": "Tera whenever you are behind is not a rescue plan: top players' Teras are split ~23% ahead / 39% even / 38% behind on mon count; Tera has the most value at the turn it changes a KO or survival threshold, not as a generic comeback attempt.",
+  "when_applies": "Deciding Tera in a losing position.",
+  "source_url": "https://replay.pokemonshowdown.com/search.json?format=gen9randombattle&sort=rating",
+  "confidence": "low"
+ },
+ {
+  "id": "G22",
+  "topic": "wincon",
+  "principle": "Identify your win condition(s) at turn 1 by scanning your team for setup sweepers, strong priority, Choice Scarf, fastest mon and wallbreakers, then plan the game around removing their checks; keep the win condition healthy and unrevealed.",
+  "when_applies": "Game start and after each new opponent reveal.",
+  "source_url": "https://www.smogon.com/articles/randbats-guide-gen8",
+  "confidence": "high"
+ },
+ {
+  "id": "G23",
+  "topic": "setup",
+  "principle": "Do not set up early: only ~6% of top players' setup moves are used on turns 1–3 vs ~20% for low-rated players. Set up once most of the opponent's team is known and their checks are weakened or removed.",
+  "when_applies": "Considering a boosting move.",
+  "source_url": "https://replay.pokemonshowdown.com/search.json?format=gen9randombattle&sort=rating",
+  "confidence": "medium"
+ },
+ {
+  "id": "G24",
+  "topic": "setup",
+  "principle": "~35% of sets are setup roles (Setup Sweeper, Bulky Setup, Fast Bulky Setup, Tera Blast user) and the format admits setup is too strong, so always ask: 'what does the opposing set-up threat do if I give it a free turn?' Answer setup with immediate damage, status, phazing, Encore/Taunt/Haze or a faster revenge killer.",
+  "when_applies": "Opponent has a setup-capable mon on the field.",
+  "source_url": "https://www.smogon.com/forums/threads/questions-about-how-random-battles-formats-work-read-here.3712694/",
+  "confidence": "high"
+ },
+ {
+  "id": "G25",
+  "topic": "setup",
+  "principle": "Boost only to the point where you can sweep: at +1/+2 many sweepers already 2HKO everything; extra boosts expose you to crits, status and phazing for little gain.",
+  "when_applies": "Deciding whether to boost again.",
+  "source_url": "https://www.smogon.com/smog/issue35/randbats-expert",
+  "confidence": "medium"
+ },
+ {
+  "id": "G26",
+  "topic": "wincon",
+  "principle": "If you have two mons sharing an offensive type (or an attack type), one of them is likely your win condition because the opponent rarely has more than one check to that type; use the first to wear that check down.",
+  "when_applies": "Planning which mon to hide for late game.",
+  "source_url": "https://www.smogon.com/smog/issue35/randbats-expert",
+  "confidence": "medium"
+ },
+ {
+  "id": "G27",
+  "topic": "wincon",
+  "principle": "Take KOs with the mon that does not give the opponent's back-line threat a free switch or setup turn; it is often worth sacking something to deny a threatening switch-in on your sweeper.",
+  "when_applies": "Multiple ways to KO an opposing mon.",
+  "source_url": "https://www.smogon.com/articles/randbats-guide-gen8",
+  "confidence": "high"
+ },
+ {
+  "id": "G28",
+  "topic": "wincon",
+  "principle": "Use wallbreakers and Choice-locked attackers early-to-mid game to remove the checks to your sweeper; save fast cleaners and priority users for the end.",
+  "when_applies": "Sequencing which of your attackers to use.",
+  "source_url": "https://www.smogon.com/smog/issue35/randbats-expert",
+  "confidence": "medium"
+ },
+ {
+  "id": "G29",
+  "topic": "hazards",
+  "principle": "At turn 1, check whether each side has hazards and removal. Only ~1/3 of teams get hazard removal, so hazards usually stay up; if the opponent has hazards and you do not, play faster and avoid long switching wars.",
+  "when_applies": "Game start and when hazard setters/removers are revealed.",
+  "source_url": "https://www.smogon.com/forums/threads/questions-about-how-random-battles-formats-work-read-here.3712694/",
+  "confidence": "high"
+ },
+ {
+  "id": "G30",
+  "topic": "hazards",
+  "principle": "Set hazards when the setter is safe (opponent's active cannot punish it hard or set up freely); never set Stealth Rock or Spikes in front of a mon that will set up on you.",
+  "when_applies": "Your hazard setter is on the field.",
+  "source_url": "https://www.smogon.com/articles/randbats-guide-gen8",
+  "confidence": "high"
+ },
+ {
+  "id": "G31",
+  "topic": "hazards",
+  "principle": "Hazards amplify pivoting and chip: they make the opponent's switching expensive and turn near-OHKOs (~85–90%) into KOs; Stealth Rock is especially valuable against teams with several Rock-weak mons, though Rock-weak mons usually carry Heavy-Duty Boots.",
+  "when_applies": "Deciding whether hazards are worth a turn.",
+  "source_url": "https://www.smogon.com/articles/randbats-beginners-guide",
+  "confidence": "high"
+ },
+ {
+  "id": "G32",
+  "topic": "hazards",
+  "principle": "Spikes layers: layer 1 = 1/8, 2 = 1/6, 3 = 1/4; the second layer is marginal versus Stealth Rock + one layer or simply attacking. Toxic Spikes is only strong if the opponent lacks grounded Poison types and removal; two layers mainly for stall.",
+  "when_applies": "Choosing between adding another hazard layer vs attacking.",
+  "source_url": "https://www.smogon.com/articles/randbats-beginners-guide",
+  "confidence": "high"
+ },
+ {
+  "id": "G33",
+  "topic": "hazards",
+  "principle": "Remove hazards at the moment it matters most (before your hazard-weak win condition must switch in, or after the opponent invested multiple turns stacking), not reflexively; one removal turn can erase several enemy turns of work.",
+  "when_applies": "You have Defog/Rapid Spin/Mortal Spin/Tidy Up and hazards are on your side.",
+  "source_url": "https://www.smogon.com/articles/randbats-beginners-guide",
+  "confidence": "medium"
+ },
+ {
+  "id": "G34",
+  "topic": "hazards",
+  "principle": "Hazard correlation with winning is weaker at top level (first hazard setter wins ~47% in top replays vs ~55% in low-rated replays): strong opponents play around hazards, so do not sacrifice tempo or a key mon for an extra layer.",
+  "when_applies": "Weighing hazard value against tempo.",
+  "source_url": "https://replay.pokemonshowdown.com/search.json?format=gen9randombattle&sort=rating",
+  "confidence": "low"
+ },
+ {
+  "id": "G35",
+  "topic": "hazards",
+  "principle": "After a hazard type is revealed on the opponent's team, their other mons almost certainly lack that hazard (generator limits 1 Stealth Rock user, 1 Sticky Web user, 1 Toxic Spikes user, 2 Spikes users, 1 hazard remover per team unless a movepool is too small).",
+  "when_applies": "Inferring unrevealed opponent movesets.",
+  "source_url": "https://raw.githubusercontent.com/smogon/pokemon-showdown/master/data/random-battles/gen9/teams.ts",
+  "confidence": "high"
+ },
+ {
+  "id": "G36",
+  "topic": "speed",
+  "principle": "Speed is deterministic: compute exact Speed from base stat and level (85 EVs, 31 IVs, neutral nature; 0 Spe for Trick Room/Gyro Ball sets). Speed ties and outspeeds by level are knowable before acting; deviations reveal Choice Scarf, paralysis, boosts or Booster Energy.",
+  "when_applies": "Any speed comparison.",
+  "source_url": "https://www.smogon.com/forums/threads/questions-about-how-random-battles-formats-work-read-here.3712694/",
+  "confidence": "high"
+ },
+ {
+  "id": "G37",
+  "topic": "speed",
+  "principle": "Identify and preserve your speed control (fastest mon, Choice Scarf, strong priority, speed boosters): late games are chip-heavy and the faster side usually wins the endgame.",
+  "when_applies": "Midgame resource management.",
+  "source_url": "https://www.smogon.com/smog/issue35/randbats-expert",
+  "confidence": "high"
+ },
+ {
+  "id": "G38",
+  "topic": "speed",
+  "principle": "Priority is decisive in endgames but most sets lack it (roughly 12% of sets, so very roughly half of teams have at least one priority attacker); before committing a low-HP sweeper, check whether the opponent's revealed or role-possible moves include priority.",
+  "when_applies": "Low-HP fast sweeper vs mons that might carry priority.",
+  "source_url": "https://pkmn.github.io/randbats/data/stats/gen9randombattle.json",
+  "confidence": "medium"
+ },
+ {
+  "id": "G39",
+  "topic": "speed",
+  "principle": "Paralysis and Sticky Web are disproportionately strong because the format's speed tiers are close; slowing the opponent's fastest threat often converts the endgame.",
+  "when_applies": "You have Thunder Wave/Glare/Nuzzle or Sticky Web.",
+  "source_url": "https://www.smogon.com/smog/issue35/randbats-expert",
+  "confidence": "medium"
+ },
+ {
+  "id": "G40",
+  "topic": "inference",
+  "principle": "Maintain an explicit set of possible roles per opposing mon (from randbats data) and prune on every reveal: a revealed move, item, ability or Tera type eliminates roles whose movepools/items cannot produce it.",
+  "when_applies": "Every reveal.",
+  "source_url": "https://pkmn.github.io/randbats/data/stats/gen9randombattle.json",
+  "confidence": "high"
+ },
+ {
+  "id": "G41",
+  "topic": "inference",
+  "principle": "Levels encode strength: level correlates about −0.78 with base-stat total in current data (median level ~89 for BST<450 vs ~71 for BST 680+). Judge threat by actual stats at level, not by tier reputation; low-tier mons at high level are often genuine threats.",
+  "when_applies": "Assessing an opposing mon's danger.",
+  "source_url": "https://pkmn.github.io/randbats/data/stats/gen9randombattle.json",
+  "confidence": "high"
+ },
+ {
+  "id": "G42",
+  "topic": "inference",
+  "principle": "Roles fix minimum structures: every non-Support role has at least 2 attacks; Bulky Attacker/Bulky Setup/Bulky Support force recovery if available; Bulky Attacker forces STAB priority if available; Setup roles always have a setup move; AV Pivot always carries Assault Vest and U-turn/Volt Switch if possible.",
+  "when_applies": "Narrowing the remaining moves of a partially revealed set.",
+  "source_url": "https://www.smogon.com/forums/threads/questions-about-how-random-battles-formats-work-read-here.3712694/",
+  "confidence": "high"
+ },
+ {
+  "id": "G43",
+  "topic": "inference",
+  "principle": "Setup and hazards never coexist on one set (generator incompatibility): seeing a hazard rules out setup on that mon and vice versa.",
+  "when_applies": "After a mon reveals a hazard or setup move.",
+  "source_url": "https://www.smogon.com/forums/threads/questions-about-how-random-battles-formats-work-read-here.3712694/",
+  "confidence": "high"
+ },
+ {
+  "id": "G44",
+  "topic": "inference",
+  "principle": "Use damage rolls and move order as evidence: damage dealt/taken narrows items (Life Orb, Choice Band/Specs, Assault Vest) and move order at equal priority bounds Speed (detects Scarf).",
+  "when_applies": "After any exchange of hits.",
+  "source_url": "https://pmariglia.github.io/posts/foul-play/",
+  "confidence": "high"
+ },
+ {
+  "id": "G45",
+  "topic": "inference",
+  "principle": "Hard negative evidence: any status move rules out Assault Vest, and status moves other than Trick/Switcheroo/Healing Wish rule out Choice items; hazard damage on entry rules out Heavy-Duty Boots; weather lasting beyond 5 turns implies the extending rock.",
+  "when_applies": "After observing status-move use, entry hazard damage, or weather duration.",
+  "source_url": "https://pmariglia.github.io/posts/foul-play/",
+  "confidence": "high"
+ },
+ {
+  "id": "G46",
+  "topic": "items",
+  "principle": "Choice items appear when a set has 4 attacks of one category (no Fake Out/Rapid Spin/etc.) or carries Trick/Switcheroo; a Choice-locked opponent is free to switch into a resist of its locked move.",
+  "when_applies": "Opponent reveals 2+ attacks of one category or a Trick/Switcheroo.",
+  "source_url": "https://raw.githubusercontent.com/smogon/pokemon-showdown/master/data/random-battles/gen9/teams.ts",
+  "confidence": "high"
+ },
+ {
+  "id": "G47",
+  "topic": "items",
+  "principle": "Choice Scarf is impossible when the set has a priority move, is a Wallbreaker role, or the species' base Speed is outside 60–108 (also excluded for special sets with U-turn); in those cases a 4-attack set is Band/Specs.",
+  "when_applies": "Deciding whether an opponent might outspeed via Scarf.",
+  "source_url": "https://raw.githubusercontent.com/smogon/pokemon-showdown/master/data/random-battles/gen9/teams.ts",
+  "confidence": "high"
+ },
+ {
+  "id": "G48",
+  "topic": "items",
+  "principle": "Heavy-Duty Boots is the default for Rock-weak mons that do not qualify for a higher-priority item (4x Rock-weak almost always), and for Fast Support pivots/spinners; non-Rock-weak mons rarely have Boots, so Stealth Rock usually chips them.",
+  "when_applies": "Predicting hazard damage on opposing switch-ins.",
+  "source_url": "https://raw.githubusercontent.com/smogon/pokemon-showdown/master/data/random-battles/gen9/teams.ts",
+  "confidence": "high"
+ },
+ {
+  "id": "G49",
+  "topic": "items",
+  "principle": "Default-item logic by role: Fast Attacker/Setup Sweeper/Wallbreaker/Tera Blast user default to Life Orb; Bulky roles default to Leftovers; non-offensive roles with no status moves get Assault Vest; Focus Sash almost only on lead-slot mons (frail Fast Support leads with hazards/setup, frail lead Sticky Web setters) plus a few species-specific cases.",
+  "when_applies": "Inferring an unrevealed item.",
+  "source_url": "https://www.smogon.com/forums/threads/questions-about-how-random-battles-formats-work-read-here.3712694/",
+  "confidence": "high"
+ },
+ {
+  "id": "G50",
+  "topic": "items",
+  "principle": "Life Orb recoil, Leftovers recovery and Boots-on-entry are revealed in the log; update the item belief immediately and remember items like Air Balloon (4x Ground-weak non-setup sets), Weakness Policy (bulky speed-setup) and White Herb (Shell Smash).",
+  "when_applies": "After any end-of-turn or entry message.",
+  "source_url": "https://raw.githubusercontent.com/smogon/pokemon-showdown/master/data/random-battles/gen9/teams.ts",
+  "confidence": "medium"
+ },
+ {
+  "id": "G51",
+  "topic": "abilities",
+  "principle": "Abilities roll uniformly within the role's ability pool, but some are enforced or rejected by moves/team (e.g., conditional weather/ability pairs); a revealed ability can collapse role uncertainty.",
+  "when_applies": "Opponent ability is revealed or still hidden.",
+  "source_url": "https://www.smogon.com/forums/threads/questions-about-how-random-battles-formats-work-read-here.3712694/",
+  "confidence": "medium"
+ },
+ {
+  "id": "G52",
+  "topic": "status",
+  "principle": "Status is a primary win tool against bulky mons that attacks alone cannot break: Toxic/burn wear down walls, paralysis fixes speed matchups, and sleep provides free switch-ins or setup turns (Sleep Clause limits one).",
+  "when_applies": "Facing a bulky mon or fast threat while holding status moves.",
+  "source_url": "https://www.smogon.com/smog/issue35/randbats-expert",
+  "confidence": "high"
+ },
+ {
+  "id": "G53",
+  "topic": "endgame",
+  "principle": "In the endgame, count precisely: remaining HP %, hazards on each side, recovery and PP, Speed order, priority and remaining Tera; search several turns ahead because positions are small and calculable.",
+  "when_applies": "Two or three mons left per side.",
+  "source_url": "https://www.smogon.com/forums/threads/jaxcalibur-a-gen-9-randbats-bot-that-reached-1-on-the-ladder.3787537/",
+  "confidence": "high"
+ },
+ {
+  "id": "G54",
+  "topic": "endgame",
+  "principle": "If every safe line loses, take the line with the highest win probability even if it relies on a miss, crit or speed tie—'1% is better than 0%'.",
+  "when_applies": "Clearly losing positions.",
+  "source_url": "https://www.smogon.com/articles/randbats-beginners-guide",
+  "confidence": "medium"
+ },
+ {
+  "id": "G55",
+  "topic": "endgame",
+  "principle": "Watch PP in long games: recovery-based walls can win by PP stalling; track the opponent's remaining PP on key moves (strong bots have been weakest exactly here).",
+  "when_applies": "Long games with recovery/walls on either side.",
+  "source_url": "https://www.smogon.com/forums/threads/jaxcalibur-a-gen-9-randbats-bot-that-reached-1-on-the-ladder.3787537/",
+  "confidence": "medium"
+ },
+ {
+  "id": "G56",
+  "topic": "endgame",
+  "principle": "Top-level games are longer (median ~31 turns vs ~22 for low-rated replays) and winners keep fewer mons (median 2 vs 3): expect grinding games and value recovery and chip preservation over fast trades.",
+  "when_applies": "Overall tempo planning.",
+  "source_url": "https://replay.pokemonshowdown.com/search.json?format=gen9randombattle&sort=rating",
+  "confidence": "medium"
+ },
+ {
+  "id": "G57",
+  "topic": "information",
+  "principle": "Reveal as little of your team as possible early; leading information advantage is decisive without Team Preview. Prefer revealing mons that are already known to be fodder or that have obvious roles.",
+  "when_applies": "Choosing between switch options of similar value.",
+  "source_url": "https://www.smogon.com/articles/randbats-beginners-guide",
+  "confidence": "high"
+ },
+ {
+  "id": "G58",
+  "topic": "information",
+  "principle": "When behind or needing a specific matchup, it is acceptable to reveal your last mon to set up the 'secret weapon'; otherwise make the objectively best play even if it reveals a mon.",
+  "when_applies": "Trade-off between hiding info and making the best move.",
+  "source_url": "https://www.smogon.com/forums/threads/random-battles-community-interview-2-michaelderbeste2.3710882/",
+  "confidence": "medium"
+ },
+ {
+  "id": "G59",
+  "topic": "information",
+  "principle": "Bulky phazers, Regenerator mons and recovery users are good scouts: they force switches and reveal more of the opponent's team while staying healthy.",
+  "when_applies": "Choosing which mon to use to gain information early.",
+  "source_url": "https://www.smogon.com/forums/threads/random-battles-community-interview-2-michaelderbeste2.3710882/",
+  "confidence": "medium"
+ },
+ {
+  "id": "G60",
+  "topic": "levels",
+  "principle": "Levels are periodically rebalanced from ladder win rates (games above 1500 Elo for current gen): one level per ~1.5% win-rate deviation at p<0.01, max 3 per patch; a 1-level change shifts win rate by ~1%. Treat every mon as roughly 50% win rate on average—matchup and play matter more than 'tier'.",
+  "when_applies": "Evaluating team strength or an opposing mon by reputation.",
+  "source_url": "https://www.smogon.com/forums/threads/random-battles-level-balancing.3721211/",
+  "confidence": "high"
+ },
+ {
+  "id": "G61",
+  "topic": "levels",
+  "principle": "Levels are pooled across a species' sets, so a species' different roles must be roughly equal in power; do not assume a mon's 'weak' set—always weigh all of its roles by their weights.",
+  "when_applies": "Role uncertainty for an opposing species.",
+  "source_url": "https://www.smogon.com/forums/threads/questions-about-how-random-battles-formats-work-read-here.3712694/",
+  "confidence": "medium"
+ },
+ {
+  "id": "G62",
+  "topic": "mistakes",
+  "principle": "Low-ladder pattern to avoid: staying in on bad matchups, setting up or Teraing early, and failing to scout. High-ladder pattern: switch more, Tera later, set up only with information, and play long games.",
+  "when_applies": "Policy-level self-check.",
+  "source_url": "https://replay.pokemonshowdown.com/search.json?format=gen9randombattle&sort=rating",
+  "confidence": "medium"
+ },
+ {
+  "id": "G63",
+  "topic": "mistakes",
+  "principle": "Do not assume the obvious play wins: at high Elo the opponent knows exactly what your set can and cannot run; if their only good response is a specific Tera or switch, playing to beat that response is often correct.",
+  "when_applies": "Against strong opponents in readable positions.",
+  "source_url": "https://www.reddit.com/r/stunfisk/comments/16b2fgy/plateaud_at_1400_in_gen_9_randbats_advice/",
+  "confidence": "medium"
+ },
+ {
+  "id": "G64",
+  "topic": "mistakes",
+  "principle": "Use the calc mindset: before a major decision compute damage ranges against the opponent's plausible sets/items (randbats calc), remembering that items and abilities change the result.",
+  "when_applies": "Any KO/survival-critical decision.",
+  "source_url": "https://www.smogon.com/forums/threads/random-battles-community-interview-10-odr.3724131/",
+  "confidence": "high"
+ },
+ {
+  "id": "G65",
+  "topic": "mistakes",
+  "principle": "Avoid panic switching (switching every time a mon takes damage); pure-LLM bots are documented to panic-switch and lose to attrition. Switch only when the switch-in gains value (takes the hit better, threatens the opponent, or preserves a needed mon).",
+  "when_applies": "LLM strategist sanity check on switch recommendations.",
+  "source_url": "https://arxiv.org/abs/2402.01118",
+  "confidence": "high"
+ }
+]
