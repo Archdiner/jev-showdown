@@ -1,16 +1,22 @@
 import { createHash } from 'crypto';
-import { loadConfig, toSpec } from '../config/load.js';
+import { loadConfig, toSpec, type LoadedConfig } from '../config/load.js';
+import type { BotSpec } from '../config/interfaces.js';
+import type { GameResult } from '../bench/game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
-import { playPaired, sideWinRate } from '../exp/play.js';
+import type { ExactConfig } from '../engine/exact/search.js';
+import { playPaired } from '../exp/play.js';
 import { openDb } from './db.js';
 import { beat } from './heartbeat.js';
 import { writeChampion, writeLiveApproved } from './labels.js';
 import type { OpsPaths } from './paths.js';
 import { listProposals, completeJob, type Proposal } from './queue.js';
+import { sprt, tallySide } from './sprt.js';
 
-const P0 = 0.5;
-const P1 = 1 / (1 + 10 ** (-10 / 400));
-const BOUNDARY = Math.log((1 - 0.05) / 0.05);
+export { sprt } from './sprt.js';
+
+const EXACT_SEARCHES = new Set(['greedy-1ply', 'depth-n', 'expectimax', 'mcts-stub']);
+const DEFAULT_MAX_GAMES = 1200;
+const DEFAULT_BATCH = 50;
 
 export interface DiagnosticReport {
   passed: number;
@@ -26,7 +32,7 @@ export interface Evidence {
   invalid: number;
   crashes: number;
   diagnostics: DiagnosticReport;
-  /** Bootstrap labels the current champion file. It still requires 100% diagnostics. */
+  /** Present when the caller is the no-game bootstrap path. It does not skip SPRT. */
   bootstrap?: boolean;
 }
 
@@ -37,40 +43,51 @@ export interface Verdict {
   sprt: 'promote' | 'reject' | 'continue';
 }
 
-export function sprt(wins: number, losses: number): Verdict['sprt'] {
-  if (wins + losses === 0) return 'continue';
-  const llr = wins * Math.log(P1 / P0) + losses * Math.log((1 - P1) / (1 - P0));
-  if (llr >= BOUNDARY) return 'promote';
-  if (llr <= -BOUNDARY) return 'reject';
-  return 'continue';
+/** Search settings the diagnostic suite should run. A non-exact config does not inherit the champion suite. */
+export function exactDiagnosticsConfig(loaded: LoadedConfig): ExactConfig | null {
+  if (!EXACT_SEARCHES.has(loaded.config.search.id)) return null;
+  const params = loaded.config.search.params;
+  return {
+    depth: params.depth,
+    samples: params.samples,
+    opponentModel: params.opponentModel,
+    evalMode: params.evalMode,
+    errorAsLoss: false,
+  };
 }
 
-export function realDiagnostics(): DiagnosticReport {
-  const result = runDiagnosticSuite();
+export function diagnosticsForConfig(loaded: LoadedConfig): DiagnosticReport {
+  const config = exactDiagnosticsConfig(loaded);
+  if (!config) return { passed: 0, failed: 1, total: 1 };
+  const result = runDiagnosticSuite(config);
   return { passed: result.passed, failed: result.failed, total: result.total };
+}
+
+export function realDiagnostics(configPath = 'configs/champion.yaml'): DiagnosticReport {
+  return diagnosticsForConfig(loadConfig(configPath));
 }
 
 /** Records a decision and writes a label only when the checks pass. */
 export function judge(paths: OpsPaths, evidence: Evidence): Verdict {
   const diagnosticsPass = evidence.diagnostics.total > 0 && evidence.diagnostics.failed === 0;
   const guardrailsPass = evidence.invalid === 0 && evidence.crashes === 0;
-  const sprtVerdict = evidence.bootstrap ? 'continue' : sprt(evidence.wins, evidence.losses);
+  const sprtVerdict = sprt(evidence.wins, evidence.losses);
+  const played = evidence.wins + evidence.losses;
   let labeled = false;
   let reason: string;
   if (!diagnosticsPass) {
     reason = `diagnostics ${evidence.diagnostics.passed}/${evidence.diagnostics.total}, need 100%`;
   } else if (!guardrailsPass) {
     reason = `guardrails failed: invalid=${evidence.invalid} crashes=${evidence.crashes}`;
-  } else if (evidence.bootstrap) {
-    labeled = true;
-    reason = `bootstrap ${evidence.configPath}; diagnostics ${evidence.diagnostics.passed}/${evidence.diagnostics.total}`;
+  } else if (played === 0) {
+    reason = `no paired games against the champion; diagnostics ${evidence.diagnostics.passed}/${evidence.diagnostics.total}`;
   } else if (sprtVerdict === 'reject') {
-    reason = 'SPRT says the challenger is worse than even';
+    reason = 'SPRT says the challenger is worse than the champion';
   } else if (sprtVerdict === 'continue') {
     reason = 'SPRT inconclusive, no label';
   } else {
     labeled = true;
-    reason = `SPRT no-regression and diagnostics ${evidence.diagnostics.passed}/${evidence.diagnostics.total}`;
+    reason = `SPRT better than the champion and diagnostics ${evidence.diagnostics.passed}/${evidence.diagnostics.total}`;
   }
 
   const db = openDb(paths);
@@ -134,32 +151,70 @@ export function bootstrapChampion(
   });
 }
 
-export async function reviewProposals(
-  paths: OpsPaths,
-  opts: { pairs?: number; diagnostics?: () => DiagnosticReport } = {}
-): Promise<Verdict[]> {
+export interface ReviewOptions {
+  /** Upper bound on paired games. The default is large enough for a true +10 Elo to finish. */
+  maxGames?: number;
+  /** @deprecated Alias of maxGames. A short cap can only return "continue". */
+  pairs?: number;
+  batch?: number;
+  opponentPath?: string;
+  diagnostics?: (loaded: LoadedConfig) => DiagnosticReport;
+  play?: (
+    a: BotSpec,
+    b: BotSpec,
+    games: number,
+    seed: number,
+    parallel: boolean,
+  ) => Promise<GameResult[]>;
+}
+
+export async function reviewProposals(paths: OpsPaths, opts: ReviewOptions = {}): Promise<Verdict[]> {
   const jobs = listProposals(paths);
   if (jobs.length === 0) return [];
-  const diagnostics = opts.diagnostics ?? realDiagnostics;
-  const report = diagnostics();
+  const diagnostics = opts.diagnostics ?? diagnosticsForConfig;
+  const play = opts.play ?? playPaired;
+  const maxGames = opts.maxGames ?? opts.pairs ?? DEFAULT_MAX_GAMES;
+  const batch = opts.batch ?? DEFAULT_BATCH;
   const verdicts: Verdict[] = [];
   for (const job of jobs) {
     const proposal: Proposal = job.proposal;
     const loaded = loadConfig(proposal.configPath);
-    const opponent = loadConfig(job.spec.opponent || 'configs/panel/maxdamage.yaml');
-    const games = evenGames(opts.pairs ?? 150);
-    const results = await playPaired(toSpec(loaded, 'gate'), toSpec(opponent, 'gate'), games, 9000, false);
-    const rate = sideWinRate(results, loaded.configId);
-    const wins = rate.wins;
-    const losses = rate.games - rate.wins;
-    const invalid = results.reduce((sum, game) => sum + game.p1Invalid + game.p2Invalid, 0);
+    const opponent = loadConfig(opts.opponentPath ?? 'configs/champion.yaml');
+    const report = diagnostics(loaded);
+    let wins = 0;
+    let losses = 0;
+    let invalid = 0;
+    let crashes = 0;
+    let played = 0;
+    let seed = 9000;
+    while (played < maxGames && sprt(wins, losses) === 'continue') {
+      let games = Math.min(batch, maxGames - played);
+      if (games < 2) break;
+      if (games % 2 !== 0) games -= 1;
+      const results = await play(toSpec(loaded, 'gate'), toSpec(opponent, 'gate'), games, seed, false);
+      seed += games;
+      if (results.length === 0) break;
+      const tally = tallySide(results.map(game => ({
+        winner: game.winner,
+        p1Id: game.p1ConfigId,
+        p2Id: game.p2ConfigId,
+        p1Invalid: game.p1Invalid,
+        p2Invalid: game.p2Invalid,
+        crashed: game.crashed,
+      })), loaded.configId);
+      wins += tally.wins;
+      losses += tally.losses;
+      invalid += tally.invalid;
+      crashes += tally.crashes;
+      played += results.length;
+    }
     const verdict = judge(paths, {
       configPath: proposal.configPath,
       action: proposal.action,
       wins,
       losses,
       invalid,
-      crashes: 0,
+      crashes,
       diagnostics: report,
     });
     completeJob(paths, job.id, { decisionId: verdict.decisionId, status: 'done' });
@@ -186,7 +241,3 @@ export async function runGatekeeper(
   beat(paths, 'gatekeeper', 'stopped', 'exit');
 }
 
-function evenGames(games: number): number {
-  const count = Math.max(2, games);
-  return count % 2 === 0 ? count : count + 1;
-}
