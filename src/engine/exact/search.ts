@@ -93,6 +93,43 @@ export interface ExactConfig {
    * the first matching set (opt-in; see stats-prior.ts).
    */
   statsPrior?: StatsPriorOptions;
+  /**
+   * Opt-in endgame deepening: search `depth` plies (with rollouts bound by
+   * the deadline) once at most `mons` unfainted mons remain on both sides
+   * combined. Unset keeps the configured depth everywhere.
+   */
+  endgame?: EndgameOptions;
+}
+
+export interface EndgameOptions {
+  /** Deepen when our unfainted mons + the foe's not-yet-fainted mons <= this. */
+  mons: number;
+  /** Depth used in the endgame. */
+  depth: number;
+}
+
+/** Gen 9 Random Battle teams always have six mons; unrevealed foes are alive. */
+const RANDBATS_TEAM_SIZE = 6;
+
+/**
+ * Mons still in the game from the searching side's view. Our side counts
+ * unfainted mons. The decision battle may hold only the revealed foes, so
+ * the foe count is the team size minus the foes seen to faint.
+ */
+export function remainingMons(battle: Battle, sideId: SideId): number {
+  const me = battle.getSide(sideId);
+  const ours = me.pokemon.filter(mon => !mon.fainted && mon.hp > 0).length;
+  const foeTeam = Math.max(RANDBATS_TEAM_SIZE, me.foe.pokemon.length);
+  const foeFainted = me.foe.pokemon.filter(mon => mon.fainted || mon.hp <= 0).length;
+  return ours + Math.max(0, foeTeam - foeFainted);
+}
+
+/** The config this decision searches with: deeper when the endgame option fires. */
+export function endgameConfig(battle: Battle, sideId: SideId, config: ExactConfig): ExactConfig {
+  const endgame = config.endgame;
+  if (!endgame || endgame.depth <= config.depth) return config;
+  if (remainingMons(battle, sideId) > endgame.mons) return config;
+  return { ...config, depth: endgame.depth, rolloutDeadline: true };
 }
 
 /** True when the deadline has passed and the search already has a score to return. */
@@ -307,6 +344,7 @@ function ownChoices(battle: Battle, sideId: SideId, config: ExactConfig, atRoot:
  * Every branch is a clone of the real battle stepped with Battle.choose.
  */
 export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig = EXACT_1PLY): SearchTrace {
+  if (config.endgame) config = endgameConfig(battle, sideId, config);
   if (config.selective && config.depth >= 2) return selectiveDepth2(battle, sideId, config);
   const working = config.foePrior ? withFoePrior(battle, sideId, config.statsPrior) : battle;
   const mine = ownChoices(working, sideId, config, true);

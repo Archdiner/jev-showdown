@@ -134,6 +134,9 @@ async function runSearch(
       evalMode: evalModeOf(ctx),
       deadlineMs: ctx.deadlineMs,
       statsPrior: statsPriorOf(params.foeStats),
+      ...(params.endgameMons != null
+        ? { endgame: { mons: params.endgameMons, depth: params.endgameDepth ?? 2 } }
+        : {}),
     });
     return trace;
   }

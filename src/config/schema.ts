@@ -74,6 +74,13 @@ export const SearchParamsSchema = z.object({
    * Unset keeps the revealed-only foe team and existing config ids.
    */
   foeUnseen: z.enum(['revealed', 'placeholder']).optional(),
+  /**
+   * Opt-in endgame deepening for exact-1ply-qw: search endgameDepth plies
+   * once at most endgameMons mons remain on both sides combined (unrevealed
+   * foes count as alive). Unset keeps the configured depth and config ids.
+   */
+  endgameMons: z.number().int().min(2).max(12).optional(),
+  endgameDepth: z.number().int().min(2).max(3).optional(),
 }).strict();
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
 

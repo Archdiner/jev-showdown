@@ -1,0 +1,11 @@
+name: stacked-qw-fitted-endgame
+extends: stacked-qw-fitted.yaml
+# stacked-qw-fitted + endgame deepening: depth 2 once <= 3 mons remain on
+# both sides combined (unrevealed foes count as alive), depth 1 otherwise.
+search:
+  id: exact-1ply-qw
+  params:
+    depth: 1
+    samples: 8
+    endgameMons: 3
+    endgameDepth: 2
