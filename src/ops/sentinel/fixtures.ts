@@ -106,6 +106,15 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
       variantId: 'arm-a',
     }),
     game({
+      battleId: 'battle-replay',
+      ts: older + 3500,
+      outcome: 'tie',
+      endReason: 'disconnect',
+      turns: 4,
+      eloAfter: null,
+      gitSha: 'good222',
+    }),
+    game({
       battleId: 'battle-bad',
       ts: older + 4000,
       outcome: 'loss',

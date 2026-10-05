@@ -1,3 +1,4 @@
+import { countableGameRows, loadContaminationFlags } from '../client/game-integrity.js';
 import { isLocalLiveGame, recordedElo, recordedOutcome } from '../client/game-record.js';
 import { openDb } from './db.js';
 import { readJsonl, type OpsPaths } from './paths.js';
@@ -17,7 +18,8 @@ interface LiveRow {
 const DAY = 24 * 60 * 60 * 1000;
 
 export function dailyReport(paths: OpsPaths, now = Date.now()): string {
-  const games = readJsonl<LiveRow>(paths.liveGames).filter(game => game.ts >= now - DAY);
+  const games = countableGameRows(readJsonl<LiveRow>(paths.liveGames), loadContaminationFlags(paths.liveGames))
+    .filter(game => game.ts >= now - DAY);
   const db = openDb(paths);
   let promotions: string[] = [];
   let regressions: string[] = [];

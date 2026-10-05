@@ -7,6 +7,7 @@ import {
 
 /** Parsers for ladder JSONL, `[ladder]` lines, and ops live/heartbeat JSONL. */
 
+import { contaminationFlagsFor, rowExcluded } from '../client/game-integrity.js';
 import { isLocalLiveGame, isPhantomRecord } from '../client/game-record.js';
 
 export type EndReason =
@@ -95,6 +96,13 @@ function num(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() && value !== 'n/a' && Number.isFinite(Number(value))) return Number(value);
   return null;
+}
+
+/** Ladder Elo is never negative. `-1` is the unreported sentinel. */
+function ratingNum(value: unknown): number | null {
+  const parsed = num(value);
+  if (parsed === null || parsed < 0) return null;
+  return parsed;
 }
 
 function str(value: unknown): string | null {
@@ -231,9 +239,9 @@ export function parseJsonRecord(row: Record<string, unknown>, hint: { source: st
       battleId,
       outcome,
       opponent: str(row.opponent) || str(row.opponentName),
-      opponentRating: num(row.opponentRating) ?? num(row.opponentElo),
-      ratingBefore: local ? null : (num(row.ratingBefore) ?? num(row.eloBefore) ?? num(row.ourRatingBefore)),
-      ratingAfter: local ? null : (num(row.ratingAfter) ?? num(row.eloAfter) ?? num(row.ourRatingAfter) ?? num(row.rating) ?? num(row.elo)),
+      opponentRating: ratingNum(row.opponentRating) ?? ratingNum(row.opponentElo),
+      ratingBefore: local ? null : (ratingNum(row.ratingBefore) ?? ratingNum(row.eloBefore) ?? ratingNum(row.ourRatingBefore)),
+      ratingAfter: local ? null : (ratingNum(row.ratingAfter) ?? ratingNum(row.eloAfter) ?? ratingNum(row.ourRatingAfter) ?? ratingNum(row.rating) ?? ratingNum(row.elo)),
       gxe: local ? null : num(row.gxe),
       replayUrl: replayUrl(row.replayUrl, row.replayId) || replayUrl(row.replay, null),
       endReason: normalizeEndReason(str(row.endReason) || str(row.end_reason) || str(row.ended), outcome),
@@ -286,9 +294,9 @@ export function parseSummary(value: unknown, source: string): GameRecord[] {
       battleId: str(row.battleId),
       outcome,
       opponent: str(row.opponent),
-      opponentRating: num(row.opponentRating),
-      ratingBefore: num(row.ratingBefore) ?? num(row.eloBefore),
-      ratingAfter: num(row.ratingAfter) ?? num(row.eloAfter) ?? num(row.elo),
+      opponentRating: ratingNum(row.opponentRating),
+      ratingBefore: ratingNum(row.ratingBefore) ?? ratingNum(row.eloBefore),
+      ratingAfter: ratingNum(row.ratingAfter) ?? ratingNum(row.eloAfter) ?? ratingNum(row.elo),
       gxe: num(row.gxe),
       replayUrl: replayUrl(row.replayUrl, row.replayId),
       endReason: normalizeEndReason(str(row.endReason), outcome),
@@ -329,6 +337,18 @@ export function parseLog(text: string, hint: { source: string; runner: string | 
   let skipped = 0;
   let engine: string | null = null;
   let lineNo = 0;
+  const objects: object[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line.startsWith('{')) continue;
+    try {
+      const row = JSON.parse(line) as object;
+      if (row && typeof row === 'object') objects.push(row);
+    } catch {
+      // Counted again on the parse pass.
+    }
+  }
+  const excluded = contaminationFlagsFor(objects);
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line) continue;
@@ -337,7 +357,9 @@ export function parseLog(text: string, hint: { source: string; runner: string | 
     if (login) engine = login[2];
     if (line.startsWith('{')) {
       try {
-        const parsed = parseJsonRecord(JSON.parse(line) as Record<string, unknown>, { source: hint.source, runner: hint.runner, engines });
+        const row = JSON.parse(line) as Record<string, unknown>;
+        if (rowExcluded(row, excluded)) continue;
+        const parsed = parseJsonRecord(row, { source: hint.source, runner: hint.runner, engines });
         if (!parsed) continue;
         if (parsed.heartbeat) heartbeats.push(parsed.heartbeat);
         if (parsed.score) scores.push(parsed.score);
