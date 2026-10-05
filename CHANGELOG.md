@@ -1,5 +1,11 @@
 # Changelog
 
+## Jev turn score
+
+Jev scores the situation brief for each legal action, including switches and Terastallize. It returns a matchup score, the chance the opponent switches, and a value and a risk for every action it was shown. The action it would play is value minus a quarter of the risk. A missing key, a timeout (2.5 seconds), or an empty answer uses exact 1-ply search.
+
+Screen on a machine with `VERCEL_AI_GATEWAY_KEY`: `npx tsx src/llm/jev-turn-screen.ts 20`
+
 ## Operations layer
 
 Four long-running commands share the graph and the logs: `npm run ops -- factory`, `gatekeeper`, `live`, and `analyst`. The factory runs queued simulations and may propose a config. The gatekeeper is the only command that writes `champion` or `live-approved`, and only after SPRT and a 100% diagnostic pass. Live plays those configs on one Showdown login, gives the champion most of the games, and pulls a config after a loss streak or a rating drop. The analyst turns a live loss into a general hypothesis and a factory job. `status`, `report --daily`, and `supervise` read the same store. `deploy/jev-ops.service` is the systemd unit.
