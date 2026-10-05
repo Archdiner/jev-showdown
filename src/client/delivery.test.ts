@@ -27,4 +27,21 @@ describe('popup attribution', () => {
       candidates: rooms,
     });
   });
+
+  it('matches a replay url whose password follows the battle id', () => {
+    const url = 'https://replay.pokemonshowdown.com/gen9randombattle-10-vf14y87snr046p0x7g86l2ffrf1912epw';
+    expect(attributePopup(url, rooms)).toEqual({
+      attribution: 'matched',
+      roomId: 'battle-gen9randombattle-10',
+    });
+  });
+
+  it('does not file a popup that names some other battle', () => {
+    const url = 'https://replay.pokemonshowdown.com/gen9randombattle-99-abc';
+    expect(attributePopup(url, rooms)).toEqual({ attribution: 'elsewhere', candidates: [] });
+    expect(attributePopup(url, ['battle-gen9randombattle-1'])).toEqual({
+      attribution: 'elsewhere',
+      candidates: [],
+    });
+  });
 });

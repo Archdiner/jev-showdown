@@ -585,8 +585,8 @@ Per-battle JSONL (`logs/ladder/{user}-{room}.jsonl`) records these events in add
 | `kind` | When |
 | --- | --- |
 | `timer` | Every `\|inactive\|` / `\|inactiveoff\|`. `secondsLeft`, `aboutUs`, `tight` (`aboutUs` and at most 4 seconds). |
-| `choice-delivery` | After `/choose`. `sent`, `cause` (`sent`, `socket-closed`, `send-threw`, `illegal`, `server-rejected`, `not-your-turn`, `no-legal-retry`), `retry`, `replacement`, `serverLine`. A false `choose` is retried. When no legal replacement remains, one `no-legal-retry` row is written. |
-| `popup` | `attribution` is `matched`, `only-open`, or `ambiguous`. An ambiguous popup is copied onto each open battle with `candidates` and is not filed on "the latest room". |
+| `choice-delivery` | After `/choose`. `sent`, `cause` (`sent`, `unconfirmed`, `stale-rqid`, `socket-closed`, `send-threw`, `illegal`, `server-rejected`, `not-your-turn`, `no-legal-retry`), `retry`, `replacement`, `serverLine`, `intendedRoomId`, `sentRoomId`. `intendedRoomId` is the battle the request belonged to. `sentRoomId` is the room id on the `/choose` message, or null when nothing was sent. A false `choose` is retried. `unconfirmed` is the same choice and rqid sent again when 8 seconds pass with no new request and no later turn, and also when our clock ticks. Turn 1 is included. `|turn|1` after the move does not clear it. `stale-rqid` was not sent. When no legal replacement remains, one `no-legal-retry` row is written. |
+| `popup` | `attribution` is `matched`, `only-open`, `ambiguous`, or `elsewhere`. A replay URL matches the battle id even when a password follows it. `elsewhere` is a named battle that is not open, and it is not copied onto the battles that are. An ambiguous popup is copied onto each open battle with `candidates` and is not filed on "the latest room". |
 
 `secondsLeft` is cleared on each `\|request\|`, so a later turn does not reuse the previous clock. The game `result` includes `choiceDeliveryFailures`, `noLegalRetries`, and `ambiguousPopups`. Finished battles are removed from the driver's room map.
 

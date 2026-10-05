@@ -1,5 +1,9 @@
 # Changelog
 
+## A sent choice is resent until the turn moves
+
+`/choose` returning true is not the server applying the move. If no new `|request|` and no later `|turn|` follows that send within 8 seconds, the same choice and the same rqid are sent again, including on turn 1. A `|turn|1` that arrives after the move was sent does not count: that line starts the turn. A clock line for us with no new turn also resends. Each `choice-delivery` row has `intendedRoomId` (the battle the request belonged to) and `sentRoomId` (the room id written on `/choose`). A choice whose rqid is no longer the room's request is not sent. One websocket frame can carry several battles; each `>roomid` switches the room, so a later battle's `|request|` is not answered in the earlier room. A replay popup names the battle in its URL, including the password after the id, and is not written onto a different open battle or onto whichever room was active most recently. A popup line that names another battle is dropped instead of being stored on the room that happened to receive it. A finished battle ignores later lines, so it does not log a second `game_start`.
+
 ## Self-play uses the ladder's hidden information
 
 Local self-play, the factory, and the gatekeeper used to search the real battle, so each bot saw the opponent's full team, sets, and unrevealed moves. They now build the decision the way the live ladder does: a `@pkmn/client` replay of the lines that side would receive, then `livePositionFromClient` and `buildDecisionBattle`. Unrevealed teammates, moves, items, and abilities stay hidden. The foe model is that same function, so a later change to the ladder's opponent sets applies here too.
@@ -15,6 +19,7 @@ Same seeds, 20 pairs, sides swapped, 40 games, after `npm run data:refresh` (509
 | max-damage vs random | 100% (40W-0L-0T) | 100% (40W-0L-0T) |
 
 Exact's voluntary switch rate vs max-damage fell from 35.5% (425/1196) with full information to 14.9% (137/921) with hidden information. The published gate (300 games, full information) was 78% vs max-damage and 98% vs random. Hidden information is where that lead shrinks.
+
 
 ## The analyst reads ladder games and the foe's real seat
 
