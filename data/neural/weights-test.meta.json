@@ -1,0 +1,18 @@
+{
+  "trainedAt": "2026-10-05T05:11:35.857322",
+  "dataPath": "data/neural/test.jsonl",
+  "architecture": {
+    "inputDim": 637,
+    "hidden1": 128,
+    "hidden2": 32
+  },
+  "parameters": 85836,
+  "epochs": 20,
+  "batchSize": 256,
+  "learningRate": 0.001,
+  "bestDevBrier": 0.35050610792474146,
+  "testBrier": 0.15639745311653244,
+  "trainSamples": 433,
+  "devSamples": 80,
+  "testSamples": 88
+}
