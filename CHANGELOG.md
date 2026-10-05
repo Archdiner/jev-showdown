@@ -1,5 +1,19 @@
 # Changelog
 
+## Fitted 1-ply is a live A/B challenger
+
+`configs/fitted-1ply.yaml` plays the fitted-team evaluator through greedy 1-ply (depth 1, 8 samples, max-damage opponent). Config id `b010a726fd447898`. Champion exact 1-ply is unchanged.
+
+Paired hidden-info screen, 100 seeds, sides swapped, 200 games, seed 1. Each policy sees only its public observation. Opponent is exact 1-ply (8 samples, HP eval). Randbats generator species 508. Invalid choices 0, crashes 0, view misses 0.
+
+119W-81L-0T (59.5%). Wilson 95% CI 52.6–66.1%. Decision latency p50 74ms, p95 123ms, p99 156ms, max 357ms.
+
+SPRT (elo0=0, elo1=+10, α=β=0.05) is still `continue`, so this is a live-approved explore share and not a champion promotion. The gatekeeper reads `state/ops/recorded/fitted-1ply.json` on startup. The diagnostic suite for this search id is the HP suite (22/22).
+
+```
+npm run ladder -- --engine search --ab configs/fitted-1ply.yaml:0.5
+```
+
 ## Stack supervisor
 
 `scripts/stack.sh start|stop|status|restart` runs ladder, the ops roles (including sentinel, which `supervise` does not start), and the dashboard as separate process groups. The pgid is `state/pids/<component>.pid`. Logs are `logs/stack/<component>.log`. `LADDER_LOG_DIR` and `LIVE_RUNS_DIR` are set. The script re-execs under bash when a zsh login shell invokes it, then enables `set -euo pipefail` and `nullglob`. Pgids are read into an array, so an orphan kill still reaches every group. `start ladder` deletes `state/DRAIN` and `live-runs/*.drain` and refuses to detach if a drain file remains. `stop` signals the group with SIGINT, then SIGTERM, then SIGKILL, and then any leftover process with that component's command line. `status` exits non-zero when a component is missing, duplicated, or orphaned. `start ladder` runs live preflight before the client, which records the account lock. See `OPERATIONS.md`.

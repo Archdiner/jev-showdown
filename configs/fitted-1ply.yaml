@@ -1,0 +1,9 @@
+name: fitted-1ply
+extends: champion.yaml
+evaluator:
+  id: fitted-team
+search:
+  id: greedy-1ply
+  params:
+    depth: 1
+    samples: 8
