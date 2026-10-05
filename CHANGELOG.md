@@ -1,5 +1,9 @@
 # Changelog
 
+## Optional PostHog mirror
+
+If `POSTHOG_API_KEY` is set, each finished ladder game is also sent to PostHog as `ladder_game`. The HTTP call is queued and is never awaited while a turn is being chosen. `POSTHOG_LLM_TRACES=1` adds model, latency, token, and cost metrics for gateway calls, without the prompt. Unset, the sink does nothing. The JSONL file remains the record that matters.
+
 ## Ladder timers and undelivered choices are logged
 
 A turn no longer reuses the previous `|inactive|` clock: `secondsLeft` is cleared when the next request arrives. If `/choose` returns false, the client writes a `choice-delivery` row and retries. When the server rejects the last legal move, one `no-legal-retry` row is written. Popups name a battle when the text contains its room id; with several battles and no id, each open battle logs the popup as ambiguous instead of attaching it to whichever room ended last. Finished battles are dropped from memory. The game result counts delivery failures, exhausted retries, and ambiguous popups. `createLogger` keeps the last 2000 decisions and 500 games in memory. The JSONL files still receive every row.
