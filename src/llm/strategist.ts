@@ -24,6 +24,7 @@ export interface StrategistDecision {
   reasoning: string;
   error?: string;
   latencyMs: number;
+  costUsd: number;
 }
 
 const PLAN_SCHEMA = {
@@ -110,12 +111,12 @@ export async function strategistDecide(args: {
   });
   client.endTurn();
   const latencyMs = Date.now() - started;
-  if (!result.ok) return done(fallbackChoice, 'search', plan, null, '', latencyMs, result.error);
+  if (!result.ok) return done(fallbackChoice, 'search', plan, null, '', latencyMs, result.metrics.costUsd, result.error);
 
   const parsed = parseStrategist(result.data, legal);
-  if (!parsed) return done(fallbackChoice, 'search', plan, null, '', latencyMs, 'unusable_plan');
+  if (!parsed) return done(fallbackChoice, 'search', plan, null, '', latencyMs, result.metrics.costUsd, 'unusable_plan');
   remember(args.battle, args.side, parsed.plan);
-  return done(parsed.action, 'grok', parsed.plan, parsed.confidence, parsed.reasoning, latencyMs);
+  return done(parsed.action, 'grok', parsed.plan, parsed.confidence, parsed.reasoning, latencyMs, result.metrics.costUsd);
 }
 
 /** Moves, switches, and Terastallize when the request allows it. */
@@ -180,9 +181,10 @@ function done(
   confidence: number | null,
   reasoning: string,
   latencyMs: number,
+  costUsd = 0,
   error?: string
 ): StrategistDecision {
-  return { choice, source, plan, confidence, reasoning, latencyMs, error };
+  return { choice, source, plan, confidence, reasoning, latencyMs, costUsd, error };
 }
 
 function asList(value: unknown): string[] {

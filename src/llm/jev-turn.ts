@@ -21,6 +21,7 @@ export interface JevTurnScore {
   degraded: boolean;
   error?: string;
   latencyMs: number;
+  costUsd: number;
 }
 
 /**
@@ -80,7 +81,7 @@ export async function scoreWithJev(args: {
   });
   client.endTurn();
   const latencyMs = Date.now() - started;
-  if (!result.ok) return empty(result.error, latencyMs);
+  if (!result.ok) return empty(result.error, latencyMs, result.metrics.costUsd);
 
   const values: Record<string, number> = {};
   const risks: Record<string, number> = {};
@@ -94,7 +95,7 @@ export async function scoreWithJev(args: {
   });
   const matchup = answers.matchup?.score;
   const switchP = answers.opponentWillSwitch?.probability;
-  if (Object.keys(values).length === 0) return empty('unusable_answers', latencyMs);
+  if (Object.keys(values).length === 0) return empty('unusable_answers', latencyMs, result.metrics.costUsd);
   return {
     choice: bestChoice(values, risks),
     source: 'jev',
@@ -104,6 +105,7 @@ export async function scoreWithJev(args: {
     risks,
     degraded: false,
     latencyMs,
+    costUsd: result.metrics.costUsd,
   };
 }
 
@@ -147,7 +149,7 @@ function bestChoice(values: Record<string, number>, risks: Record<string, number
   return best;
 }
 
-function empty(error: string, latencyMs: number): JevTurnScore {
+function empty(error: string, latencyMs: number, costUsd = 0): JevTurnScore {
   return {
     choice: null,
     source: 'search',
@@ -158,6 +160,7 @@ function empty(error: string, latencyMs: number): JevTurnScore {
     degraded: true,
     error,
     latencyMs,
+    costUsd,
   };
 }
 

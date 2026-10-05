@@ -11,6 +11,7 @@ import { decide as legacyDecide } from '../../engine/exact/policies.js';
 import { exactSearch, searchBudgetExpired, type ExactConfig } from '../../engine/exact/search.js';
 import { register } from '../registry.js';
 import { SearchParamsSchema, type SearchParams } from '../schema.js';
+import { recordStrategistTurn } from '../../llm/turn-meter.js';
 import { scoreWithJev } from '../../llm/jev-turn.js';
 import { verifyChoices, vetoChoice } from '../../llm/sim-veto.js';
 import { strategistDecide } from '../../llm/strategist.js';
@@ -134,6 +135,13 @@ async function strategistLine(battle: Battle, side: SideId, ctx: SearchCtx): Pro
           .join(' '),
       }
     : ctx.plan;
+  recordStrategistTurn({
+    grok: grok.source === 'grok',
+    jev: !jev.degraded,
+    veto: Boolean(decided.veto),
+    fallback: grok.source !== 'grok' || jev.degraded,
+    costUsd: grok.costUsd + jev.costUsd,
+  });
   const note = decided.veto ? 'veto' : jev.degraded ? grok.source : 'jev';
   return { choice: decided.choice, scores, gamePlan, note };
 }
