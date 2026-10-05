@@ -151,6 +151,7 @@ export function cachedDamage(attacker: any, defender: any, move: string, weather
   const hit = damageCache.get(key);
   if (hit !== undefined) return hit;
   const damage = expectedDamage(attacker, defender, move, weather);
+  if (damageCache.size > 8000) damageCache.clear();
   damageCache.set(key, damage);
   return damage;
 }

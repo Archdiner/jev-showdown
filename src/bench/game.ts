@@ -93,11 +93,25 @@ export async function runGame(job: GameJob): Promise<GameResult> {
 
   const started = Date.now();
   let loops = 0;
+  let repeatedTurn = 0;
+  let seenTurn = -1;
   clearMatchupCache();
   try {
     const battle = startRandomBattle(job.p1Team, job.p2Team, job.seed);
     while (!battle.ended && loops < MAX_LOOPS) {
       loops++;
+      if (battle.turn === seenTurn) repeatedTurn++;
+      else {
+        seenTurn = battle.turn;
+        repeatedTurn = 0;
+      }
+      // A request we cannot answer used to be retried until the decision cap,
+      // and every retry was counted as an invalid choice.
+      if (repeatedTurn > 8) {
+        result.crashed = true;
+        result.error = `turn ${battle.turn} did not advance request=${battle.requestState}`;
+        break;
+      }
       // Both players choose before either choice is sent. Choosing p1
       // first used to leave that move on the battle, and p2's search
       // then treated a simultaneous turn as a known opponent move.

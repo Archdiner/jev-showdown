@@ -27,14 +27,7 @@ export function legalChoices(battle: Battle, sideId: SideId): string[] {
 
   if (req.teamPreview) return ['default'];
 
-  if (req.forceSwitch) {
-    const choices: string[] = [];
-    for (let i = 0; i < side.pokemon.length; i++) {
-      const mon = side.pokemon[i];
-      if (mon && !mon.fainted && !mon.isActive) choices.push(`switch ${i + 1}`);
-    }
-    return choices;
-  }
+  if (req.forceSwitch) return forceSwitchChoices(side, req.forceSwitch);
 
   const choices: string[] = [];
   const active = req.active?.[0];
@@ -48,6 +41,38 @@ export function legalChoices(battle: Battle, sideId: SideId): string[] {
       const mon = side.pokemon[i];
       if (mon && !mon.fainted && !mon.isActive) choices.push(`switch ${i + 1}`);
     }
+  }
+  return choices;
+}
+
+/**
+ * A forced switch with a bench is `switch N`. Revival Blessing's follow-up
+ * can only target a fainted mon. With nobody legal to send, the sim wants
+ * `pass` (the last mon was phazed, or Blessing has no fainted target).
+ */
+function forceSwitchChoices(side: { pokemon: any[]; active: any[]; slotConditions?: any[] }, forceSwitch: unknown): string[] {
+  const flags = Array.isArray(forceSwitch) ? forceSwitch : [Boolean(forceSwitch)];
+  const choices: string[] = [];
+  for (let i = 0; i < flags.length; i++) {
+    if (!flags[i]) {
+      choices.push('pass');
+      continue;
+    }
+    const active = side.active[i];
+    const reviving = Boolean(active && side.slotConditions?.[active.position]?.revivalblessing);
+    let found = false;
+    for (let j = 0; j < side.pokemon.length; j++) {
+      const mon = side.pokemon[j];
+      if (!mon) continue;
+      // The active slots sit at the front of the party. A switch target is
+      // anyone behind them, or a fainted mon when this slot is reviving.
+      if (j < flags.length && !reviving) continue;
+      const fainted = Boolean(mon.fainted || mon.hp <= 0);
+      if (fainted !== reviving) continue;
+      choices.push(`switch ${j + 1}`);
+      found = true;
+    }
+    if (!found) choices.push('pass');
   }
   return choices;
 }
