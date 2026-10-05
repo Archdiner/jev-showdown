@@ -559,8 +559,11 @@ P0 is losing games or corrupting data now. P1 is the loop or visibility broken. 
 | win-rate-batch | P2 | A 10-game batch (grouped by git sha) more than 10 points under a 50% target |
 | checkout-behind | P2 | `HEAD` is behind `origin/main` |
 | malformed-log-line | P3 | A JSONL line that is not an object |
+| duplicate-battle-id | P0 | The same battle id on more than one game row |
+| null-replay-url | P2 | `replayUrl` null on a non-phantom game |
+| null-required-field | P2 | A required field null, except a reasoned null opponent rating or `eloAfter` |
 
-The scorecard names its files. It drops phantom games (`phantom: true`, or a 0-turn tie with end reason disconnect or unknown) and local games from Elo and win rate, and it says how many it dropped. `--since` is a duration (`24h`) or an ISO timestamp for the start of the window. Elo, win rate, and the win-loss-tie record are compared with the previous window of the same length. `npm run ops -- sentinel --once --json` prints the current incidents as one JSON object and exits 1 when a P0 is open, so a scheduler can call it. Uptime is the share of the window covered by fresh `live` heartbeats. MTTR is the mean time from an incident's episode open to `verified`. Progress is the Elo series, per-batch and per-variant record, win rate against the target, gate decisions plus finished factory jobs, what was promoted or rejected and why, and open regressions. `src/ops/sentinel/fixtures.ts` writes a log set with all of the failures above for the tests.
+The scorecard names its files. It drops phantom games (`phantom: true`, or a 0-turn tie with end reason disconnect or unknown), local games, and a disconnect tie that shares a battle id with one decisive result. It says how many it dropped. `--since` is a duration (`24h`) or an ISO timestamp for the start of the window. Elo, win rate, and the win-loss-tie record are compared with the previous window of the same length. `npm run ops -- sentinel --once --json` prints the current incidents as one JSON object and exits 1 when a P0 is open, so a scheduler can call it. Uptime is the share of the window covered by fresh `live` heartbeats. MTTR is the mean time from an incident's episode open to `verified`. Progress is the Elo series, per-batch and per-variant record, win rate against the target, gate decisions plus finished factory jobs, what was promoted or rejected and why, and open regressions. `src/ops/sentinel/fixtures.ts` writes a log set with all of the failures above for the tests.
 
 `supervise` does not start the sentinel. A P0 makes `--once` exit 1, and the supervisor would treat that as a crash. Run sentinel beside the other four.
 
@@ -599,15 +602,15 @@ Other fields:
 | Field | Meaning |
 | --- | --- |
 | `battleId` | Showdown room id, `battle-gen9randombattle-…` |
-| `opponent`, `opponentRating` | name and pre-game ladder rating from `\|player\|`. Null when the server omits them. |
-| `eloBefore`, `eloAfter` | our rating from the rating popup. `eloBefore` falls back to our `\|player\|` rating. Null when absent. Never 1000. |
+| `opponent`, `opponentRating` | name and pre-game ladder rating from `\|player\|`. A missing rating stays null with `opponentRatingReason: "unreported"`. Never -1 and never 1000. |
+| `eloBefore`, `eloAfter` | our rating from the rating popup. `eloBefore` falls back to our `\|player\|` rating and stays null when absent. `eloAfter` stays null, with `eloAfterReason: "unreported"`, when the update is missing or does not match the result. A loss that stays at the 1000 floor is kept. Never -1 and never a made-up 1000. |
 | `gxe` | from the rating line when that parser provides it. Null when absent. Never 50. |
 | `turns`, `invalidChoices`, `invalidChoiceReasons`, `crashes`, `fallbacks`, `mismatches`, `beliefErrors` | existing counters. `invalidChoiceReasons` is the text after `[Invalid choice]` on each `\|error\|` or `\|bigerror\|` line, capped at 8. A chat echo of the same words is not counted. Ops name for `invalidChoices` is `invalid`. `beliefErrors` counts posterior updates that threw; that battle then uses BeliefTracker. It is 0 when set inference is not `calibrated`. |
 | `durationMs` | wall clock from room open to the record |
 | `decisions` | number of `latencyMs` samples |
 | `latencyP50Ms`, `latencyP95Ms`, `latencyP99Ms` | nearest-rank percentiles of per-turn `latencyMs`, same rule as `metrics.jsonl`. Null when there are no samples. |
 | `latencyMaxMs` | largest `latencyMs` sample. Null when there are no samples. |
-| `minTimerMarginSec` | smallest Showdown seconds-left observed for us. Null if no timer line. |
+| `minTimerMarginSec` | smallest Showdown seconds-left observed for us. When no timer line arrived, the opening clock `150` and `minTimerMarginReason: "no-timer-update"`. |
 | `engine` | ladder engine name, or the ops search layer id |
 | `configId` | Builtin policy id (`champion-exact-1ply` or `maxdamage-v1`), the gatekeeper label's id when `--labeled-champion` is on, or the challenger file hash when `--ab` routed this battle. `ops live` writes the config id. |
 | `configHash` | Builtin: sha256 of the policy object. Labeled champion or `--ab` file: 16-hex content hash, the same value as `configId` when the label still matches. |
@@ -616,8 +619,8 @@ Other fields:
 | `gitSha` | `JEV_GIT_SHA` or `GIT_COMMIT` or `GITHUB_SHA`, else `git rev-parse HEAD` |
 | `concurrency` | configured `--concurrency` |
 | `replayId` | Public replay id. The server's id when it confirms one, otherwise the room id with the `battle-` prefix removed (`gen9randombattle-…`). |
-| `replayUrl` | Set only after the server popup or log contains `https://replay.pokemonshowdown.com/…`. `/savereplay` asks the server to upload; this process does not invent the URL. |
-| `replayUploaded` | true only when `replayUrl` is set |
+| `replayUrl` | Never null. The server's `replay.pokemonshowdown.com` link when it arrives. Otherwise `https://replay.pokemonshowdown.com/` plus the room id with `battle-` removed, which keeps a hidden room's `-{password}pw` suffix. A local server stores the local log path and `replayUnavailableReason: "local-server"`. |
+| `replayUploaded` | true only when the server confirmed the upload |
 | `replayStatus` | `confirmed` (URL arrived), `local-only` (local server), or `unconfirmed` (public server, upload requested, no URL before the wait). The public client waits up to 8s and writes the row as soon as the URL arrives. |
 | `localReplayPath` | raw protocol log on disk |
 | `logPath` | per-battle JSONL |
@@ -640,7 +643,7 @@ A later `prediction_error` row (`jev.prediction-error.v1`) on the same file scor
 Example:
 
 ```json
-{"schema":"jev.ladder-game.v1","kind":"ladder-game","source":"ladder","battleId":"battle-gen9randombattle-1","opponent":"Rival","opponentRating":1400,"outcome":"win","endReason":"ko","turns":21,"invalidChoices":0,"invalidChoiceReasons":[],"crashes":0,"fallbacks":0,"eloBefore":1073,"eloAfter":1089,"gxe":null,"durationMs":84000,"decisions":20,"latencyP50Ms":40,"latencyP95Ms":180,"latencyP99Ms":400,"latencyMaxMs":400,"minTimerMarginSec":12,"engine":"max-damage","configId":"maxdamage-v1","configHash":"ab12","gitSha":"87b268f","concurrency":1,"replayUrl":null,"replayStatus":"unconfirmed"}
+{"schema":"jev.ladder-game.v1","kind":"ladder-game","source":"ladder","battleId":"battle-gen9randombattle-1","opponent":"Rival","opponentRating":1400,"opponentRatingReason":null,"outcome":"win","endReason":"ko","turns":21,"invalidChoices":0,"invalidChoiceReasons":[],"crashes":0,"fallbacks":0,"eloBefore":1073,"eloAfter":1089,"eloAfterReason":null,"gxe":null,"durationMs":84000,"decisions":20,"latencyP50Ms":40,"latencyP95Ms":180,"latencyP99Ms":400,"latencyMaxMs":400,"minTimerMarginSec":12,"minTimerMarginReason":null,"engine":"max-damage","configId":"maxdamage-v1","configIdReason":null,"configHash":"ab12","gitSha":"87b268f","gitShaReason":null,"runId":"1710000000000","batchLabel":null,"hostname":"live-mac","concurrency":1,"replayUrl":"https://replay.pokemonshowdown.com/gen9randombattle-1","replayUnavailableReason":null,"replayStatus":"unconfirmed"}
 ```
 
 ## Sim calibration
@@ -657,7 +660,7 @@ Ladder Elo and GXE come from the server line, or they stay null.
 
 - The HTML line `rating: N → M` plus `(GXE: …)` is the public-ladder form. It counts only when it is in that battle's room, or when a popup names that battle id. A popup that does not name a battle is not copied onto whichever room just ended. `/rank` is not written onto a game. GXE is omitted on some lines; the record then has `gxe: null` and `gxeSource: "missing"`.
 - A local `|rating|elo` or `|rating|elo|gxe` line is the other form. It has no `before`, so `eloAfter` stays null. The `|player|` rating is still stored as `eloBefore`.
-- `eloAfter` is kept only when the same update has `before` and `after`, and a win rose or a loss fell. Otherwise `eloAfter` is null. `eloDeltaConsistent` is the check an incident loop can run on a row: null on either side is unknown, not a failure.
+- `eloAfter` is kept only when the same update has `before` and `after`, and a win rose or a loss fell. A loss that stays at the 1000 floor is kept. Otherwise `eloAfter` is null with `eloAfterReason: "unreported"`. `eloDeltaConsistent` is the check an incident loop can run on a row: null on either side is unknown, not a failure. A missing opponent rating stays null with `opponentRatingReason: "unreported"`. Neither field is stored as `-1`.
 - An A/B-routed battle stores that assignment's `configId`, `role`, and `share` on the same row. A rating from another concurrent arm is not copied onto it.
 - Nothing in this client writes Elo `1000` or GXE `50` as a stand-in. The per-battle JSONL (`logs/ladder/{user}-{room}.jsonl`) gets a `rating` event when a line parses, and the `result` event copies `eloBefore`, `eloAfter`, `gxe`, and `gxeSource`. `fabricated` is always `false`. `ops live` stores the same nulls on its live-game row. A missing Elo is left out of the circuit-breaker window.
 

@@ -8,6 +8,7 @@ import { LossReviewer, writeFindingAsHypothesis, type LossFinding } from '../llm
 import { recordLoss, recordPass, type CyclePass } from './cycle.js';
 import { openDb } from './db.js';
 import { beat } from './heartbeat.js';
+import { countableGameRows } from '../client/game-integrity.js';
 import { queueHypothesisVariant } from './hypotheses.js';
 import { defaultAnalystDirs, gameFromRow, listGameJsonl, type AnalystGame } from './ingest.js';
 import { appendJsonl, consumeJsonl, type OpsPaths } from './paths.js';
@@ -209,7 +210,7 @@ function unreadGames(paths: OpsPaths, ladderDirs: string[]): {
       files[resolved] = chunk.next;
     }
   }
-  return { games, liveNext: live.next, files, corrupt };
+  return { games: countableGameRows(games), liveNext: live.next, files, corrupt };
 }
 
 function safeReal(file: string): string {

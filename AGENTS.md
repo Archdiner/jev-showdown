@@ -160,7 +160,7 @@ npm run ladder -- --games 10 --format gen9randombattle --engine max-damage --con
 That connects to `wss://sim3.psim.us/showdown/websocket`, logs in with `POST https://play.pokemonshowdown.com/action.php` (`act=login`, `name`, `pass`, `challstr`), then sends `/trn username,0,ASSERTION`. It searches `gen9randombattle`, plays `--games` battles, sends `/savereplay`, and exits. On an engine error or timer squeeze it plays the best legal move and records the fallback. Logs are JSONL in `logs/ladder/`:
 
 - one file per battle, named with the username and room id. Turn rows include `searchMs` (engine time), `latencyMs` (wall clock), and `secondsLeft`. The `result` row is the same object as the aggregate file. `ops live` writes that same object to `live-games.jsonl`.
-- `logs/ladder/games.jsonl`, one `jev.ladder-game.v1` object per finished game. Schema is in the README.
+- `logs/ladder/games.jsonl`, one `jev.ladder-game.v1` object per finished game. Schema is in the README. The recorder claims the room at open and will not append a second row for that battle id. A different process's row is flagged in `games.contamination.jsonl` (`npm run ops -- repair-games` does this for rows already on disk and does not delete them). Readers drop a contaminated or conflicting row. `replayUrl` is the public link, including a hidden room's `-{password}pw` suffix. A missing timer line is `minTimerMarginSec: 150` with `minTimerMarginReason: no-timer-update`. `npm run ops -- sentinel` reports a duplicate battle id, a null replay link, or a null required field.
 - `logs/ladder/summary.json` for the run
 
 Override the login endpoint with `SHOWDOWN_LOGIN_URL` if action.php moves. Optional flags: `--search-ms`, `--decision-ms`, `--log-dir`, `--engine`, `--concurrency`.

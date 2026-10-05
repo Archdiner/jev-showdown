@@ -18,7 +18,9 @@ import type { CalibrationSummary } from './prediction.js';
  * choosing), and `secondsLeft`. Game rows use the same latency names as
  * `logs/ladder/metrics.jsonl`: `latencyP50Ms`, `latencyP95Ms`,
  * `latencyP99Ms`, plus `latencyMaxMs` and `minTimerMarginSec`.
- * Missing Elo and GXE stay null. This file does not invent 1000 or 50.
+ * GXE stays null when the server omits it. This file does not invent 1000, -1, or 50.
+ * A missing opponent rating stays null with `opponentRatingReason: "unreported"`.
+ * `eloAfter` stays null when the update is missing or does not match the result.
  */
 export const LADDER_GAME_SCHEMA = 'jev.ladder-game.v1' as const;
 
@@ -78,7 +80,10 @@ export interface LadderGameRecord {
   format: string;
   username: string;
   opponent: string | null;
+  /** Pre-game rating from `|player|`. Null when the server omitted it. */
   opponentRating: number | null;
+  /** `unreported` when `opponentRating` is null because the server omitted it. */
+  opponentRatingReason: string | null;
   outcome: 'win' | 'loss' | 'tie';
   endReason: GameEndReason;
   winner: string | null;
@@ -98,7 +103,13 @@ export interface LadderGameRecord {
    */
   beliefErrors: number;
   eloBefore: number | null;
+  /**
+   * Post-game rating when this battle's update matches the result.
+   * Null when the server omitted it or the move does not match. Never a stand-in.
+   */
   eloAfter: number | null;
+  /** `unreported` when `eloAfter` is null. Scorecards ignore that row's Elo. */
+  eloAfterReason: string | null;
   /** Null when the server line had no GXE. Never defaulted. */
   gxe: number | null;
   durationMs: number;
@@ -109,19 +120,31 @@ export interface LadderGameRecord {
   latencyP95Ms: number | null;
   latencyP99Ms: number | null;
   latencyMaxMs: number | null;
-  /** Smallest Showdown seconds-left observed for us. Null if no timer line. */
-  minTimerMarginSec: number | null;
+  /**
+   * Smallest Showdown seconds-left observed for us.
+   * When no timer line arrived, this is the ladder's opening clock (`LADDER_TIMER_START_SEC`).
+   */
+  minTimerMarginSec: number;
+  /** `no-timer-update` when the value is the opening clock rather than an observed line. */
+  minTimerMarginReason: string | null;
   engine: string;
-  configId: string | null;
+  configId: string;
+  /** Set when the batch had no config id. */
+  configIdReason: string | null;
   configHash: string | null;
-  gitSha: string | null;
+  gitSha: string;
+  /** Set when no commit could be read. */
+  gitShaReason: string | null;
   /** Set when the ladder routed this battle. Absent on older rows and on `ops live`. */
   role?: 'champion' | 'challenger';
   /** Share of new battles this config was given, as a fraction in (0, 1]. */
   share?: number;
   concurrency: number;
   replayId: string | null;
-  replayUrl: string | null;
+  /** Public replay link, a local log path, or `unavailable`. Never null. */
+  replayUrl: string;
+  /** Why `replayUrl` is not a confirmed public replay. Null when the link is usable. */
+  replayUnavailableReason: string | null;
   localReplayPath: string | null;
   replayUploaded: boolean;
   replayStatus: 'confirmed' | 'unconfirmed' | 'local-only';
@@ -132,6 +155,9 @@ export interface LadderGameRecord {
    * and analyst totals skip them.
    */
   phantom?: true;
+  /** This row must not be scored. Set when a non-owning process or a second result wrote it. */
+  contaminated?: true;
+  contaminationReason?: 'non-owning-process' | 'conflicting-result';
   /** Seat we occupied. Absent when the protocol never named us. */
   ourSide?: 'p1' | 'p2';
   /**
@@ -296,9 +322,52 @@ export function classifyEnd(input: {
   return { outcome, endReason: 'ko' };
 }
 
+/**
+ * Showdown's opening turn clock for a non-challenge battle (`STARTING_TIME` in
+ * `RoomBattleTimer`). The private line is `Time left: 150 sec this turn`.
+ */
+export const LADDER_TIMER_START_SEC = 150;
+
+/** Showdown does not display a ladder rating under this. A loss that stays here is still this battle's update. */
+export const LADDER_ELO_FLOOR = 1000;
+
+export const TIMER_REASON_UNOBSERVED = 'no-timer-update';
+export const RATING_REASON_UNREPORTED = 'unreported';
+export const REPLAY_REASON_LOCAL = 'local-server';
+export const REPLAY_REASON_UNKNOWN_ROOM = 'unrecognized-room-id';
+
 /** `battle-gen9randombattle-1` → `gen9randombattle-1`, the public replay id. */
 export function replayIdFromBattle(battleId: string): string {
   return battleId.startsWith('battle-') ? battleId.slice('battle-'.length) : battleId;
+}
+
+/**
+ * Shareable replay URL. Showdown's room id is `battle-{format}-{n}` or, after
+ * `setPrivate`, `battle-{format}-{n}-{password}pw`. The public path is that id
+ * without the `battle-` prefix, so a hidden room keeps `-{password}pw`.
+ */
+export function publicReplayUrl(battleId: string): string | null {
+  const id = replayIdFromBattle(battleId);
+  if (!/^[a-z0-9]+-\d+(?:-[a-z0-9]+)?$/i.test(id)) return null;
+  return `https://replay.pokemonshowdown.com/${id}`;
+}
+
+function opponentRatingOf(value: number | null | undefined): { value: number | null; reason: string | null } {
+  const reported = reportedRating(value);
+  if (reported === null) return { value: null, reason: RATING_REASON_UNREPORTED };
+  return { value: reported, reason: null };
+}
+
+function requireGitSha(value: string | null | undefined): { value: string; reason: string | null } {
+  if (typeof value === 'string' && value.trim()) return { value: value.trim(), reason: null };
+  const discovered = currentGitSha();
+  if (discovered) return { value: discovered, reason: null };
+  return { value: 'unknown', reason: 'missing' };
+}
+
+function requireConfigId(value: string | null | undefined): { value: string; reason: string | null } {
+  if (typeof value === 'string' && value.trim()) return { value: value.trim(), reason: null };
+  return { value: 'unconfigured', reason: 'missing' };
 }
 
 export function replayStatusOf(input: {
@@ -373,7 +442,10 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     disconnected: input.disconnected,
   });
   const phantom = isPhantomGame({ turns: input.turns, winner: input.winner, lines: input.lines });
-  const replay = replayStatusOf({ replayUrl: input.replayUrl, localServer: input.localServer });
+  const observedTimer = tighterMargin(input.minTimerMarginSec, timerMarginSec(input.lines, input.username));
+  const timerUnobserved = observedTimer === null;
+  const timer = timerUnobserved ? LADDER_TIMER_START_SEC : observedTimer;
+  const opponentRating = opponentRatingOf(input.opponentRating);
   const rated = eloForGame({
     outcome: classified.outcome,
     ratingBefore: input.eloBefore,
@@ -383,6 +455,10 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
   const gxe = rated.eloAfter === null
     ? null
     : (typeof input.gxe === 'number' && Number.isFinite(input.gxe) ? input.gxe : null);
+  const configId = requireConfigId(input.configId);
+  const gitSha = requireGitSha(input.gitSha);
+  const replay = resolveReplay(input);
+  const startedAt = Number.isFinite(input.startedAt) ? input.startedAt : ts;
   return {
     schema: LADDER_GAME_SCHEMA,
     kind: 'ladder-game',
@@ -393,12 +469,13 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     batchLabel: input.batchLabel !== undefined ? input.batchLabel : readBatchLabel(),
     hostname: input.hostname?.trim() || currentHostname(),
     ts,
-    startedAt: input.startedAt,
+    startedAt,
     battleId: input.battleId,
     format: input.format,
     username: input.username,
     opponent: input.opponent,
-    opponentRating: input.opponentRating,
+    opponentRating: opponentRating.value,
+    opponentRatingReason: opponentRating.reason,
     outcome: classified.outcome,
     endReason: classified.endReason,
     winner: input.winner,
@@ -412,18 +489,24 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     beliefErrors: input.beliefErrors ?? 0,
     eloBefore: rated.eloBefore,
     eloAfter: rated.eloAfter,
+    eloAfterReason: rated.eloAfter === null ? RATING_REASON_UNREPORTED : null,
     gxe,
-    durationMs: Math.max(0, ts - input.startedAt),
-    ...latencyFields(input.latencies, tighterMargin(input.minTimerMarginSec, timerMarginSec(input.lines, input.username))),
+    durationMs: Math.max(0, ts - startedAt),
+    ...latencyFields(input.latencies, timer),
+    minTimerMarginSec: timer,
+    minTimerMarginReason: timerUnobserved ? TIMER_REASON_UNOBSERVED : null,
     engine: input.engine,
-    configId: input.configId,
+    configId: configId.value,
+    configIdReason: configId.reason,
     configHash: input.configHash,
-    gitSha: input.gitSha,
+    gitSha: gitSha.value,
+    gitShaReason: gitSha.reason,
     ...(input.role ? { role: input.role } : {}),
     ...(typeof input.share === 'number' ? { share: input.share } : {}),
     concurrency: input.concurrency,
-    replayId: input.replayId ?? replayIdFromBattle(input.battleId),
-    replayUrl: input.replayUrl,
+    replayId: replay.replayId,
+    replayUrl: replay.replayUrl,
+    replayUnavailableReason: replay.replayUnavailableReason,
     localReplayPath: input.localReplayPath,
     replayUploaded: replay.replayUploaded,
     replayStatus: replay.replayStatus,
@@ -437,13 +520,233 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
   };
 }
 
+function resolveReplay(input: LadderGameInput): {
+  replayId: string;
+  replayUrl: string;
+  replayUploaded: boolean;
+  replayStatus: LadderGameRecord['replayStatus'];
+  replayUnavailableReason: string | null;
+} {
+  const replayId = input.replayId ?? replayIdFromBattle(input.battleId);
+  const serverUrl = typeof input.replayUrl === 'string' && input.replayUrl.trim() ? input.replayUrl.trim() : null;
+  if (serverUrl) {
+    const status = replayStatusOf({ replayUrl: serverUrl, localServer: false });
+    return { replayId, replayUrl: serverUrl, replayUnavailableReason: null, ...status };
+  }
+  if (input.localServer) {
+    const local = input.localReplayPath && input.localReplayPath.trim() ? input.localReplayPath.trim() : 'local-only';
+    return {
+      replayId,
+      replayUrl: local,
+      replayUploaded: false,
+      replayStatus: 'local-only',
+      replayUnavailableReason: REPLAY_REASON_LOCAL,
+    };
+  }
+  const synthesized = publicReplayUrl(input.battleId);
+  if (synthesized) {
+    return {
+      replayId,
+      replayUrl: synthesized,
+      replayUploaded: false,
+      replayStatus: 'unconfirmed',
+      replayUnavailableReason: null,
+    };
+  }
+  return {
+    replayId,
+    replayUrl: 'unavailable',
+    replayUploaded: false,
+    replayStatus: 'unconfirmed',
+    replayUnavailableReason: REPLAY_REASON_UNKNOWN_ROOM,
+  };
+}
+
 export function gamesJsonlPath(dir: string): string {
   return path.join(dir, 'games.jsonl');
 }
 
-export function appendGameRecord(dir: string, record: LadderGameRecord): void {
+const CLAIMS_FILE = 'battle-claims.jsonl';
+const CONTAMINATION_FILE = 'games.contamination.jsonl';
+const LOCK_FILE = '.games.lock';
+
+export interface AppendResult {
+  written: boolean;
+  reason: 'appended' | 'duplicate' | 'non-owning-process' | 'conflicting-result';
+}
+
+interface ClaimRow {
+  battleId: string;
+  pid: number;
+  ts: number;
+}
+
+/** The first process to open the room owns the battle id in this log directory. */
+export function claimBattle(dir: string, battleId: string, pid = process.pid): { owned: boolean; ownerPid: number } {
   fs.mkdirSync(dir, { recursive: true });
-  fs.appendFileSync(gamesJsonlPath(dir), `${JSON.stringify(record)}\n`);
+  return withGameLock(dir, () => {
+    const existing = readClaims(dir).find(row => row.battleId === battleId);
+    if (existing) return { owned: existing.pid === pid, ownerPid: existing.pid };
+    appendLine(path.join(dir, CLAIMS_FILE), { battleId, pid, ts: Date.now() });
+    return { owned: true, ownerPid: pid };
+  });
+}
+
+/**
+ * One game row per battle id. A second write from this process is a no-op.
+ * A different process does not append; it flags the attempt and leaves the raw log.
+ */
+export function appendGameRecord(dir: string, record: LadderGameRecord, fileName = 'games.jsonl'): AppendResult {
+  fs.mkdirSync(dir, { recursive: true });
+  return withGameLock(dir, () => appendOwned(dir, path.join(dir, fileName), record));
+}
+
+function appendOwned(dir: string, file: string, record: LadderGameRecord): AppendResult {
+  const claim = readClaims(dir).find(row => row.battleId === record.battleId);
+  const rows = readStoredGames(file).filter(row => row.battleId === record.battleId);
+  const ownerPid = claim?.pid ?? rows.find(row => typeof row.pid === 'number')?.pid ?? record.pid;
+  if (ownerPid !== record.pid) {
+    writeContamination(dir, {
+      battleId: record.battleId,
+      pid: record.pid,
+      ts: record.ts,
+      reason: 'non-owning-process',
+      note: `owner pid ${ownerPid}`,
+    });
+    return { written: false, reason: 'non-owning-process' };
+  }
+  if (!claim) appendLine(path.join(dir, CLAIMS_FILE), { battleId: record.battleId, pid: record.pid, ts: Date.now() });
+  const signature = `${record.outcome}|${record.endReason}|${record.winner ?? ''}`;
+  if (rows.length > 0) {
+    const conflict = rows.some(row => `${row.outcome ?? ''}|${row.endReason ?? ''}|${row.winner ?? ''}` !== signature);
+    if (conflict) {
+      for (const row of rows) {
+        writeContamination(dir, {
+          battleId: record.battleId,
+          pid: typeof row.pid === 'number' ? row.pid : record.pid,
+          ts: typeof row.ts === 'number' ? row.ts : null,
+          reason: 'conflicting-result',
+          note: 'same battle recorded with two results',
+        });
+      }
+      return { written: false, reason: 'conflicting-result' };
+    }
+    return { written: false, reason: 'duplicate' };
+  }
+  appendLine(file, record);
+  return { written: true, reason: 'appended' };
+}
+
+function writeContamination(dir: string, flag: {
+  battleId: string;
+  pid: number;
+  ts: number | null;
+  reason: 'non-owning-process' | 'conflicting-result';
+  note: string;
+}): void {
+  appendLine(path.join(dir, CONTAMINATION_FILE), {
+    schema: 'jev.game-contamination.v1',
+    battleId: flag.battleId,
+    pid: flag.pid,
+    ts: flag.ts,
+    reason: flag.reason,
+    exclude: true,
+    note: flag.note,
+  });
+}
+
+function appendLine(file: string, value: object): void {
+  fs.appendFileSync(file, `${JSON.stringify(value)}\n`);
+}
+
+function readClaims(dir: string): ClaimRow[] {
+  const file = path.join(dir, CLAIMS_FILE);
+  if (!fs.existsSync(file)) return [];
+  const claims: ClaimRow[] = [];
+  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const row = JSON.parse(trimmed) as ClaimRow;
+      if (row && typeof row.battleId === 'string' && typeof row.pid === 'number') claims.push(row);
+    } catch {
+      // A torn claim line does not grant ownership.
+    }
+  }
+  return claims;
+}
+
+function readStoredGames(file: string): Array<{ battleId?: string; pid?: number; ts?: number; outcome?: string; endReason?: string; winner?: string | null }> {
+  if (!fs.existsSync(file)) return [];
+  const rows: Array<{ battleId?: string; pid?: number; ts?: number; outcome?: string; endReason?: string; winner?: string | null }> = [];
+  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const row = JSON.parse(trimmed) as { kind?: string; schema?: string; battleId?: string };
+      if (row.kind !== 'ladder-game' && row.schema !== 'jev.ladder-game.v1') continue;
+      rows.push(row);
+    } catch {
+      // Skip a torn line. The next append still locks the file.
+    }
+  }
+  return rows;
+}
+
+function withGameLock<T>(dir: string, fn: () => T): T {
+  acquireGameLock(dir);
+  try {
+    return fn();
+  } finally {
+    releaseGameLock(dir);
+  }
+}
+
+function acquireGameLock(dir: string): void {
+  const lockPath = path.join(dir, LOCK_FILE);
+  const deadline = Date.now() + 2000;
+  for (;;) {
+    try {
+      const fd = fs.openSync(lockPath, 'wx');
+      fs.writeSync(fd, `${process.pid}\n`);
+      fs.closeSync(fd);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST') throw err;
+      if (lockIsStale(lockPath)) {
+        try {
+          fs.unlinkSync(lockPath);
+        } catch {
+          // Another waiter removed it.
+        }
+        continue;
+      }
+      if (Date.now() > deadline) throw new Error('timed out waiting for the game log lock');
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  }
+}
+
+function lockIsStale(lockPath: string): boolean {
+  try {
+    const pid = Number(fs.readFileSync(lockPath, 'utf8').trim());
+    if (!Number.isInteger(pid) || pid <= 0) return true;
+    process.kill(pid, 0);
+    return false;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EPERM') return false;
+    return true;
+  }
+}
+
+function releaseGameLock(dir: string): void {
+  try {
+    fs.unlinkSync(path.join(dir, LOCK_FILE));
+  } catch {
+    // Already released.
+  }
 }
 
 /** New `jev.ladder-game.v1` rows must name their run. Older rows with no schema are left alone. */
@@ -519,12 +822,12 @@ export function toOpsLiveGame(record: LadderGameRecord): {
     kind: 'live-game',
     id: record.battleId,
     ts: record.ts,
-    configId: record.configId,
+    configId: record.configIdReason ? null : record.configId,
     winner: record.outcome,
-    rating: record.eloAfter,
+    rating: recordedElo(record),
     gxe: record.gxe,
     opponent: record.opponent,
-    opponentRating: record.opponentRating,
+    opponentRating: reportedRating(record.opponentRating, record.opponentRatingReason),
     endReason: record.endReason,
     invalid: record.invalidChoices,
     turns: record.turns,
@@ -547,9 +850,20 @@ export function recordedOutcome(game: {
 }
 
 /**
+ * A ladder rating the server actually sent.
+ * A reason, a non-finite value, or a negative number is not a rating.
+ */
+export function reportedRating(value: number | null | undefined, reason?: string | null): number | null {
+  if (reason) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  return value;
+}
+
+/**
  * A win must raise Elo and a loss must lower it.
  * Null on either side is not a contradiction: the incident check can keep the row
  * and treat a missing number as unknown. A tie is not judged.
+ * A loss that stays at `LADDER_ELO_FLOOR` is consistent: Showdown does not display a lower rating.
  */
 export function eloDeltaConsistent(
   outcome: 'win' | 'loss' | 'tie',
@@ -559,7 +873,10 @@ export function eloDeltaConsistent(
   if (eloBefore === null || eloAfter === null) return true;
   if (!Number.isFinite(eloBefore) || !Number.isFinite(eloAfter)) return true;
   if (outcome === 'win') return eloAfter > eloBefore;
-  if (outcome === 'loss') return eloAfter < eloBefore;
+  if (outcome === 'loss') {
+    if (eloAfter < eloBefore) return true;
+    return eloBefore === LADDER_ELO_FLOOR && eloAfter === LADDER_ELO_FLOOR;
+  }
   return true;
 }
 
@@ -581,21 +898,29 @@ export function eloForGame(input: {
   const ratingBefore = finiteRating(input.ratingBefore);
   const ratingAfter = finiteRating(input.ratingAfter);
   const preRating = finiteRating(input.preRating);
+  const floorLoss = input.outcome === 'loss'
+    && ratingBefore === LADDER_ELO_FLOOR
+    && ratingAfter === LADDER_ELO_FLOOR;
   if (
     ratingBefore !== null
     && ratingAfter !== null
     && eloDeltaConsistent(input.outcome, ratingBefore, ratingAfter)
-    && (input.outcome === 'tie' || ratingBefore !== ratingAfter)
+    && (input.outcome === 'tie' || ratingBefore !== ratingAfter || floorLoss)
   ) {
     return { eloBefore: ratingBefore, eloAfter: ratingAfter };
   }
   return { eloBefore: preRating ?? ratingBefore, eloAfter: null };
 }
 
-/** Elo after the game. Prefers `eloAfter`. Older ops rows used `rating`. Null stays null. */
-export function recordedElo(game: { eloAfter?: number | null; rating?: number | null }): number | null {
+/** Elo after the game. Prefers `eloAfter`. Older ops rows used `rating`. A reason or a negative number stays out. */
+export function recordedElo(game: {
+  eloAfter?: number | null;
+  rating?: number | null;
+  eloAfterReason?: string | null;
+}): number | null {
+  if (game.eloAfterReason) return null;
   const value = typeof game.eloAfter === 'number' ? game.eloAfter : game.rating;
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  return reportedRating(value);
 }
 
 export interface TranscriptFacts {

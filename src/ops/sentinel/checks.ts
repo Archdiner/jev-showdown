@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { checkGameInvariants } from '../../client/game-integrity.js';
 import { percentile } from '../../client/live-metrics.js';
 import { foldCycle, stallAlert } from '../cycle.js';
 import { invalidChoiceReasonsOf } from './games.js';
@@ -176,6 +177,27 @@ export const CHECKS: InvariantCheck[] = [
     suggestedFix: 'Append one JSON object per line. A partial or text line is skipped by readers and hides the game that followed it.',
     detect: malformedLines,
   },
+  {
+    id: 'duplicate-battle-id',
+    severity: 'P0',
+    title: 'A battle id is stored more than once',
+    suggestedFix: 'The recorder claims the room and appends one row. npm run ops -- repair-games flags the extra rows in games.contamination.jsonl and does not rewrite the log. Readers keep one decisive result.',
+    detect: ctx => integrityHits(ctx, 'duplicate-battle-id'),
+  },
+  {
+    id: 'null-replay-url',
+    severity: 'P2',
+    title: 'A finished game has replayUrl null',
+    suggestedFix: 'Store the public replay link, including a hidden room\'s -{password}pw suffix. A local server stores the local log path. Do not leave replayUrl null.',
+    detect: ctx => integrityHits(ctx, 'null-replay-url'),
+  },
+  {
+    id: 'null-required-field',
+    severity: 'P2',
+    title: 'A finished game is missing a required field',
+    suggestedFix: 'minTimerMarginSec, endReason, durationMs, configId, gitSha, and replayUrl are required. A missing opponent rating stays null with opponentRatingReason unreported. A missing or mismatched eloAfter stays null with eloAfterReason. Those reasoned nulls are not this check.',
+    detect: ctx => integrityHits(ctx, 'null-required-field'),
+  },
 ];
 
 function improvementStall(ctx: SentinelContext): CheckHit[] {
@@ -188,6 +210,27 @@ function improvementStall(ctx: SentinelContext): CheckHit[] {
     detail: alert.message,
     evidence: [{ file, detail: alert.message }],
   }];
+}
+
+function integrityHits(ctx: SentinelContext, code: 'duplicate-battle-id' | 'null-replay-url' | 'null-required-field'): CheckHit[] {
+  const located = ctx.rows.flatMap(row => (row.value ? [{ file: row.file, line: row.line, value: row.value }] : []));
+  return checkGameInvariants(located.map(row => row.value))
+    .filter(finding => finding.code === code)
+    .map(finding => {
+      const match = located.find(row => {
+        const battleId = typeof row.value.battleId === 'string' ? row.value.battleId : null;
+        return finding.battleId !== null && battleId === finding.battleId;
+      });
+      return {
+        key: `${finding.battleId ?? 'row'}:${finding.field ?? code}`,
+        detail: finding.detail,
+        evidence: [{
+          file: match?.file ?? path.join(ctx.layout.ladderLogDir, 'games.jsonl'),
+          line: match?.line,
+          detail: finding.detail,
+        }],
+      };
+    });
 }
 
 function duplicateLadderRunners(ctx: SentinelContext): CheckHit[] {

@@ -4,11 +4,34 @@
 
 A loss streak no longer pulls the champion. Five losses is normal variance for a config winning about 20% of games, and pulling the only approved config made `ops live` exit every cycle with `every approved config is pulled`. The champion stays schedulable. A streak that is unlikely at that config's baseline win rate flags a regression, and if a distinct previous champion exists the live worker plays that one. A challenger is pulled only when its own streak crosses that same baseline threshold (or its ladder rating drops), then returns after a 30 minute cooldown. Local games and ladder games keep separate counters in `circuits.json`, so a local loss cannot add to the ladder streak. `npm run ops -- sentinel` raises P1 when live reports that skip or when every approved config in a scope is pulled. The check does not read `/proc`.
 
+## Fitted team eval and selective depth-2 search
+
+The leaf score is no longer only HP and faints. `fitted-team` averages the 1v1 matchup of every remaining Pokémon (Sarantinos 2022), then adds speed control, hazard chip on each side unless the Pokémon holds Heavy-Duty Boots, status, boosts, whether Tera is still available, and how many healthy checks remain. The weights are a logistic regression fit on self-play (even seeds max-damage and sometimes Terastallize; odd seeds play a random legal choice). Seeds split 60% train, 20% dev, 20% held-out before the fit. Held-out was scored once, after the weights were frozen. The randbats generator covers 508 species. `eval-weights.json` is that fit.
+
+Dev (n=780): team log loss 0.5615, accuracy 70.5%. HP-only log loss 0.5536, accuracy 70.4%. Constant log loss 0.6931. Held-out (n=800): team log loss 0.6092, accuracy 65.3%. HP-only log loss 0.6255, accuracy 65.3%.
+
+`selective-depth2` scores every legal move at depth 1, then spends the remaining deadline on the top-N of those moves against the opponent's top-M replies. Damaging rolls are two buckets, KO and non-KO. A transposition table remembers finished nodes for that decision. Both pieces are config components (`fitted-team`, `selective-depth2`). `exactSearch` honors `evalMode: 'fitted'`, `selective`, a leaf override, and an inner rollout deadline only when the caller sets them. Champion, weighted, and the other existing configs do not, so their scores stay the same.
+
+Info-honest bench, 60 pairs, sides swapped, 120 games, each policy sees only its public observation. Opponent is exact 1-ply (8 samples, HP eval). Invalid choices 0, crashes 0, view misses 0. Randbats generator species 508.
+
+| Policy | Result | Wilson 95% CI | p50 | p95 |
+| --- | --- | --- | --- | --- |
+| fitted 1-ply | 70W-50L-0T (58.3%) | 49.4–66.8% | 77ms | 126ms |
+| fitted depth-2 | 58W-62L-0T (48.3%) | 39.6–57.2% | 119ms | 313ms |
+
 ## Cosmetic formes and Revival Blessing switches
 
 `@smogon/calc` has no entry for a cosmetic forme such as Gastrodon-East, so damage for that Pokémon came back as zero. `speciesForCalc` maps a cosmetic forme to the base species and leaves a forme the calc already lists, such as Ogerpon-Wellspring, unchanged. `calcMon` uses that name.
 
 A Revival Blessing follow-up is a forced switch onto a fainted teammate. `legalChoices` used to offer a healthy Pokémon, which the sim rejects (`INC-007`). It now offers the fainted teammates when the active slot has `revivalblessing`. The hidden-info battle copies the request's `reviving` flag onto that slot, so the search and the real battle list the same switches.
+
+## Ladder game rows stay one per battle, with a replay link and a timer
+
+A second process on the same account could append another `games.jsonl` row for a room the first process already owned. A disconnect tie with turns already played was counted next to the real result. The recorder now claims the room when it opens and appends one row per battle id. A different pid does not append; the attempt is flagged in `games.contamination.jsonl`. `npm run ops -- repair-games` writes those flags for rows already on disk and does not delete or rewrite the log. Ladder totals, the dashboard, the analyst, the circuit-breaker window, and `ladderGamesForGate` skip a flagged or conflicting row and keep a single decisive result. The reliability sentinel reports `duplicate-battle-id`, `null-replay-url`, and `null-required-field`. The scorecard drops a duplicate disconnect tie.
+
+A hidden battle room is `battle-gen9randombattle-<n>-<password>pw`. The shareable replay is `https://replay.pokemonshowdown.com/gen9randombattle-<n>-<password>pw`. The popup's id is only the numeric prefix, so it used to miss that room and the row stored `replayUrl: null`. The link is now the room id without `battle-`, or the server's own URL when that arrives. A local server has no public replay: the row keeps the local log path and `replayUnavailableReason: local-server`.
+
+Showdown's opening clock is 150 seconds. A game that ends before any `|inactive|` line used to store `minTimerMarginSec: null`. It now stores 150 and `minTimerMarginReason: no-timer-update`. A missing opponent rating stays null with `opponentRatingReason: unreported`. `eloAfter` stays null when the update is missing or does not match the result. A loss that stays at the 1000 floor is consistent and is kept. Scorecards do not treat a missing rating as Elo 1000 or as -1.
 
 ## Live losses reach the factory
 
