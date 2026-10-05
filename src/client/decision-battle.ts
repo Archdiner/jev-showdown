@@ -83,6 +83,22 @@ function named(kind: 'abilities' | 'items' | 'moves' | 'species', raw: string | 
   return entry?.exists ? entry.name : '';
 }
 
+/**
+ * Switch-in abilities that rewrite the active (Imposter) must not fire in the
+ * decision battle. The live `|request|` already carries the post-Imposter
+ * moves (or Transform alone when Imposter failed, e.g. into a Substitute).
+ * Re-firing Imposter against an incomplete foe model invents move slots the
+ * server never offered — the bench then hard-aborts on `move 2`.
+ */
+function decisionAbility(ability: string | undefined, speciesName: string): string {
+  const namedAbility = named('abilities', ability);
+  if (namedAbility && namedAbility !== 'Imposter') return namedAbility;
+  const dexSpecies = Dex.species.get(speciesName);
+  const fallback = dexSpecies.abilities?.['0'];
+  if (fallback && fallback !== 'Imposter') return fallback;
+  return 'Pressure';
+}
+
 function toSet(
   species: string,
   moves: string[],
@@ -99,7 +115,7 @@ function toSet(
   const set: PokemonSet = {
     species: speciesName,
     moves: moveNames,
-    ability: named('abilities', ability) || dexSpecies.abilities?.['0'] || 'Pressure',
+    ability: decisionAbility(ability, speciesName),
     item: named('items', item) || '',
     nature: 'Hardy',
     evs: { hp: 85, atk: 85, def: 85, spa: 85, spd: 85, spe: 85 },
