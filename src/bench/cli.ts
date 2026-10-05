@@ -208,16 +208,11 @@ async function main() {
   const summary = scoreCandidate(results, jobs, a);
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   console.log('\n=== Result ===');
-  const [lo, hi] = wilsonCI(summary.wins, summary.games);
-  console.log(`A win rate: ${(summary.winRate * 100).toFixed(1)}% (${summary.wins}W-${summary.losses}L-${summary.ties}T / ${summary.games})`);
-<<<<<<< HEAD
-  console.log(`Wilson 95% CI: [${(lo * 100).toFixed(1)}%, ${(hi * 100).toFixed(1)}%]`);
-=======
   const decided = summary.wins + summary.losses;
   const interval = wilson(summary.wins, decided > 0 ? decided : summary.games);
   const pct = (value: number | null) => value == null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
+  console.log(`A win rate: ${(summary.winRate * 100).toFixed(1)}% (${summary.wins}W-${summary.losses}L-${summary.ties}T / ${summary.games})`);
   console.log(`Wilson 95% CI: [${pct(interval.low)}, ${pct(interval.high)}]`);
->>>>>>> cursor/fitted-eval-depth2-69dd
   const viewMiss = results.reduce((sum, game) => sum + game.p1ViewMiss + game.p2ViewMiss, 0);
   console.log(`invalid=${summary.invalid} crashes=${summary.crashes} viewMiss=${viewMiss} p50=${summary.p50ms.toFixed(0)}ms p95=${summary.p95ms.toFixed(0)}ms p99=${summary.p99ms.toFixed(0)}ms max=${summary.maxMs.toFixed(0)}ms`);
   const play = playRate(results, jobs, a);
