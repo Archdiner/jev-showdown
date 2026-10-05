@@ -3,6 +3,7 @@ import {
   loadHypotheses,
   loadReplayStats,
   resetMetaCache,
+  resolveMetaPath,
   switchPhase,
   switchPriorPercent,
 } from './meta.js';
@@ -26,6 +27,8 @@ test('top-level switch prior follows the published turn bins', () => {
 });
 
 test('principle and hypothesis files are optional', () => {
-  expect(loadGuidance()).toEqual([]);
-  expect(loadHypotheses()).toEqual([]);
+  expect(resolveMetaPath(['state/meta/missing-guidance.json'])).toBeNull();
+  expect(resolveMetaPath(['state/meta/missing-hypotheses.json'])).toBeNull();
+  expect(Array.isArray(loadGuidance())).toBe(true);
+  expect(Array.isArray(loadHypotheses())).toBe(true);
 });

@@ -22,6 +22,11 @@ export function validateConfigs(root = path.join(process.cwd(), 'configs')): Val
       } else if (rel.startsWith('experiments/')) {
         const raw = file.endsWith('.json') ? JSON.parse(fs.readFileSync(file, 'utf8')) : parseYaml(fs.readFileSync(file, 'utf8'));
         ExperimentSpecSchema.parse(raw);
+      } else if (rel.startsWith('live/')) {
+        // Live knobs (concurrency profiles) are not strategy configs.
+        const text = fs.readFileSync(file, 'utf8');
+        if (file.endsWith('.json')) JSON.parse(text);
+        else parseYaml(text);
       } else {
         loadConfig(file);
       }
