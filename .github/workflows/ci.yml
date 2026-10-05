@@ -35,7 +35,12 @@ jobs:
         run: npm test
 
       - name: Stack supervisor
-        run: bash scripts/stack.test.sh
+        run: |
+          if ! command -v zsh >/dev/null 2>&1; then
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y zsh
+          fi
+          bash scripts/stack.test.sh
 
   typecheck:
     name: typecheck

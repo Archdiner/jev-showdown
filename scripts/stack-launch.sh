@@ -29,6 +29,9 @@ case "$component" in
   ops-live)
     exec npx tsx src/ops/cli.ts live "$@"
     ;;
+  ops-sentinel)
+    exec npx tsx src/ops/cli.ts sentinel "$@"
+    ;;
   dashboard)
     exec npx tsx src/dashboard/cli.ts "$@"
     ;;

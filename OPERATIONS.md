@@ -18,9 +18,20 @@ Components:
 | `ops-gatekeeper` | `npx tsx src/ops/cli.ts gatekeeper` |
 | `ops-analyst` | `npx tsx src/ops/cli.ts analyst` |
 | `ops-live` | `npx tsx src/ops/cli.ts live` |
+| `ops-sentinel` | `npx tsx src/ops/cli.ts sentinel` |
 | `dashboard` | `npx tsx src/dashboard/cli.ts` |
 
+`npm run ops -- supervise` starts factory, gatekeeper, live, and analyst. It does not start sentinel: a P0 makes `sentinel --once` exit 1, and the supervisor would restart that as a crash. `ops-sentinel` is a stack component so the long-running worker still has one process group.
+
 Extra arguments are forwarded. `scripts/stack.sh start ladder --games 10 --engine max-damage` is the live client with those flags.
+
+## Shell
+
+The Mac login shell is zsh. zsh does not split an unquoted list of pids, and an unmatched `live-runs/*.drain` aborts the command before `rm` runs. `scripts/stack.sh` has a bash shebang and, when `BASH_VERSION` is unset, re-execs itself with `bash` before `set -euo pipefail` and `shopt -s nullglob`. `npm run stack` is that same `bash scripts/stack.sh` invocation. Process-group ids are read one per line into an array, so a stop still signals every orphan group.
+
+## Drain files
+
+`start ladder` and `restart ladder` delete `state/DRAIN` and every `LIVE_RUNS_DIR/*.drain` before preflight and before the client is detached. `nullglob` makes a directory with no `.drain` file expand to nothing, so that deletion still removes `state/DRAIN`. If `state/DRAIN` or a `.drain` file is still present afterward, start prints `still exists` and does not launch a process. A batch therefore does not inherit a drain and finish at 0 games. `JEV_STACK_DRAIN_FILE` overrides the `state/DRAIN` path.
 
 ## Process groups
 

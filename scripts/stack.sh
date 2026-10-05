@@ -5,28 +5,43 @@
 #   scripts/stack.sh start|stop|status|restart <component> [args...]
 #   scripts/stack.sh status
 #
-# Components: ladder, ops-factory, ops-gatekeeper, ops-analyst, ops-live, dashboard
+# The Mac login shell is zsh. zsh does not word-split an unquoted pid list, and
+# an unmatched glob aborts the command, so this file re-execs under bash before
+# any option that zsh would reject. npm run stack is the same bash invocation.
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec /usr/bin/env bash "$0" "$@"
+fi
 set -euo pipefail
+shopt -s nullglob
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 PIDS=${JEV_STACK_PIDS:-$ROOT/state/pids}
 LOGS=${JEV_STACK_LOG_DIR:-$ROOT/logs/stack}
 WAIT=${JEV_STACK_SIGNAL_WAIT:-5}
-COMPONENTS="ladder ops-factory ops-gatekeeper ops-analyst ops-live dashboard"
+# supervise does not start sentinel: a P0 makes --once exit 1, and that restart
+# loop would treat the exit as a crash. This supervisor owns the long-running worker.
+COMPONENTS=(ladder ops-factory ops-gatekeeper ops-analyst ops-live ops-sentinel dashboard)
 
 usage() {
   cat <<'EOF'
 Usage: scripts/stack.sh <start|stop|status|restart> [component] [args...]
 
-Components: ladder, ops-factory, ops-gatekeeper, ops-analyst, ops-live, dashboard
+Components: ladder, ops-factory, ops-gatekeeper, ops-analyst, ops-live,
+ops-sentinel, dashboard
+
+The script always runs under bash (shebang, and re-exec when a zsh login shell
+invokes it). set -euo pipefail and nullglob are on, so a missing live-runs/*.drain
+does not abort the command.
 
 start launches the component in its own process group and records the pgid in
 state/pids/<component>.pid. Logs go to logs/stack/<component>.log.
 LADDER_LOG_DIR (default logs/ladder) and LIVE_RUNS_DIR (default live-runs) are set.
 
-ladder start runs live preflight first (clean tree on origin/main, species
-floor, account lock, local canary). The ladder client then records the lock.
+ladder start deletes state/DRAIN and every live-runs/*.drain, then refuses to
+detach if state/DRAIN is still present. It then runs live preflight (clean tree
+on origin/main, species floor, account lock, local canary). The ladder client
+records the lock.
 
 stop sends SIGINT, then SIGTERM, then SIGKILL to that group, then to any
 leftover process whose command line is that component. It exits non-zero if
@@ -41,7 +56,7 @@ EOF
 
 is_component() {
   case "$1" in
-    ladder|ops-factory|ops-gatekeeper|ops-analyst|ops-live|dashboard) return 0 ;;
+    ladder|ops-factory|ops-gatekeeper|ops-analyst|ops-live|ops-sentinel|dashboard) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -74,6 +89,9 @@ cmdline_matches() {
       ;;
     ops-live)
       [[ "$cmd" =~ src/ops/cli\.ts[[:space:]]+live([[:space:]]|$) ]]
+      ;;
+    ops-sentinel)
+      [[ "$cmd" =~ src/ops/cli\.ts[[:space:]]+sentinel([[:space:]]|$) ]]
       ;;
     dashboard)
       [[ "$cmd" =~ (^|[[:space:]/])src/dashboard/cli\.ts([[:space:]]|$) ]]
@@ -129,7 +147,7 @@ read_pgid() {
 
 known_pgid() {
   local component pgid
-  for component in $COMPONENTS; do
+  for component in "${COMPONENTS[@]}"; do
     pgid=$(read_pgid "$component")
     if [[ -n "$pgid" && "$pgid" == "$1" ]]; then
       return 0
@@ -234,6 +252,7 @@ build_cmd() {
       ops-gatekeeper) CMD=(bash "$SCRIPT_DIR/stack-hold.sh" src/ops/cli.ts gatekeeper) ;;
       ops-analyst) CMD=(bash "$SCRIPT_DIR/stack-hold.sh" src/ops/cli.ts analyst) ;;
       ops-live) CMD=(bash "$SCRIPT_DIR/stack-hold.sh" src/ops/cli.ts live) ;;
+      ops-sentinel) CMD=(bash "$SCRIPT_DIR/stack-hold.sh" src/ops/cli.ts sentinel) ;;
       dashboard) CMD=(bash "$SCRIPT_DIR/stack-hold.sh" src/dashboard/cli.ts) ;;
     esac
     return 0
@@ -245,6 +264,38 @@ ensure_env() {
   export LADDER_LOG_DIR="${LADDER_LOG_DIR:-$ROOT/logs/ladder}"
   export LIVE_RUNS_DIR="${LIVE_RUNS_DIR:-$ROOT/live-runs}"
   mkdir -p "$LADDER_LOG_DIR" "$LIVE_RUNS_DIR" "$PIDS" "$LOGS"
+}
+
+# Delete the repo drain switch and every live-runs/*.drain. nullglob makes a
+# directory with no *.drain expand to zero names, so the DRAIN removal is not
+# skipped. Refuse when a marker is still on disk (a directory that cannot be
+# written, for example) so the next batch cannot drain at 0 games.
+clear_ladder_drain() {
+  local drain runs f
+  drain="${JEV_STACK_DRAIN_FILE:-$ROOT/state/DRAIN}"
+  runs="${LIVE_RUNS_DIR:-$ROOT/live-runs}"
+  mkdir -p "$(dirname "$drain")" "$runs"
+  rm -f -- "$drain" || true
+  for f in "$runs"/*.drain; do
+    rm -f -- "$f" || true
+  done
+  local stuck
+  stuck=()
+  if [[ -e "$drain" ]]; then
+    stuck+=("$drain")
+  fi
+  for f in "$runs"/*.drain; do
+    if [[ -e "$f" ]]; then
+      stuck+=("$f")
+    fi
+  done
+  if [[ ${#stuck[@]} -eq 0 ]]; then
+    return 0
+  fi
+  for f in "${stuck[@]}"; do
+    echo "refusing to start ladder: $f still exists" >&2
+  done
+  return 1
 }
 
 start_component() {
@@ -262,6 +313,9 @@ start_component() {
   if [[ -n "$recorded" ]] && group_alive "$recorded"; then
     echo "$component pidfile pgid $recorded is still alive" >&2
     return 1
+  fi
+  if [[ "$component" == "ladder" ]]; then
+    clear_ladder_drain || return 1
   fi
   if [[ "$component" == "ladder" && "${JEV_STACK_HOLD:-}" != 1 ]]; then
     echo "ladder start: live preflight, then the ladder client (account lock is recorded before login)"
@@ -299,12 +353,19 @@ stop_component() {
   if [[ -n "$pgid" ]]; then
     signal_group "$pgid" || true
   fi
-  local leftover
-  leftover=$(matching_pgids "$component" || true)
+  local groups
+  groups=()
   local g
-  for g in $leftover; do
-    signal_group "$g" || true
-  done
+  while IFS= read -r g; do
+    [[ -n "$g" ]] || continue
+    groups+=("$g")
+  done < <(matching_pgids "$component" || true)
+  if [[ ${#groups[@]} -gt 0 ]]; then
+    for g in "${groups[@]}"; do
+      signal_group "$g" || true
+    done
+  fi
+  local leftover
   leftover=$(matching_pgids "$component" || true)
   rm -f "$(pidfile "$component")"
   if [[ -n "$leftover" ]]; then
@@ -318,28 +379,34 @@ stop_component() {
 status_component() {
   local component="$1"
   local require_up="${2:-1}"
-  local recorded matches count
+  local recorded
   recorded=$(read_pgid "$component" || true)
-  matches=$(matching_pgids "$component" || true)
-  count=0
+  local groups
+  groups=()
   local g
-  for g in $matches; do
-    count=$((count + 1))
-  done
-  if [[ "$count" -eq 1 && -n "$recorded" && "$matches" == "$recorded" ]] && group_alive "$recorded"; then
+  while IFS= read -r g; do
+    [[ -n "$g" ]] || continue
+    groups+=("$g")
+  done < <(matching_pgids "$component" || true)
+  local count=${#groups[@]}
+  if [[ "$count" -eq 1 && -n "$recorded" && "${groups[0]}" == "$recorded" ]] && group_alive "$recorded"; then
     local pids
     pids=$(matching_processes "$component" | awk '{print $1}' | tr '\n' ',' | sed 's/,$//')
     echo "$component healthy pgid=$recorded pids=$pids log=$(logfile "$component")"
     return 0
   fi
   if [[ "$count" -gt 1 ]]; then
-    echo "$component duplicate pgids=$(echo "$matches" | tr '\n' ',' | sed 's/,$//')"
+    local joined=""
+    for g in "${groups[@]}"; do
+      joined="${joined}${g},"
+    done
+    echo "$component duplicate pgids=${joined%,}"
     return 1
   fi
-  if [[ "$count" -eq 1 && "$matches" != "$recorded" ]]; then
+  if [[ "$count" -eq 1 && "${groups[0]}" != "$recorded" ]]; then
     local cmd
     cmd=$(matching_processes "$component" | head -n 1 | cut -d' ' -f3-)
-    echo "$component orphan pgid=$matches pidfile=${recorded:-none} cmd=$cmd"
+    echo "$component orphan pgid=${groups[0]} pidfile=${recorded:-none} cmd=$cmd"
     return 1
   fi
   if [[ -n "$recorded" ]] && group_alive "$recorded"; then
@@ -357,7 +424,7 @@ status_component() {
 # Processes whose command matches a component and whose pgid is not that component's pidfile.
 report_orphans() {
   local component failed=0
-  for component in $COMPONENTS; do
+  for component in "${COMPONENTS[@]}"; do
     local recorded
     recorded=$(read_pgid "$component" || true)
     local line pid g cmd
@@ -425,7 +492,7 @@ case "$cmd" in
       status_component "$component" 1 || failed=1
       report_orphans || failed=1
     else
-      for component in $COMPONENTS; do
+      for component in "${COMPONENTS[@]}"; do
         status_component "$component" 1 || failed=1
       done
       report_orphans || failed=1

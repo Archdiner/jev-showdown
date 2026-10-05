@@ -2,7 +2,7 @@
 
 ## Stack supervisor
 
-`scripts/stack.sh start|stop|status|restart` runs ladder, the four ops roles, and the dashboard as separate process groups. The pgid is `state/pids/<component>.pid`. Logs are `logs/stack/<component>.log`. `LADDER_LOG_DIR` and `LIVE_RUNS_DIR` are set. `stop` signals the group with SIGINT, then SIGTERM, then SIGKILL, and then any leftover process with that component's command line. `status` exits non-zero when a component is missing, duplicated, or orphaned. `start ladder` runs live preflight before the client, which records the account lock. See `OPERATIONS.md`.
+`scripts/stack.sh start|stop|status|restart` runs ladder, the ops roles (including sentinel, which `supervise` does not start), and the dashboard as separate process groups. The pgid is `state/pids/<component>.pid`. Logs are `logs/stack/<component>.log`. `LADDER_LOG_DIR` and `LIVE_RUNS_DIR` are set. The script re-execs under bash when a zsh login shell invokes it, then enables `set -euo pipefail` and `nullglob`. Pgids are read into an array, so an orphan kill still reaches every group. `start ladder` deletes `state/DRAIN` and `live-runs/*.drain` and refuses to detach if a drain file remains. `stop` signals the group with SIGINT, then SIGTERM, then SIGKILL, and then any leftover process with that component's command line. `status` exits non-zero when a component is missing, duplicated, or orphaned. `start ladder` runs live preflight before the client, which records the account lock. See `OPERATIONS.md`.
 
 ## Development constraints
 
