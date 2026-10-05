@@ -189,4 +189,12 @@ describe('config plugs the eval and the depth-2 search', () => {
     expect(deep.config.search.params).toMatchObject({ depth: 2, topN: 3, topM: 2, rollGrouping: 'ko' });
     expect(deep.config.evaluator.id).toBe('fitted-team');
   });
+
+  test('stacked-qw-fitted reuses exact-1ply-qw and the fitted evaluator', () => {
+    const stacked = loadConfig(path.join(process.cwd(), 'configs/stacked-qw-fitted.yaml'));
+    expect(stacked.config.search.id).toBe('exact-1ply-qw');
+    expect(stacked.config.search.params).toMatchObject({ depth: 1, samples: 8 });
+    expect(stacked.config.evaluator.id).toBe('fitted-team');
+    expect(hasComponent('search', 'exact-1ply-qw')).toBe(true);
+  });
 });
