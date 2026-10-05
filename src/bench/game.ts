@@ -249,49 +249,54 @@ async function chooseSeen(
   
   // exact-det needs the LivePosition, not a battle
   if (player.policy?.kind === 'exact-det') {
-    const { chooseDeterminized } = await import('../client/decision-battle.js');
-    const { dataLoader } = await import('../data/data-loader.js');
-    const { livePositionFromClient } = await import('../client/live-position.js');
-    const { Battle: ClientBattle } = await import('@pkmn/client');
-    const { Generations } = await import('@pkmn/data');
-    const { Dex } = await import('@pkmn/dex');
-    
-    const gens = new Generations(Dex);
-    const client = new ClientBattle(gens);
-    const request = battle.getSide(side).activeRequest;
-    
-    // Replay protocol as that side would see it
-    for (const line of battle.log) {
-      if (typeof line !== 'string') continue;
-      try {
-        client.add(line);
-      } catch {
-        // skip unparseable lines
-      }
-    }
-    
-    if (request) {
-      try {
-        client.add(`|request|${JSON.stringify(request)}`);
-      } catch {
-        // request may not parse
-      }
-    }
-    
-    const viewerSide = side === 'p1' ? 'p1' : 'p2';
-    const position = livePositionFromClient(client, request, viewerSide);
-    
+    const started = Date.now();
     try {
+      const { chooseDeterminized } = await import('../client/decision-battle.js');
+      const { dataLoader } = await import('../data/data-loader.js');
+      const { livePositionFromClient } = await import('../client/live-position.js');
+      const { Battle: ClientBattle } = await import('@pkmn/client');
+      const { Generations } = await import('@pkmn/data');
+      const { Dex } = await import('@pkmn/dex');
+      
+      const gens = new Generations(Dex);
+      const client = new ClientBattle(gens);
+      const request = battle.getSide(side).activeRequest;
+      
+      // Replay protocol as that side would see it
+      for (const line of battle.log) {
+        if (typeof line !== 'string') continue;
+        try {
+          client.add(line);
+        } catch {
+          // skip unparseable lines
+        }
+      }
+      
+      if (request) {
+        try {
+          client.add(`|request|${JSON.stringify(request)}`);
+        } catch {
+          // request may not parse
+        }
+      }
+      
+      const viewerSide = side === 'p1' ? 'p1' : 'p2';
+      const position = livePositionFromClient(client, request, viewerSide);
+      
       const result = await chooseDeterminized(position, player.policy.config, dataLoader.getStats());
-      return { choice: result.choice, ms: 0, configId: player.id };
-    } catch {
-      return { choice: legal[0] || 'default', ms: 0, configId: player.id, viewMiss: true };
-    } finally {
+      const ms = Date.now() - started;
+      
       try {
         client.destroy();
       } catch {
         // position is already plain data
       }
+      
+      return { choice: result.choice, ms, configId: player.id };
+    } catch (error) {
+      const ms = Date.now() - started;
+      console.error('exact-det failed:', error);
+      return { choice: legal[0] || 'default', ms, configId: player.id, viewMiss: true };
     }
   }
   
