@@ -231,6 +231,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
           latencies: watched?.latencies ?? [],
           minTimerMarginSec: facts.minTimerMarginSec,
           engine: current.session.bot.layerIds.search,
+          ourSide: sides.get(room) ?? facts.ourSide,
           configId: current.config.configId,
           configHash: current.session.bot.configId,
           gitSha,

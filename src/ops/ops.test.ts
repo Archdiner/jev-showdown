@@ -319,6 +319,19 @@ describe('factory proposals', () => {
 });
 
 describe('analyst', () => {
+  const savedGateway = process.env.VERCEL_AI_GATEWAY_KEY;
+  const savedAi = process.env.AI_GATEWAY_API_KEY;
+  beforeEach(() => {
+    delete process.env.VERCEL_AI_GATEWAY_KEY;
+    delete process.env.AI_GATEWAY_API_KEY;
+  });
+  afterEach(() => {
+    if (savedGateway === undefined) delete process.env.VERCEL_AI_GATEWAY_KEY;
+    else process.env.VERCEL_AI_GATEWAY_KEY = savedGateway;
+    if (savedAi === undefined) delete process.env.AI_GATEWAY_API_KEY;
+    else process.env.AI_GATEWAY_API_KEY = savedAi;
+  });
+
   test('a loss becomes a general hypothesis and category priors', async () => {
     const paths = tempPaths();
     appendJsonl(paths.liveGames, {
@@ -327,15 +340,17 @@ describe('analyst', () => {
       ts: Date.now(),
       configId: 'cfg',
       configPath: 'configs/champion.yaml',
+      username: 'Us',
+      ourSide: 'p1',
       winner: 'loss',
       rating: 990,
       gxe: 48,
       inputLog: '',
-      log: '|move|p2a: Tackle|p1a: Foe\n|switch|p2a: Bench|Bench, L80|100/100',
+      log: '|player|p1|Us|1\n|player|p2|Them|2\n|move|p2a: Tackle|p1a: Foe\n|switch|p2a: Bench|Bench, L80|100/100',
     });
-    const reviewed = await runAnalyst(paths, { once: true });
+    const reviewed = await runAnalyst(paths, { once: true, ladderDirs: [] });
     expect(reviewed).toBe(1);
-    expect(await runAnalyst(paths, { once: true })).toBe(0);
+    expect(await runAnalyst(paths, { once: true, ladderDirs: [] })).toBe(0);
 
     const db = openDb(paths);
     const titles = db.getNodesByType('Hypothesis').map(node => node.title);
@@ -479,7 +494,7 @@ function labelsOf(paths: ReturnType<typeof tempPaths>) {
 
 test('category counts ignore species names', () => {
   const counts = emptyCounts();
-  observeLog('|move|p2a: Surf|p1a: Foe\n|move|p1a: Tackle|p2a: Foe', counts);
+  observeLog('|move|p2a: Surf|p1a: Foe\n|move|p1a: Tackle|p2a: Foe', counts, 'p2');
   const priors = countsToPriors(counts);
   expect(priors.special).toBeGreaterThan(0);
   expect(priors.physical).toBe(0);
