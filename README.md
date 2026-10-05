@@ -576,6 +576,20 @@ Ladder Elo and GXE come from the server line, or they stay null.
 - A local `|rating|elo` or `|rating|elo|gxe` line is the other form. A missing number stays null.
 - Nothing in this client writes Elo `1000` or GXE `50` as a stand-in. The per-battle JSONL (`logs/ladder/{user}-{room}.jsonl`) gets a `rating` event when a line parses, and the `result` event copies `eloBefore`, `eloAfter`, `gxe`, and `gxeSource`. `fabricated` is always `false`. `ops live` stores the same nulls on its live-game row. A missing Elo is left out of the circuit-breaker window.
 
+## Choice delivery and timers
+
+Per-battle JSONL (`logs/ladder/{user}-{room}.jsonl`) records these events in addition to the existing `turn` row. `type` and `kind` are the same string.
+
+| `kind` | When |
+| --- | --- |
+| `timer` | Every `\|inactive\|` / `\|inactiveoff\|`. `secondsLeft`, `aboutUs`, `tight` (`aboutUs` and at most 4 seconds). |
+| `choice-delivery` | After `/choose`. `sent`, `cause` (`sent`, `socket-closed`, `send-threw`, `illegal`, `server-rejected`, `not-your-turn`, `no-legal-retry`), `retry`, `replacement`, `serverLine`. A false `choose` is retried. When no legal replacement remains, one `no-legal-retry` row is written. |
+| `popup` | `attribution` is `matched`, `only-open`, or `ambiguous`. An ambiguous popup is copied onto each open battle with `candidates` and is not filed on "the latest room". |
+
+`secondsLeft` is cleared on each `\|request\|`, so a later turn does not reuse the previous clock. The game `result` includes `choiceDeliveryFailures`, `noLegalRetries`, and `ambiguousPopups`. Finished battles are removed from the driver's room map.
+
+`createLogger` keeps the last 2000 decisions and the last 500 games in memory. When the env log sink is a file, every row is still appended to `decisions.jsonl` and `games.jsonl`.
+
 ## License
 
 MIT

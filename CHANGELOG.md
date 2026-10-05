@@ -1,5 +1,9 @@
 # Changelog
 
+## Ladder timers and undelivered choices are logged
+
+A turn no longer reuses the previous `|inactive|` clock: `secondsLeft` is cleared when the next request arrives. If `/choose` returns false, the client writes a `choice-delivery` row and retries. When the server rejects the last legal move, one `no-legal-retry` row is written. Popups name a battle when the text contains its room id; with several battles and no id, each open battle logs the popup as ambiguous instead of attaching it to whichever room ended last. Finished battles are dropped from memory. The game result counts delivery failures, exhausted retries, and ambiguous popups. `createLogger` keeps the last 2000 decisions and 500 games in memory. The JSONL files still receive every row.
+
 ## Rating and GXE stay null when the server omits them
 
 The ladder rating parser now reads GXE from the HTML popup `(GXE: …)` and from a `|rating|elo|gxe` line. If that number is not there, `gxe` is null. A missing rating stays null. The client does not fill in 1000 or 50. Each parsed update is a `rating` event in the per-battle JSONL, and the game `result` copies Elo before/after, GXE, and `gxeSource`. `ops live` writes the same nulls on its live-game row and does not feed a stand-in Elo into the circuit breaker.

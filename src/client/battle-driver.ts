@@ -25,8 +25,13 @@ import { FoeMon, LivePosition } from './decision-battle.js';
 import { ourClockUpdate } from './inactive-clock.js';
 import { safeError, toID } from './ids.js';
 import { appendGameRecord, buildLadderGameRecord, LadderGameRecord } from './game-record.js';
+import { attributePopup } from './delivery.js';
 
-export type { LadderGameRecord as GameSummary } from './game-record.js';
+export type GameSummary = LadderGameRecord & {
+  choiceDeliveryFailures: number;
+  noLegalRetries: number;
+  ambiguousPopups: number;
+};
 
 function boostsOf(mon: ClientPokemon): LivePosition['ourBoosts'] {
   return {
@@ -69,8 +74,15 @@ interface RoomState {
   lastRequest: any;
   lastLegal: Action[];
   lastChoice: Action | null;
+  lastChoiceText: string | null;
+  pendingDelivery: number | null;
+  choiceDeliveryFailures: number;
+  noLegalRetries: number;
+  ambiguousPopups: number;
+  noLegalRetryLogged: boolean;
   requestTimer?: NodeJS.Timeout;
   finalizeTimer?: NodeJS.Timeout;
+  deliveryTimer?: NodeJS.Timeout;
 }
 
 export interface BattleDriverOptions {
@@ -87,9 +99,13 @@ export interface BattleDriverOptions {
   gitSha?: string | null;
   concurrency?: number;
   localServer?: boolean;
+  /** Delay between choice-delivery retries. Tests use a few milliseconds. */
+  deliveryRetryMs?: number;
   /** How long to wait for a replay popup. Tests use 0. */
   settleMs?: number;
 }
+
+const DELIVERY_ATTEMPTS = 3;
 
 /**
  * One user's battle loop: protocol state, request reconciliation,
@@ -119,12 +135,17 @@ export class BattleDriver extends EventEmitter {
     });
   }
 
+  roomCount(): number {
+    return this.rooms.size;
+  }
+
   async stop(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
     for (const room of [...this.rooms.values()]) {
       if (room.requestTimer) clearTimeout(room.requestTimer);
       if (room.finalizeTimer) clearTimeout(room.finalizeTimer);
+      if (room.deliveryTimer) clearTimeout(room.deliveryTimer);
       if (!room.finalized) {
         if (!room.ended) room.disconnected = true;
         await this.finalize(room);
@@ -161,15 +182,29 @@ export class BattleDriver extends EventEmitter {
       room.turns = Number(line.slice('|turn|'.length)) || room.turns;
     }
 
-    if (line.startsWith('|inactive|')) {
+    if (line.startsWith('|inactive|') || line.startsWith('|inactiveoff|')) {
       const seconds = line.match(/(\d+) seconds left/);
       const aboutUs = line.includes(this.options.username) || /You have/i.test(line);
-      if (seconds && aboutUs) {
-        room.secondsLeft = Number(seconds[1]);
-        room.minTimerMarginSec = room.minTimerMarginSec === null
-          ? room.secondsLeft
-          : Math.min(room.minTimerMarginSec, room.secondsLeft);
+      const secondsLeft = seconds ? Number(seconds[1]) : null;
+      if (line.startsWith('|inactiveoff|')) {
+        if (aboutUs) room.secondsLeft = null;
+      } else if (aboutUs) {
+        room.secondsLeft = secondsLeft;
+        if (secondsLeft !== null) {
+          room.minTimerMarginSec = room.minTimerMarginSec === null
+            ? secondsLeft
+            : Math.min(room.minTimerMarginSec, secondsLeft);
+        }
       }
+      room.log.write({
+        type: 'timer',
+        kind: 'timer',
+        battleId: room.roomId,
+        secondsLeft: aboutUs ? room.secondsLeft : secondsLeft,
+        aboutUs,
+        raw: line,
+        tight: aboutUs && room.secondsLeft !== null && room.secondsLeft <= 4,
+      });
     }
 
     const rating = parseRatingLine(line);
@@ -199,6 +234,7 @@ export class BattleDriver extends EventEmitter {
     }
 
     if (line.startsWith('|request|')) {
+      room.secondsLeft = null;
       const raw = line.slice('|request|'.length);
       if (!raw) return;
       try {
@@ -271,6 +307,12 @@ export class BattleDriver extends EventEmitter {
       lastRequest: null,
       lastLegal: [],
       lastChoice: null,
+      lastChoiceText: null,
+      pendingDelivery: null,
+      choiceDeliveryFailures: 0,
+      noLegalRetries: 0,
+      ambiguousPopups: 0,
+      noLegalRetryLogged: false,
     };
     this.rooms.set(roomId, room);
     this.options.client.trackRoom(roomId);
@@ -304,7 +346,7 @@ export class BattleDriver extends EventEmitter {
     if (!request || isWaitRequest(request)) return;
 
     const rqid = typeof request.rqid === 'number' ? request.rqid : null;
-    if (rqid !== null && room.answered.has(rqid)) return;
+    if (rqid !== null && (room.answered.has(rqid) || room.pendingDelivery === rqid)) return;
 
     const preview = teamPreviewChoice(request);
     if (preview) {
@@ -316,6 +358,7 @@ export class BattleDriver extends EventEmitter {
     if (legal.length === 0) {
       room.log.write({
         type: 'turn',
+        kind: 'turn',
         battleId: room.roomId,
         turn: room.battle.turn,
         rqid,
@@ -493,37 +536,143 @@ export class BattleDriver extends EventEmitter {
 
   private sendChoice(room: RoomState, choice: string, rqid: number | null, action: Action | null, preview: boolean): void {
     if (this.stopped) return;
-    if (!this.options.client.isReady()) return;
+    room.pendingDelivery = rqid;
+    this.deliver(room, choice, rqid, action, preview, 0);
+  }
+
+  private deliver(
+    room: RoomState,
+    choice: string,
+    rqid: number | null,
+    action: Action | null,
+    preview: boolean,
+    attempt: number,
+  ): void {
+    if (this.stopped || room.finalized || room.ended) return;
+    if (!this.options.client.isReady()) {
+      this.failDelivery(room, choice, rqid, action, preview, attempt, 'socket-closed', null);
+      return;
+    }
     let sent = false;
     try {
       sent = this.options.client.choose(room.roomId, choice);
     } catch (err) {
       if (this.stopped) return;
       room.crashes += 1;
-      room.log.write({ type: 'crash', battleId: room.roomId, message: `send failed: ${safeError(err)}` });
+      const message = `send failed: ${safeError(err)}`;
+      room.log.write({ type: 'crash', kind: 'crash', battleId: room.roomId, message });
+      this.failDelivery(room, choice, rqid, action, preview, attempt, 'send-threw', message);
       return;
     }
-    if (!sent) return;
+    if (!sent) {
+      this.failDelivery(room, choice, rqid, action, preview, attempt, 'socket-closed', null);
+      return;
+    }
     if (rqid !== null) room.answered.add(rqid);
+    room.pendingDelivery = null;
     room.lastChoice = action;
+    room.lastChoiceText = choice;
+    room.log.write({
+      type: 'choice-delivery',
+      kind: 'choice-delivery',
+      battleId: room.roomId,
+      rqid,
+      choice,
+      sent: true,
+      cause: 'sent',
+      serverLine: null,
+      retry: attempt,
+      replacement: null,
+    });
     if (preview) {
-      room.log.write({ type: 'turn', battleId: room.roomId, turn: 0, rqid, choice, decision: 'team', score: null });
+      room.log.write({ type: 'turn', kind: 'turn', battleId: room.roomId, turn: 0, rqid, choice, decision: 'team', score: null });
     }
   }
 
+  private failDelivery(
+    room: RoomState,
+    choice: string,
+    rqid: number | null,
+    action: Action | null,
+    preview: boolean,
+    attempt: number,
+    cause: 'socket-closed' | 'send-threw',
+    serverLine: string | null,
+  ): void {
+    const exhausted = attempt + 1 >= DELIVERY_ATTEMPTS;
+    room.choiceDeliveryFailures += 1;
+    room.log.write({
+      type: 'choice-delivery',
+      kind: 'choice-delivery',
+      battleId: room.roomId,
+      rqid,
+      choice,
+      sent: false,
+      cause,
+      serverLine,
+      retry: attempt,
+      replacement: null,
+      exhausted,
+    });
+    if (exhausted) {
+      room.pendingDelivery = null;
+      return;
+    }
+    if (room.deliveryTimer) clearTimeout(room.deliveryTimer);
+    room.deliveryTimer = setTimeout(() => {
+      room.deliveryTimer = undefined;
+      this.deliver(room, choice, rqid, action, preview, attempt + 1);
+    }, this.options.deliveryRetryMs ?? 25);
+  }
+
   private async retryChoice(room: RoomState, errorLine: string): Promise<void> {
-    if (/not your turn/i.test(errorLine)) return;
-    if (room.retries >= 6 || room.lastLegal.length === 0 || !room.lastRequest) return;
-    const remaining = room.lastLegal.filter(action => !room.lastChoice || !sameAction(action, room.lastChoice));
-    if (remaining.length === 0) return;
+    const rqid = typeof room.lastRequest?.rqid === 'number' ? room.lastRequest.rqid : null;
+    const cause = /not your turn/i.test(errorLine)
+      ? 'not-your-turn'
+      : /invalid choice/i.test(errorLine) ? 'illegal' : 'server-rejected';
+    if (cause === 'not-your-turn') {
+      room.log.write({
+        type: 'choice-delivery',
+        kind: 'choice-delivery',
+        battleId: room.roomId,
+        rqid,
+        choice: room.lastChoiceText,
+        sent: false,
+        cause,
+        serverLine: errorLine,
+        retry: room.retries,
+        replacement: null,
+      });
+      return;
+    }
+    const blocked = room.retries >= 6 || room.lastLegal.length === 0 || !room.lastRequest;
+    const remaining = blocked
+      ? []
+      : room.lastLegal.filter(action => !room.lastChoice || !sameAction(action, room.lastChoice));
+    if (blocked || remaining.length === 0) {
+      this.logNoLegalRetry(room, errorLine, rqid);
+      return;
+    }
     room.retries += 1;
-    const rqid = typeof room.lastRequest.rqid === 'number' ? room.lastRequest.rqid : null;
     if (rqid !== null) room.answered.delete(rqid);
     const state = room.snapshot;
     const action = state ? pickBestLegal(state, remaining) : remaining[0];
     const choice = formatChoice(action, rqid ?? undefined);
     room.log.write({
+      type: 'choice-delivery',
+      kind: 'choice-delivery',
+      battleId: room.roomId,
+      rqid,
+      choice: room.lastChoiceText,
+      sent: false,
+      cause,
+      serverLine: errorLine,
+      retry: room.retries,
+      replacement: choice,
+    });
+    room.log.write({
       type: 'fallback',
+      kind: 'fallback',
       battleId: room.roomId,
       reason: 'retry after server rejected the previous choice',
       action,
@@ -532,10 +681,29 @@ export class BattleDriver extends EventEmitter {
     this.sendChoice(room, choice, rqid, action, false);
   }
 
+  private logNoLegalRetry(room: RoomState, errorLine: string, rqid: number | null): void {
+    if (room.noLegalRetryLogged) return;
+    room.noLegalRetryLogged = true;
+    room.noLegalRetries += 1;
+    room.log.write({
+      type: 'choice-delivery',
+      kind: 'choice-delivery',
+      battleId: room.roomId,
+      rqid,
+      choice: room.lastChoiceText,
+      sent: false,
+      cause: 'no-legal-retry',
+      serverLine: errorLine,
+      retry: room.retries,
+      replacement: null,
+    });
+  }
+
   private markEnded(room: RoomState, line: string): void {
     if (room.ended) return;
     room.ended = true;
     if (room.requestTimer) clearTimeout(room.requestTimer);
+    if (room.deliveryTimer) clearTimeout(room.deliveryTimer);
     if (line.startsWith('|win|')) room.winner = line.slice('|win|'.length).trim();
     try {
       this.options.client.saveReplay(room.roomId);
@@ -549,9 +717,33 @@ export class BattleDriver extends EventEmitter {
 
   private onPopup(message: string): void {
     const open = [...this.rooms.values()].filter(room => !room.finalized);
-    const target = open.find(room => room.ended) ?? open[open.length - 1];
+    const attribution = attributePopup(message, open.map(room => room.roomId));
+    if (attribution.attribution === 'ambiguous') {
+      for (const room of open) {
+        room.ambiguousPopups += 1;
+        room.log.write({
+          type: 'popup',
+          kind: 'popup',
+          battleId: room.roomId,
+          message,
+          ambiguous: true,
+          attribution: 'ambiguous',
+          candidates: attribution.candidates,
+        });
+      }
+      return;
+    }
+    const target = open.find(room => room.roomId === attribution.roomId);
     if (!target) return;
-    target.log.write({ type: 'popup', battleId: target.roomId, message });
+    target.log.write({
+      type: 'popup',
+      kind: 'popup',
+      battleId: target.roomId,
+      message,
+      ambiguous: false,
+      attribution: attribution.attribution,
+      candidates: [target.roomId],
+    });
   }
 
   private onReplay(replay: ReplayNotice): void {
@@ -594,7 +786,7 @@ export class BattleDriver extends EventEmitter {
     fs.writeFileSync(localReplayPath, room.lines.join('\n'));
     this.replayFromLines(room);
 
-    const summary: LadderGameRecord = buildLadderGameRecord({
+    const record = buildLadderGameRecord({
       startedAt: room.startedAt,
       battleId: room.roomId,
       format: this.options.format.id,
@@ -625,6 +817,12 @@ export class BattleDriver extends EventEmitter {
       disconnected: room.disconnected,
       logPath: room.log.filePath,
     });
+    const summary: GameSummary = {
+      ...record,
+      choiceDeliveryFailures: room.choiceDeliveryFailures,
+      noLegalRetries: room.noLegalRetries,
+      ambiguousPopups: room.ambiguousPopups,
+    };
 
     room.log.write({
       type: 'result',
