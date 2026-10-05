@@ -155,6 +155,7 @@ export class BattleDriver extends EventEmitter {
   private onLine(roomId: string, line: string): void {
     if (this.stopped || !roomId.startsWith('battle-')) return;
     if (this.closedRooms.has(roomId)) return;
+    if (this.namesAnotherBattle(roomId, line)) return;
     let room = this.rooms.get(roomId);
     if (!room) room = this.openRoom(roomId);
     if (room.finalized) return;
@@ -737,6 +738,16 @@ export class BattleDriver extends EventEmitter {
     room.finalizeTimer = setTimeout(() => {
       void this.finalize(room);
     }, this.options.settleMs ?? 2000);
+  }
+
+  /** A replay or popup line that names some other battle is not this room's. */
+  private namesAnotherBattle(roomId: string, line: string): boolean {
+    if (!line.startsWith('|popup|') && !line.includes('replay.pokemonshowdown.com/')) return false;
+    const open = [...this.rooms.keys()];
+    if (!open.includes(roomId)) open.push(roomId);
+    const attribution = attributePopup(line, open);
+    if (attribution.attribution === 'elsewhere') return true;
+    return attribution.attribution === 'matched' && attribution.roomId !== roomId;
   }
 
   private onPopup(message: string): void {

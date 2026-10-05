@@ -324,4 +324,52 @@ describe('ladder delivery and timers', () => {
     expect(driver.roomCount()).toBe(0);
     await driver.stop();
   });
+
+  it('files a replay popup on the named battle, not the most recently active one', async () => {
+    const { driver, socket, logDir } = harness(() => true);
+    const first = 'battle-gen9randombattle-7000';
+    const middle = 'battle-gen9randombattle-7005';
+    const latest = 'battle-gen9randombattle-7020';
+    const popups = (room: string) => readLog(logDir, room).filter(event => event.type === 'popup');
+    const uploaded = (id: string) =>
+      `|popup||html|<p>Your replay has been uploaded! https://replay.pokemonshowdown.com/${id}-vf14y87snr046p0x7g86l2ffrf1912epw</p>`;
+    for (const room of [first, middle, latest]) {
+      socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
+      socket.emit('line', room, '|player|p2|Rival|2|1400');
+    }
+    socket.emit('popup', uploaded('gen9randombattle-7020'));
+    socket.emit('popup', uploaded('gen9randombattle-7000'));
+    socket.emit('popup', uploaded('gen9randombattle-7005'));
+    socket.emit('line', latest, uploaded('gen9randombattle-7005'));
+    const endedFirst = ended(driver);
+    socket.emit('line', first, '|win|BotAlpha');
+    await endedFirst;
+    socket.emit('popup', uploaded('gen9randombattle-7000'));
+    for (const room of [middle, latest]) socket.emit('line', room, '|win|BotAlpha');
+    await new Promise<void>(resolve => {
+      let left = 2;
+      driver.on('gameEnd', () => {
+        left -= 1;
+        if (left === 0) resolve();
+      });
+    });
+    expect(popups(first).map(event => event.message)).toEqual([
+      expect.stringContaining('gen9randombattle-7000-'),
+    ]);
+    expect(popups(middle).map(event => event.message)).toEqual([
+      expect.stringContaining('gen9randombattle-7005-'),
+    ]);
+    expect(popups(latest).map(event => event.message)).toEqual([
+      expect.stringContaining('gen9randombattle-7020-'),
+    ]);
+    expect(popups(latest).some(event => String(event.message).includes('2692967000') || String(event.message).includes('gen9randombattle-7000'))).toBe(false);
+    expect(popups(middle).some(event => String(event.message).includes('gen9randombattle-7020'))).toBe(false);
+    const latestReplay = fs.readFileSync(
+      path.join(logDir, 'replays', 'botalpha-battle-gen9randombattle-7020.log'),
+      'utf8',
+    );
+    expect(latestReplay).not.toContain('gen9randombattle-7005');
+    expect(latestReplay).not.toContain('gen9randombattle-7000');
+    await driver.stop();
+  });
 });
