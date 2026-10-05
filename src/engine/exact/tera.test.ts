@@ -264,6 +264,32 @@ describe('live request tera type', () => {
     expect(locked?.p1.active[0].canTerastallize).toBeNull();
   });
 
+  it('switches to a fainted teammate when the request is reviving', () => {
+    const battle = open(7);
+    const request = JSON.parse(JSON.stringify(battle.p1.activeRequest));
+    request.side.pokemon[0].reviving = true;
+    request.forceSwitch = [true];
+    request.side.pokemon[2].condition = '0 fnt';
+    delete request.active;
+    const foe = battle.p2.active[0];
+    const built = buildDecisionBattle({
+      request,
+      foeActive: {
+        species: foe.species.name,
+        level: foe.level,
+        hp: foe.hp,
+        maxhp: foe.maxhp,
+        moves: foe.moveSlots.map(slot => slot.id),
+      },
+      foeBench: [],
+    });
+    expect(built).not.toBeNull();
+    const choices = legalChoices(built!, 'p1');
+    expect(choices).toContain('switch 3');
+    expect(choices).not.toContain('switch 2');
+    expect(built!.choose('p1', 'switch 3')).toBe(true);
+  });
+
   it('does not offer Tera when the live request omitted it', () => {
     const battle = open(7);
     const request = JSON.parse(JSON.stringify(battle.p1.activeRequest));

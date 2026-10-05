@@ -2,7 +2,7 @@
 
 ## Exact search can Terastallize
 
-The champion still never Terastallizes. `exact-tera-1ply` is a separate config (`configs/challengers/exact-tera-1ply.yaml`, ladder `--engine exact-tera`) that adds `move N terastallize` beside each legal move. The live request's `teraType` is copied onto the cloned battle, so the sim changes typing and damage when that choice is played. A revealed foe Tera is copied the same way. Hidden foe Tera types are not guessed. The clone's turn is the real battle's turn, so the hold uses the same clock on the ladder and in hidden-information self-play.
+The champion still never Terastallizes. `exact-tera-1ply` is a separate config (`configs/challengers/exact-tera-1ply.yaml`, ladder `--engine exact-tera`) that adds `move N terastallize` beside each legal move. The live request's `teraType` is copied onto the cloned battle, so the sim changes typing and damage when that choice is played. A revealed foe Tera is copied the same way. Hidden foe Tera types are not guessed. The clone's turn is the real battle's turn, so the hold uses the same clock on the ladder and in hidden-information self-play. A Revival Blessing request is copied too: the only legal switches are fainted teammates, which is the choice the sim accepts.
 
 Tera is held until it flips a KO or a survival in at least half the sampled replies. Before turn 10 that is the only reason to Tera. After that, the gain has to be at least half a mon of HP if the opponent has already Terastallized, and a full mon of HP if they have not. The factory can sweep `teraMargin`, `teraHoldTurn`, and `teraUnspentMargin` on that config. Promotion is still the gate.
 

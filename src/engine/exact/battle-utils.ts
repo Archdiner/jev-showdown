@@ -50,10 +50,13 @@ export function legalChoices(battle: Battle, sideId: SideId, options?: { tera?: 
   if (req.teamPreview) return ['default'];
 
   if (req.forceSwitch) {
+    // Revival Blessing asks for a fainted teammate. A normal switch asks for a healthy one.
+    const reviving = Array.isArray(req.side?.pokemon) && req.side.pokemon.some((mon: { reviving?: boolean }) => mon?.reviving);
     const choices: string[] = [];
     for (let i = 0; i < side.pokemon.length; i++) {
       const mon = side.pokemon[i];
-      if (mon && !mon.fainted && !mon.isActive) choices.push(`switch ${i + 1}`);
+      if (!mon || mon.isActive) continue;
+      if (reviving ? mon.fainted : !mon.fainted) choices.push(`switch ${i + 1}`);
     }
     return choices;
   }

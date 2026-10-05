@@ -289,7 +289,12 @@ export function buildDecisionBattle(position: LivePosition): Battle | null {
       }
     }
 
-    const force = isForceSwitch(request) || !!active.fainted;
+    const reviving = (slots as Array<{ reviving?: boolean }>).some(slot => slot?.reviving);
+    if (reviving) {
+      battle.p1.addSlotCondition(active, 'revivalblessing', active);
+      active.switchFlag = true;
+    }
+    const force = isForceSwitch(request) || !!active.fainted || reviving;
     if (force) active.switchFlag = true;
     // A lock, Struggle, or an already-used Tera omits canTerastallize. The
     // fresh pokemon would still offer it, and the server would reject the choice.
