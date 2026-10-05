@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { Dex, PRNG } from '@pkmn/sim';
 import { runGame } from '../../bench/game.js';
@@ -139,11 +140,13 @@ describe('hybrid live choice path', () => {
   }, 20000);
 
   it('plays hidden self-play with zero invalid choices', async () => {
-    const dir = process.env.JEV_DATA_DIR;
-    if (!dir) throw new Error('expected the test data directory');
-    for (const name of ['gen9-sets.json', 'gen9-stats.json']) {
-      fs.copyFileSync(path.join('data', name), path.join(dir, name));
-    }
+    const dir = process.env.JEV_DATA_DIR ?? fs.mkdtempSync(path.join(os.tmpdir(), 'hybrid-choice-'));
+    process.env.JEV_DATA_DIR = dir;
+    const stats = wideStats();
+    const sets: Record<string, { level: number }> = {};
+    for (const name of Object.keys(stats)) sets[name] = { level: 80 };
+    fs.writeFileSync(path.join(dir, 'gen9-stats.json'), JSON.stringify(stats));
+    fs.writeFileSync(path.join(dir, 'gen9-sets.json'), JSON.stringify(sets));
     DataLoader.resetForTests();
     const bot = specForAlias('hybrid-core', 'selfplay');
     let invalid = 0;
