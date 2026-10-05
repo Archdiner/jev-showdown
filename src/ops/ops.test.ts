@@ -758,6 +758,24 @@ describe('factory', () => {
   test('two variants reach the factory as different configs and the champion file stays hp-fraction', async () => {
     const paths = tempPaths();
     const db = openDb(paths);
+    const now = Date.now();
+    for (const node of [
+      { id: 'h-pres', title: 'eval-term: preservation', description: 'preservation' },
+      { id: 'h-switch', title: 'mechanism: switch-timing', description: 'switch timing' },
+    ]) {
+      db.addNode({
+        id: node.id,
+        type: 'Hypothesis',
+        status: 'open',
+        title: node.title,
+        description: node.description,
+        created_at: now,
+        updated_at: now,
+        rationale: node.description,
+        expected_effect: 'Paired win rate against max-damage.',
+        test_plan: 'Self-play the mapped term. Do not add a species rule.',
+      });
+    }
     queueHypothesisVariant(paths, db, { id: 'h-pres', title: 'eval-term: preservation', description: 'preservation' });
     queueHypothesisVariant(paths, db, { id: 'h-switch', title: 'mechanism: switch-timing', description: 'switch timing' });
     db.close();
