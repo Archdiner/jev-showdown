@@ -180,9 +180,18 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         if (decision.viewMiss) result.p1ViewMiss++;
         result.p1TurnTimes.push(decision.ms);
         notePlay(result, 'p1', p1Legal, decision);
-        if (!p1Legal.includes(decision.choice) && decision.choice !== 'default') result.p1Invalid++;
+        const wasLegal = p1Legal.includes(decision.choice) || decision.choice === 'default';
+        if (!wasLegal) {
+          const error = `Invalid choice at turn ${battle.turn}, seed ${job.seed}: p1 chose "${decision.choice}", legal: [${p1Legal.join(', ')}]`;
+          console.error(`[INVALID] ${error}`);
+          throw new Error(error);
+        }
         const ok = safeChoose(battle, 'p1', decision.choice);
-        if (!ok) result.p1Invalid++;
+        if (!ok) {
+          const error = `safeChoose rejected legal choice at turn ${battle.turn}, seed ${job.seed}: "${decision.choice}", legal: [${p1Legal.join(', ')}]`;
+          console.error(`[SAFE_CHOOSE_FAILED] ${error}`);
+          throw new Error(error);
+        }
         result.decisions?.push({
           side: 'p1',
           turn: battle.turn,
@@ -196,9 +205,18 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         if (decision.viewMiss) result.p2ViewMiss++;
         result.p2TurnTimes.push(decision.ms);
         notePlay(result, 'p2', p2Legal, decision);
-        if (!p2Legal.includes(decision.choice) && decision.choice !== 'default') result.p2Invalid++;
+        const wasLegal = p2Legal.includes(decision.choice) || decision.choice === 'default';
+        if (!wasLegal) {
+          const error = `Invalid choice at turn ${battle.turn}, seed ${job.seed}: p2 chose "${decision.choice}", legal: [${p2Legal.join(', ')}]`;
+          console.error(`[INVALID] ${error}`);
+          throw new Error(error);
+        }
         const ok = safeChoose(battle, 'p2', decision.choice);
-        if (!ok) result.p2Invalid++;
+        if (!ok) {
+          const error = `safeChoose rejected legal choice at turn ${battle.turn}, seed ${job.seed}: "${decision.choice}", legal: [${p2Legal.join(', ')}]`;
+          console.error(`[SAFE_CHOOSE_FAILED] ${error}`);
+          throw new Error(error);
+        }
         result.decisions?.push({
           side: 'p2',
           turn: battle.turn,
