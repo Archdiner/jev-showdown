@@ -116,6 +116,36 @@ describe('hybrid search pieces', () => {
     expect(body.reasoning_effort).toBe('medium');
     expect(body.providerOptions.gateway.only).toEqual(['cerebras']);
     expect(body.max_tokens).toBe(10000);
+
+    const every = await judgeMove(client, HybridParamsSchema.parse({
+      judgment: true,
+      everyTurn: true,
+      margin: 0.5,
+      model: 'spacexai/grok-4.7',
+      effort: 'none',
+      maxTokens: 1000,
+    }), null, [
+      { choice: 'move 1', score: 3, koRate: 0.5 },
+      { choice: 'switch 2', score: 1, koRate: 0 },
+    ], 2000, 'sides: US test');
+    expect(every.choice).toBeNull();
+    const grok = JSON.parse(calls[1]);
+    expect(grok.reasoning_effort).toBe('none');
+    expect(grok.providerOptions).toBeUndefined();
+    expect(grok.max_tokens).toBe(1000);
+    expect(grok.messages[1].content).toContain('sides: US test');
+
+    const wide = await judgeMove(client, HybridParamsSchema.parse({
+      everyTurn: true,
+      margin: 3,
+      model: 'spacexai/grok-4.7',
+      effort: 'none',
+      maxTokens: 1000,
+    }), null, [
+      { choice: 'move 1', score: 3, koRate: 0.5 },
+      { choice: 'switch 2', score: 1, koRate: 0 },
+    ], 2000);
+    expect(wide.choice).toBe('switch 2');
   });
 
   it('returns a legal choice from sampled worlds', async () => {

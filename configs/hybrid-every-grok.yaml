@@ -1,0 +1,8 @@
+name: hybrid-every-grok
+extends: hybrid-every-qwen.yaml
+hybrid:
+  id: layers
+  params:
+    model: spacexai/grok-4.7
+    effort: none
+    maxTokens: 1000
