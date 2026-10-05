@@ -19,8 +19,9 @@ export function otherSide(side: SideId): SideId {
 /**
  * Legal choice strings taken from the side's active request.
  * Switches are included unless the pokemon is strictly trapped.
+ * `tera` adds `move N terastallize` for each enabled move.
  */
-export function legalChoices(battle: Battle, sideId: SideId): string[] {
+export function legalChoices(battle: Battle, sideId: SideId, options?: { tera?: boolean }): string[] {
   const side = battle.getSide(sideId);
   const req = side.activeRequest as any;
   if (!req || req.wait) return [];
@@ -40,7 +41,9 @@ export function legalChoices(battle: Battle, sideId: SideId): string[] {
   const active = req.active?.[0];
   if (active?.moves) {
     for (let i = 0; i < active.moves.length; i++) {
-      if (!active.moves[i].disabled) choices.push(`move ${i + 1}`);
+      if (active.moves[i].disabled) continue;
+      choices.push(`move ${i + 1}`);
+      if (options?.tera && active.canTerastallize) choices.push(`move ${i + 1} terastallize`);
     }
   }
   if (active && !active.trapped) {
@@ -122,7 +125,7 @@ export function hpEval(battle: Battle, sideId: SideId): number {
 }
 
 export function safeChoose(battle: Battle, sideId: SideId, choice: string): boolean {
-  const legal = legalChoices(battle, sideId);
+  const legal = legalChoices(battle, sideId, { tera: true });
   if (legal.length === 0) return true;
   const pick = legal.includes(choice) ? choice : legal[0];
   try {

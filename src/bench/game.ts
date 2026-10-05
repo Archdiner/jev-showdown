@@ -168,8 +168,8 @@ export async function runGame(job: GameJob): Promise<GameResult> {
       loops++;
       observe(battle, result, teraFirst);
       teraFirst = noteTera(battle, teraFirst, result);
-      const p1Legal = legalChoices(battle, 'p1');
-      const p2Legal = legalChoices(battle, 'p2');
+      const p1Legal = legalChoices(battle, 'p1', { tera: true });
+      const p2Legal = legalChoices(battle, 'p2', { tera: true });
       if (p1Legal.length === 0 && p2Legal.length === 0) {
         result.crashed = true;
         result.error = `stuck at turn ${battle.turn} request=${battle.requestState}`;

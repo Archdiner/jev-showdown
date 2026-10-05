@@ -97,6 +97,9 @@ export function strictLegalActions(request: any): Action[] {
     for (let i = 0; i < active.moves.length; i++) {
       const action: Action = { type: 'move', moveIndex: i + 1 };
       if (isMoveLegal(request, action.moveIndex, false)) actions.push(action);
+      if (active.canTerastallize && isMoveLegal(request, i + 1, true)) {
+        actions.push({ type: 'move', moveIndex: i + 1, terastallize: true });
+      }
     }
   }
 
@@ -142,6 +145,10 @@ export function teamPreviewChoice(request: any): string | null {
 /**
  * Highest-damage legal move, then any legal switch. Used when the engine
  * throws, times out, or returns a choice the request would reject.
+ *
+ * This is a real fallback. Search's opponent model calls `maxDamageChoice`
+ * and does not come through here. `MaxDamage Debug` on stdout is this path,
+ * and the battle driver counts it on `fallbacks`.
  */
 export function pickBestLegal(state: GameState, legal: Action[]): Action {
   if (legal.length === 0) {

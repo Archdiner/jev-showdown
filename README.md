@@ -172,7 +172,17 @@ Connects to Pokemon Showdown, logs in, and searches for rated Gen 9 Random Battl
 
 `run-live.sh` is the live runner. It calls the ladder client.
 
-`--labeled-champion` plays the gatekeeper's current champion file for the whole batch. It is off unless you pass it. `--rollback` keeps the builtin `--engine` policy. The process logs `config live` with the config id, content hash, and commit before searching, and writes those three fields on every finished game. A promotion does not swap the engine until the next batch.
+`--labeled-champion` plays the gatekeeper's current champion file for the whole batch. It is off unless you pass it. `--rollback` keeps the builtin `--engine` policy. The process logs `config live` with the config id, content hash, and commit before searching, and writes those fields plus `role` and `share` on every finished game. A promotion does not swap the engine until the next batch.
+
+`--ab <config>:<share>` is repeatable. It splits new battles inside this one process. `<config>` is a yaml or json path, a config id of a file under `configs/`, or an engine profile (`search`, `exact`, `max-damage`). `<share>` is that config's fraction of battles, in `(0, 1]`. The shares must sum to at most 1. The rest play the champion. A hash of the room id picks the arm, so the same battle keeps it. Concurrency, the turn timer, and the choice watchdog stay shared. A challenger is pulled back to the champion after any invalid move, a loss on our timer, a crash, or 4 losses in a row. Each pull is one `jev.ab-incident.v1` line in `incidents.jsonl`. The process takes the account lock once, before login, and every arm shares it.
+
+```bash
+npm run ladder -- --games 40 --format gen9randombattle --engine search --concurrency 3 --ab configs/panel/maxdamage.yaml:0.2
+```
+
+`--check` prints one preflight canary per arm after proving each config file builds.
+
+One Showdown account can have one ladder process. Before it logs in, the runner creates `state/ladder-<userid>.lock` with `O_EXCL`. The file holds the pid, the start time, and the host. A second runner prints that host, pid, and start time and exits non-zero. A lock is stale only when its pid is dead on this host. A lock written on another machine is not taken over. The file is removed on exit and on SIGINT. The first SIGTERM drains and keeps the lock until the process exits, so a restart during that drain is refused. `--check` does not take the lock. A local two-bot series locks both BotAlpha and BotBravo.
 
 Concurrency is 1 unless you pass `--concurrency K` (absolute max 16). `--use-engine-profile` uses `configs/live/concurrency.json` (search 3, max-damage 4, grok 1). `--concurrency-config FILE` replaces those numbers. `--runners N` multiplies the limit. Grok (`--engine grok`) is the search engine with an LLM prior and stays at 1 game because a call is about 25 seconds. `ops live --runners=N --concurrency=K` uses the same limit: default 1, then those flags, clamped at 16. It does not pick an engine profile, because one login plays whichever config the gatekeeper approved.
 
@@ -197,7 +207,7 @@ Each run also appends `logs/ladder/metrics.jsonl` (one JSON object per line) nex
 
 ### Live metrics JSONL
 
-`v` is the schema version (`1`). Every line also has `ts` (unix ms), `runId`, and `engine`. A batch also stamps `configId`, `configHash`, and `gitSha` from the config chosen at startup.
+`v` is the schema version (`1`). Every line also has `ts` (unix ms), `runId`, and `engine`. A decision or game line stamps the `configId`, `configHash`, `role` (`champion` or `challenger`), and `share` of the config that played that battle. The `run` line lists every arm in `ab`. `gitSha` is the process commit.
 
 Percentiles are nearest-rank: sort the samples and take index `ceil(p/100 * n) - 1`. An empty sample list is `null`.
 
@@ -546,8 +556,10 @@ Other fields:
 | `latencyMaxMs` | largest `latencyMs` sample. Null when there are no samples. |
 | `minTimerMarginSec` | smallest Showdown seconds-left observed for us. Null if no timer line. |
 | `engine` | ladder engine name, or the ops search layer id |
-| `configId` | Builtin policy id (`champion-exact-1ply` or `maxdamage-v1`), or the gatekeeper label's id when `--labeled-champion` is on. `ops live` writes the config id. |
-| `configHash` | Builtin: sha256 of the policy object. Labeled champion: 16-hex content hash of the file, the same value as `configId` when the label still matches. |
+| `configId` | Builtin policy id (`champion-exact-1ply` or `maxdamage-v1`), the gatekeeper label's id when `--labeled-champion` is on, or the challenger file hash when `--ab` routed this battle. `ops live` writes the config id. |
+| `configHash` | Builtin: sha256 of the policy object. Labeled champion or `--ab` file: 16-hex content hash, the same value as `configId` when the label still matches. |
+| `role` | `champion` or `challenger` for a routed ladder battle. Absent on older rows and on `ops live`. |
+| `share` | Fraction of new battles that config was given. The champion's share is what remains after the `--ab` shares. |
 | `gitSha` | `JEV_GIT_SHA` or `GIT_COMMIT` or `GITHUB_SHA`, else `git rev-parse HEAD` |
 | `concurrency` | configured `--concurrency` |
 | `replayId` | Public replay id. The server's id when it confirms one, otherwise the room id with the `battle-` prefix removed (`gen9randombattle-…`). |
@@ -557,17 +569,30 @@ Other fields:
 | `localReplayPath` | raw protocol log on disk |
 | `logPath` | per-battle JSONL |
 | `ts`, `startedAt` | epoch ms. `pid` is the process id. |
+| `calibration` | present when at least one turn was compared with the protocol. Foe-action accuracy, damage MAE, KO misses, and speed-order misses. See Sim calibration below. |
 
 Per-turn rows in the battle file (not copied into `games.jsonl`):
 
 - `searchMs`: engine time.
 - `latencyMs`: wall clock spent choosing. The game row's percentiles are computed from these samples.
 - `secondsLeft`: Showdown clock at the decision. Null when no `|inactive|` for us has been seen.
+- `prediction`: `jev.turn-forecast.v1`, or null when the sim battle could not be built. The foe action is the modal reply (`move id` or `switch:<species id>`). HP and damage are fractions of max HP. The search champion averages its 8 draws; max-damage uses one draw. Either way the rollout is after the choice is sent, and it is capped at 8.
+- `predictionBaseline`: `{ourSide, ourHpBefore, foeHpBefore}` from the client at decision time. The offline report uses it with the replay log.
+
+A later `prediction_error` row (`jev.prediction-error.v1`) on the same file scores that forecast against the protocol up to the next request or result: `foeActionMatch`, `ourActionMatch`, `damageDealtAbs`, `damageTakenAbs`, `ourKoMismatch`, `foeKoMismatch`, `speedOrderMismatch`. `comparable` is false when the turn never played (forfeit, disconnect). Those rows are the game's `calibration` totals.
 
 Example:
 
 ```json
 {"schema":"jev.ladder-game.v1","kind":"ladder-game","source":"ladder","battleId":"battle-gen9randombattle-1","opponent":"Rival","opponentRating":1400,"outcome":"win","endReason":"ko","turns":21,"invalidChoices":0,"crashes":0,"fallbacks":0,"eloBefore":1073,"eloAfter":1089,"gxe":null,"durationMs":84000,"decisions":20,"latencyP50Ms":40,"latencyP95Ms":180,"latencyP99Ms":400,"latencyMaxMs":400,"minTimerMarginSec":12,"engine":"max-damage","configId":"maxdamage-v1","configHash":"ab12","gitSha":"87b268f","concurrency":1,"replayUrl":null,"replayStatus":"unconfirmed"}
+```
+
+## Sim calibration
+
+`npm run calibration` reads `logs/ladder` (or `--log-dir`) and prints foe-action accuracy, damage MAE both ways, KO misses, and speed-order misses. `--json` prints the same totals. The dashboard's Sim calibration panel reads the `prediction_error` rows and, when a battle only has the game-level total, `calibration` on `jev.ladder-game.v1`.
+
+```bash
+npm run calibration -- --log-dir logs/ladder
 ```
 
 ## Rating and GXE

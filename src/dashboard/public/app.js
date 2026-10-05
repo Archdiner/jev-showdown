@@ -3,8 +3,11 @@ const band = document.querySelector('#band');
 const meta = document.querySelector('#meta');
 const ops = document.querySelector('#ops');
 const rates = document.querySelector('#rates');
+const calibration = document.querySelector('#calibration');
+const calNote = document.querySelector('#calNote');
 const filtered = document.querySelector('#filtered');
 const rows = document.querySelector('#rows');
+const configRows = document.querySelector('#configRows');
 
 function text(value) {
   if (value === null || value === undefined || value === '') return '—';
@@ -34,6 +37,79 @@ function card(parent, title, tally, className) {
   parent.append(node);
 }
 
+function calCard(parent, title, strong, detail) {
+  const node = document.createElement('div');
+  node.className = 'card';
+  const label = document.createElement('span');
+  label.textContent = title;
+  const value = document.createElement('strong');
+  value.textContent = strong;
+  node.append(label, value);
+  if (detail) {
+    const note = document.createElement('span');
+    note.textContent = detail;
+    node.append(note);
+  }
+  parent.append(node);
+}
+
+function countPct(rate, numerator, denominator) {
+  if (rate === null || rate === undefined || !denominator) return '—';
+  return `${pct(rate)} (${numerator}/${denominator})`;
+}
+
+function renderCalibration(summary, filtered) {
+  calibration.replaceChildren();
+  calNote.textContent = filtered
+    ? 'This filter. Predicted foe action, damage, KOs, and speed order against the protocol that followed the choice. Damage is mean absolute error as a fraction of max HP.'
+    : 'All logged turns. Predicted foe action, damage, KOs, and speed order against the protocol that followed the choice. Damage is mean absolute error as a fraction of max HP.';
+  if (!summary || !summary.compared) {
+    const empty = document.createElement('p');
+    empty.textContent = 'No compared turns yet.';
+    calibration.append(empty);
+    return;
+  }
+  calCard(calibration, 'Foe action', countPct(summary.foeActionAccuracy, summary.foeActionCorrect, summary.foeActions), `${summary.compared} turns`);
+  calCard(calibration, 'Damage dealt', summary.damageDealtMae === null ? '—' : `${(summary.damageDealtMae * 100).toFixed(1)}% HP`, 'mean absolute error');
+  calCard(calibration, 'Damage taken', summary.damageTakenMae === null ? '—' : `${(summary.damageTakenMae * 100).toFixed(1)}% HP`, 'mean absolute error');
+  calCard(calibration, 'KO misses', countPct(summary.koErrorRate, summary.koErrors, summary.koCompared), `ours ${summary.ourKoErrors}, foe ${summary.foeKoErrors}`);
+  calCard(calibration, 'Speed order', countPct(summary.speedOrderErrorRate, summary.speedOrderErrors, summary.speedCompared), 'who acted first');
+}
+
+function score(tally) {
+  if (!tally) return '—';
+  return `${pct(tally.winRate)} ${tally.wins}-${tally.losses}-${tally.ties}`;
+}
+
+function renderConfigs(list) {
+  configRows.replaceChildren();
+  if (!list.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 10;
+    td.textContent = 'No finished games.';
+    tr.append(td);
+    configRows.append(tr);
+    return;
+  }
+  for (const row of list) {
+    const tr = document.createElement('tr');
+    tr.append(
+      cell(row.configId),
+      cell(row.role),
+      cell(row.share),
+      cell(`${row.wins}-${row.losses}-${row.ties}`),
+      cell(row.eloDelta === null || row.eloDelta === undefined ? null : Math.round(row.eloDelta)),
+      cell(row.invalidMoves),
+      cell(score(row.report && row.report.strategy)),
+      cell(score(row.report && row.report.timerDisconnect)),
+      cell(score(row.report && row.report.crash)),
+      cell(score(row.report && row.report.all)),
+    );
+    configRows.append(tr);
+  }
+}
+
 function cell(value) {
   const td = document.createElement('td');
   td.textContent = text(value);
@@ -46,10 +122,13 @@ function render(body, status) {
   const report = games.report;
   meta.textContent = `${body.fixtureMode ? 'Fixture data. ' : ''}${games.record.games} games, rating ${text(games.elo)}. Strategy excludes timer, disconnect, and crash. Ladder lines have no end reason, so they stay in strategy and their losses are also counted as unclassified (${report.unclassifiedLosses}).`;
   rates.replaceChildren();
+  renderConfigs(games.configs || []);
   card(rates, 'Strategy', report.strategy, 'strategy');
   card(rates, 'Timer / disconnect', report.timerDisconnect, 'timer');
   card(rates, 'Crash', report.crash, 'crash');
   card(rates, 'All finished', report.all, '');
+  const unfiltered = endReason.value === 'any' && band.value === 'any';
+  renderCalibration(unfiltered ? games.calibration : games.filteredCalibration, !unfiltered);
   const slice = games.filteredReport.all;
   const noun = slice.games === 1 ? 'game' : 'games';
   filtered.textContent = `This filter (${games.filter.endReason}, ${games.filter.band}): ${pct(slice.winRate)} on ${slice.games} ${noun}, ${slice.wins}-${slice.losses}-${slice.ties}. Across all games: strategy losses ${report.strategyLosses}, timer/disconnect losses ${report.timerDisconnectLosses}, crash losses ${report.crashLosses}, unclassified losses ${report.unclassifiedLosses}.`;

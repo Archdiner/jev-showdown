@@ -129,5 +129,22 @@ describe('ladder log ingest', () => {
     }, ladder);
     expect(parsed?.ourSide).toBe('p2');
     expect(parsed?.foeSide).toBe('p1');
+    expect(gameFromRow({
+      kind: 'ladder-game',
+      id: 'ghost',
+      turns: 0,
+      outcome: 'tie',
+      endReason: 'disconnect',
+      winner: null,
+    }, ladder)).toBeNull();
+    expect(gameFromRow({
+      kind: 'ladder-game',
+      id: 'local-loss',
+      outcome: 'loss',
+      localServer: true,
+      replayStatus: 'local-only',
+      eloAfter: 1074,
+      log: '|win|Foe',
+    }, ladder)).toBeNull();
   });
 });

@@ -2,7 +2,7 @@ import { informationMode, type InformationMode } from '../client/hidden-info.js'
 import { specForAlias } from '../config/aliases.js';
 import { BenchPlayer, GameJob, GameResult, playerId } from './game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
-import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2 } from '../engine/exact/search.js';
+import { EXACT_1PLY, EXACT_1PLY_PREVIOUS, ExactConfig, SWITCH_DEPTH2 } from '../engine/exact/search.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
 import { p99, runGamesParallel } from './pool.js';
 
@@ -17,6 +17,7 @@ function policy(name: string): BenchPlayer {
   if (name === 'maxdamage') return { kind: 'maxdamage' };
   if (name === 'legacy') return { kind: 'legacy' };
   if (name === 'exact') return { kind: 'exact', config: EXACT_1PLY };
+  if (name === 'previous' || name === 'exact-previous') return { kind: 'exact', config: EXACT_1PLY_PREVIOUS };
   if (name === 'switch') return { kind: 'exact', config: SWITCH_DEPTH2 };
   if (name.startsWith('exact')) {
     const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',');
@@ -70,6 +71,17 @@ function pairedJobs(
     });
   }
   return jobs;
+}
+
+/** Wilson score interval. Ties stay in the denominator, so a tie is not a win. */
+export function wilsonCI(wins: number, total: number): [number, number] {
+  if (total <= 0) return [0, 1];
+  const z = 1.96;
+  const p = wins / total;
+  const denom = 1 + (z * z) / total;
+  const center = (p + (z * z) / (2 * total)) / denom;
+  const margin = (z * Math.sqrt((p * (1 - p)) / total + (z * z) / (4 * total * total))) / denom;
+  return [Math.max(0, center - margin), Math.min(1, center + margin)];
 }
 
 export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate: BenchPlayer): {
@@ -172,7 +184,9 @@ async function main() {
   const summary = scoreCandidate(results, jobs, a);
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   console.log('\n=== Result ===');
+  const [lo, hi] = wilsonCI(summary.wins, summary.games);
   console.log(`A win rate: ${(summary.winRate * 100).toFixed(1)}% (${summary.wins}W-${summary.losses}L-${summary.ties}T / ${summary.games})`);
+  console.log(`Wilson 95% CI: [${(lo * 100).toFixed(1)}%, ${(hi * 100).toFixed(1)}%]`);
   const viewMiss = results.reduce((sum, game) => sum + game.p1ViewMiss + game.p2ViewMiss, 0);
   console.log(`invalid=${summary.invalid} crashes=${summary.crashes} viewMiss=${viewMiss} p99=${summary.p99ms.toFixed(0)}ms max=${summary.maxMs.toFixed(0)}ms`);
   const play = playRate(results, jobs, a);
