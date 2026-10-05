@@ -175,6 +175,11 @@ export function classifyEnd(input: {
   return { outcome, endReason: 'ko' };
 }
 
+/** `battle-gen9randombattle-1` → `gen9randombattle-1`, the public replay id. */
+export function replayIdFromBattle(battleId: string): string {
+  return battleId.startsWith('battle-') ? battleId.slice('battle-'.length) : battleId;
+}
+
 export function replayStatusOf(input: {
   replayUrl: string | null;
   localServer: boolean;
@@ -264,7 +269,7 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     configHash: input.configHash,
     gitSha: input.gitSha,
     concurrency: input.concurrency,
-    replayId: input.replayId,
+    replayId: input.replayId ?? replayIdFromBattle(input.battleId),
     replayUrl: input.replayUrl,
     localReplayPath: input.localReplayPath,
     replayUploaded: replay.replayUploaded,

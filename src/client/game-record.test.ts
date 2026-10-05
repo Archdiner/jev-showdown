@@ -12,6 +12,7 @@ import {
   gxeOf,
   latencyFields,
   percentile,
+  replayIdFromBattle,
   toOpsLiveGame,
   LadderGameInput,
 } from './game-record.js';
@@ -176,6 +177,26 @@ describe('ladder game records', () => {
     expect(rated.eloBefore).toBeNull();
   });
 
+  it('records the battle replay id and a URL only when the server confirms it', () => {
+    expect(replayIdFromBattle('battle-gen9randombattle-42')).toBe('gen9randombattle-42');
+    const pending = buildLadderGameRecord(input());
+    expect(pending.replayId).toBe('gen9randombattle-1');
+    expect(pending.replayUrl).toBeNull();
+    expect(pending.replayUploaded).toBe(false);
+    expect(pending.replayStatus).toBe('unconfirmed');
+
+    const confirmed = buildLadderGameRecord(input({
+      replayId: 'gen9randombattle-1',
+      replayUrl: 'https://replay.pokemonshowdown.com/gen9randombattle-1',
+    }));
+    expect(confirmed.replayUploaded).toBe(true);
+    expect(confirmed.replayStatus).toBe('confirmed');
+
+    const local = buildLadderGameRecord(input({ localServer: true }));
+    expect(local.replayStatus).toBe('local-only');
+    expect(local.replayUrl).toBeNull();
+  });
+
   it('appends one JSON object per game', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-games-'));
     appendGameRecord(dir, buildLadderGameRecord(input()));
@@ -259,6 +280,53 @@ describe('BattleDriver game record', () => {
     const stored = JSON.parse(fs.readFileSync(path.join(logDir, 'games.jsonl'), 'utf8'));
     expect(stored.battleId).toBe(room);
     expect(stored.endReason).toBe('opponent-forfeit');
+    expect(stored.replayId).toBe('gen9randombattle-9');
+    await driver.stop();
+  });
+
+  it('writes the replay URL as soon as the server confirms it', async () => {
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-replay-'));
+    const socket = new EventEmitter();
+    const client = Object.assign(socket, {
+      choose: () => true,
+      saveReplay: () => true,
+      trackRoom: () => undefined,
+      untrackRoom: () => undefined,
+      isReady: () => true,
+    }) as unknown as ShowdownClient;
+    const driver = new BattleDriver({
+      client,
+      username: 'BotAlpha',
+      format: gen9RandomBattle,
+      engineName: 'max-damage',
+      decisions: {
+        openBattle() { /* unused */ },
+        closeBattle() { /* unused */ },
+        async stop() { /* unused */ },
+      } as unknown as DecisionClient,
+      logDir,
+      decisionTimeoutMs: 1000,
+      settleMs: 8000,
+      localServer: false,
+    });
+    const ended = new Promise<import('./game-record.js').LadderGameRecord>(resolve => driver.on('gameEnd', resolve));
+    const room = 'battle-gen9randombattle-9';
+    const started = Date.now();
+    socket.emit('line', room, '|player|p1|BotAlpha|1|');
+    socket.emit('line', room, '|player|p2|Rival|2|');
+    socket.emit('line', room, '|win|BotAlpha');
+    socket.emit('replay', {
+      id: 'gen9randombattle-9',
+      url: 'https://replay.pokemonshowdown.com/gen9randombattle-9',
+    });
+    const summary = await ended;
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(summary.replayUrl).toBe('https://replay.pokemonshowdown.com/gen9randombattle-9');
+    expect(summary.replayId).toBe('gen9randombattle-9');
+    expect(summary.replayStatus).toBe('confirmed');
+    expect(summary.replayUploaded).toBe(true);
+    expect(summary.localReplayPath).toEqual(expect.stringMatching(/\.log$/));
+    expect(fs.existsSync(summary.localReplayPath as string)).toBe(true);
     await driver.stop();
   });
 });

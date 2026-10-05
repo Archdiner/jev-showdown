@@ -548,9 +548,10 @@ Other fields:
 | `configHash` | 16 hex chars. Same function as `configIdOf`. The ladder hashes the engine name plus `BotConfig`. Ops writes the config id. |
 | `gitSha` | `JEV_GIT_SHA` or `GIT_COMMIT` or `GITHUB_SHA`, else `git rev-parse HEAD` |
 | `concurrency` | configured `--concurrency` |
-| `replayId`, `replayUrl` | set when the server sends a `replay.pokemonshowdown.com` URL. Otherwise null. |
+| `replayId` | Public replay id. The server's id when it confirms one, otherwise the room id with the `battle-` prefix removed (`gen9randombattle-…`). |
+| `replayUrl` | Set only after the server popup or log contains `https://replay.pokemonshowdown.com/…`. `/savereplay` asks the server to upload; this process does not invent the URL. |
 | `replayUploaded` | true only when `replayUrl` is set |
-| `replayStatus` | `confirmed` (URL arrived), `local-only` (local server), or `unconfirmed` (public server, `/savereplay` sent, no URL yet) |
+| `replayStatus` | `confirmed` (URL arrived), `local-only` (local server), or `unconfirmed` (public server, upload requested, no URL before the wait). The public client waits up to 8s and writes the row as soon as the URL arrives. |
 | `localReplayPath` | raw protocol log on disk |
 | `logPath` | per-battle JSONL |
 | `ts`, `startedAt` | epoch ms. `pid` is the process id. |

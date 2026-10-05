@@ -7,7 +7,7 @@ import { Dex } from '@pkmn/dex';
 import { Format } from '../types/format.js';
 import { Action, GameState } from '../types/index.js';
 import { StateMismatch } from '../types/format.js';
-import { ShowdownClient, ReplayNotice, parseRatingLine } from './showdown-client.js';
+import { ShowdownClient, ReplayNotice, parseRatingLine, parseReplayUrl } from './showdown-client.js';
 import { DecisionClient } from './decision-client.js';
 import { OpponentTracker } from './opponent-tracker.js';
 import { GameLog, openGameLog } from './game-log.js';
@@ -534,7 +534,22 @@ export class BattleDriver extends EventEmitter {
       || room.roomId === `battle-${replay.id}`
       || room.roomId.endsWith(replay.id),
     );
-    if (target) target.replay = replay;
+    if (!target || target.finalized) return;
+    target.replay = replay;
+    if (!target.ended) return;
+    if (target.finalizeTimer) clearTimeout(target.finalizeTimer);
+    void this.finalize(target);
+  }
+
+  private replayFromLines(room: RoomState): void {
+    if (room.replay) return;
+    for (let i = room.lines.length - 1; i >= 0; i--) {
+      const found = parseReplayUrl(room.lines[i]);
+      if (found) {
+        room.replay = found;
+        return;
+      }
+    }
   }
 
   private async finalize(room: RoomState): Promise<void> {
@@ -551,6 +566,7 @@ export class BattleDriver extends EventEmitter {
       `${toID(this.options.username)}-${room.roomId.replace(/[^a-zA-Z0-9_-]+/g, '_')}.log`,
     );
     fs.writeFileSync(localReplayPath, room.lines.join('\n'));
+    this.replayFromLines(room);
 
     const summary: LadderGameRecord = buildLadderGameRecord({
       startedAt: room.startedAt,
