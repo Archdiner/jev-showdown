@@ -1,4 +1,5 @@
 import { Battle, PRNG } from '@pkmn/sim';
+import { simVeto } from '../../llm/sim-veto.js';
 import { Action } from '../../types/index.js';
 import { SideId, legalChoices } from './battle-utils.js';
 import { maxDamageChoice } from './max-damage.js';
@@ -8,7 +9,8 @@ export type PolicySpec =
   | { kind: 'random' }
   | { kind: 'maxdamage' }
   | { kind: 'exact'; config: ExactConfig }
-  | { kind: 'legacy' };
+  | { kind: 'legacy' }
+  | { kind: 'sim'; margin?: number };
 
 export interface Decision {
   choice: string;
@@ -16,6 +18,7 @@ export interface Decision {
   scores?: ScoredChoice[];
   predictedSwitch?: boolean;
   answersPredictedSwitch?: boolean;
+  source?: 'sim' | 'veto';
 }
 
 export async function decide(spec: PolicySpec, battle: Battle, side: SideId, rng: PRNG): Promise<Decision> {
@@ -37,6 +40,16 @@ export async function decide(spec: PolicySpec, battle: Battle, side: SideId, rng
   if (spec.kind === 'legacy') {
     const choice = await legacyChoice(battle, side, legal);
     return { choice, ms: Date.now() - started };
+  }
+
+  if (spec.kind === 'sim') {
+    const result = simVeto(battle, side, spec.margin ?? 1);
+    return {
+      choice: result.choice,
+      ms: Date.now() - started,
+      scores: result.scores,
+      source: result.veto ? 'veto' : 'sim',
+    };
   }
 
   const trace = exactSearch(battle, side, spec.config);
@@ -100,6 +113,8 @@ export function specFromId(id: string): PolicySpec {
     case 'switch-depth2':
     case 'challenger-switch-depth2':
       return { kind: 'exact', config: SWITCH_DEPTH2 };
+    case 'sim':
+      return { kind: 'sim' };
     default:
       if (id.startsWith('exact:')) {
         const [, depth, model, evalMode] = id.split(':');

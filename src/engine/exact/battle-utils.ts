@@ -121,10 +121,21 @@ export function hpEval(battle: Battle, sideId: SideId): number {
   return score;
 }
 
+/** True for a normal legal choice, or Terastallize on a move the request allows. */
+export function choiceAccepted(battle: Battle, sideId: SideId, choice: string): boolean {
+  const legal = legalChoices(battle, sideId);
+  if (legal.includes(choice)) return true;
+  if (!choice.endsWith(' terastallize')) return false;
+  const plain = choice.slice(0, -' terastallize'.length);
+  if (!legal.includes(plain)) return false;
+  const request = battle.getSide(sideId).activeRequest as { active?: Array<{ canTerastallize?: unknown }> } | null;
+  return !!request?.active?.[0]?.canTerastallize;
+}
+
 export function safeChoose(battle: Battle, sideId: SideId, choice: string): boolean {
   const legal = legalChoices(battle, sideId);
   if (legal.length === 0) return true;
-  const pick = legal.includes(choice) ? choice : legal[0];
+  const pick = choiceAccepted(battle, sideId, choice) ? choice : legal[0];
   try {
     if (battle.choose(sideId, pick)) return pick === choice;
   } catch {
