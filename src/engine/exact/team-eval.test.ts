@@ -171,7 +171,7 @@ describe('selective depth-2', () => {
 
   test('fitted 1-ply returns one score per legal choice', () => {
     const { battle, legal } = withMoves(5);
-    const trace = exactSearch(battle, 'p1', { ...FITTED_1PLY, samples: 1 });
+    const trace = exactSearch(battle, 'p1', { ...FITTED_1PLY, samples: 1, tera: false });
     expect(trace.scores).toHaveLength(legal.length);
     expect(legal).toContain(trace.choice);
   });
