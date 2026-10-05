@@ -25,6 +25,7 @@ function tempLayout(): { root: string; layout: Layout } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-sentinel-load-'));
   const layout: Layout = {
     cwd: root,
+    liveRepoDir: null,
     opsDir: path.join(root, 'ops'),
     ladderLogDir: path.join(root, 'ladder'),
     liveRunsDir: path.join(root, 'live-runs'),

@@ -8,12 +8,15 @@ import { observeGames } from './games.js';
 import {
   DEFAULTS,
   type BatchEndSignal,
+  type CheckoutStatus,
   type DrainFile,
   type GitStatus,
   type Layout,
+  type LockSnapshot,
   type LogRow,
   type ProcessSnapshot,
   type RunMeta,
+  type RunSummary,
   type SentinelContext,
 } from './types.js';
 
@@ -38,8 +41,15 @@ export interface LoadOptions {
   processes?: ProcessSnapshot[];
   /** Overrides `process.kill(pid, 0)` for claim-owner checks. */
   pidAlive?: (pid: number) => boolean;
-  /** When set, git is not invoked. */
+  /** When set, git is not invoked for the ops checkout. */
   git?: GitStatus;
+  /** When set, git is not invoked for LIVE_REPO_DIR. */
+  liveGit?: GitStatus;
+  /**
+   * Evaluation baseline in milliseconds. Undefined derives it from the newest
+   * non-local run. Null disables the cutoff.
+   */
+  baselineMs?: number | null;
 }
 
 export function loadContext(layout: Layout, options: LoadOptions = {}): SentinelContext {
@@ -52,6 +62,8 @@ export function loadContext(layout: Layout, options: LoadOptions = {}): Sentinel
       : snapshotProcesses({ procRoot: '/proc' });
   const processesScanned = snapshot.scanned;
   const processes = snapshot.processes;
+  const pidAlive = options.pidAlive
+    ?? (options.processes ? (pid: number) => options.processes?.some(proc => proc.pid === pid) ?? false : processAlive);
   const rows = collectRows(layout, now, lookbackMs);
   const speciesPath = path.join(layout.dataDir, 'gen9-stats.json');
   const species = readSpecies(speciesPath);
@@ -70,10 +82,12 @@ export function loadContext(layout: Layout, options: LoadOptions = {}): Sentinel
     batchSize: options.batchSize ?? DEFAULTS.batchSize,
     processesScanned,
     processes,
-    pidAlive: options.pidAlive ?? processAlive,
+    pidAlive,
+    baselineMs: options.baselineMs === undefined ? defaultBaseline(findRuns(layout.liveRunsDir)) : options.baselineMs,
     git: options.git ?? readGit(layout.cwd),
+    checkouts: readCheckouts(layout, options.git ?? readGit(layout.cwd), options.liveGit),
     rows,
-    games: observeGames(rows),
+    games: assignRuns(observeGames(rows), findRuns(layout.liveRunsDir)),
     heartbeats: heartbeatRows(rows),
     circuits: readCircuits(path.join(layout.opsDir, 'circuits.json')),
     approvedConfigIds: approvedConfigIds(layout.graphDb),
@@ -82,7 +96,9 @@ export function loadContext(layout: Layout, options: LoadOptions = {}): Sentinel
     speciesPath,
     speciesError: species.error,
     drains: findDrains(layout),
+    locks: findLocks(layout),
     runs: findRuns(layout.liveRunsDir),
+    runSummary: readSummary(path.join(layout.ladderLogDir, 'summary.json')),
     summaryMtimeMs: mtimeIfExists(path.join(layout.ladderLogDir, 'summary.json')),
     batchEnds: collectBatchEnds(layout, rows, now, lookbackMs),
     decisionSamples: decisionSamples(rows),
@@ -98,6 +114,8 @@ export interface ProcessScanInput {
   procRoot?: string;
   /** Process table text. Used when `procRoot` does not exist. */
   readTable?: () => string;
+  /** Alias for readTable. */
+  ps?: () => string;
 }
 
 /**
@@ -107,10 +125,21 @@ export interface ProcessScanInput {
  */
 export function snapshotProcesses(input: ProcessScanInput = {}): { processes: ProcessSnapshot[]; scanned: boolean } {
   const root = input.procRoot ?? '/proc';
+  const readTable = input.readTable ?? input.ps;
+  if (readTable) {
+    try {
+      let procs = parseProcessTable(readTable()).filter(proc => relevantProcess(proc.cmd));
+      if (fs.existsSync(root)) {
+        procs = procs.map(proc => augmentWithEnv(proc, root));
+      }
+      return { processes: procs, scanned: true };
+    } catch {
+      return { processes: [], scanned: false };
+    }
+  }
   if (fs.existsSync(root)) return { processes: scanProc(root), scanned: true };
-  const readTable = input.readTable ?? readProcessTable;
   try {
-    return { processes: parseProcessTable(readTable()), scanned: true };
+    return { processes: parseProcessTable(readProcessTable()), scanned: true };
   } catch {
     return { processes: [], scanned: false };
   }
@@ -118,6 +147,57 @@ export function snapshotProcesses(input: ProcessScanInput = {}): { processes: Pr
 
 export function scanProcesses(input: ProcessScanInput = {}): ProcessSnapshot[] {
   return snapshotProcesses(input).processes;
+}
+
+function augmentWithEnv(proc: ProcessSnapshot, procRoot: string): ProcessSnapshot {
+  try {
+    const environPath = path.join(procRoot, String(proc.pid), 'environ');
+    if (fs.existsSync(environPath)) {
+      const env = parseEnviron(fs.readFileSync(environPath));
+      return { ...proc, env };
+    }
+  } catch {
+    // If we can't read environ, just return the process without env
+  }
+  return proc;
+}
+
+const MONTHS: Record<string, number> = {
+  Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
+  Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
+};
+
+export function relevantProcess(cmd: string): boolean {
+  return LADDER_CMD.test(cmd);
+}
+
+function parseLstart(text: string): number | undefined {
+  const match = /^(\w{3})\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/.exec(text.trim());
+  if (!match) return undefined;
+  const month = MONTHS[match[2]];
+  if (month === undefined) return undefined;
+  return Date.UTC(Number(match[7]), month, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]));
+}
+
+/** Parse `ps -axo pid,ppid,pgid,lstart,command`. The header and short lines are skipped. */
+export function parsePs(text: string): ProcessSnapshot[] {
+  const out: ProcessSnapshot[] = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trimEnd();
+    if (!line.trim()) continue;
+    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.*)$/.exec(line);
+    if (!match) continue;
+    const cmd = match[5].trim();
+    if (!cmd) continue;
+    out.push({
+      pid: Number(match[1]),
+      ppid: Number(match[2]),
+      pgid: Number(match[3]),
+      startedAt: parseLstart(match[4]),
+      cmd,
+    });
+  }
+  return out;
 }
 
 /** `ps -axww -o pid=,command=` rows. Works on macOS and Linux. */
@@ -181,7 +261,8 @@ function collectBatchEnds(layout: Layout, rows: LogRow[], now: number, lookbackM
     if (signal) signals.push(signal);
   }
   for (const file of listLogFiles(layout.ladderLogDir).concat(listLogFiles(layout.liveRunsDir))) {
-    for (const signal of readLogEnds(file, now, lookbackMs)) signals.push(signal);
+    const fileSignals = readLogEnds(file, now, lookbackMs);
+    for (const signal of fileSignals) signals.push(signal);
   }
   return signals;
 }
@@ -294,6 +375,21 @@ function listLogFiles(dir: string): string[] {
   return found;
 }
 
+export function gitTopLevel(dir: string): string | null {
+  if (!dir || !fs.existsSync(dir)) return null;
+  try {
+    const out = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: dir,
+      encoding: 'utf8',
+      timeout: 4000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
 export function readGit(cwd: string): GitStatus {
   try {
     const out = execFileSync('git', ['rev-list', '--count', 'HEAD..origin/main'], {
@@ -371,7 +467,8 @@ function collectRows(layout: Layout, now: number, lookbackMs: number): LogRow[] 
   const cutoff = now - lookbackMs;
   for (const file of [...files].sort()) {
     if (isSentinelIncidentLog(file)) continue;
-    for (const row of readLogWindow(file, cutoff)) rows.push(row);
+    const fileRows = readLogWindow(file, cutoff);
+    for (const row of fileRows) rows.push(row);
   }
   return rows;
 }
@@ -578,15 +675,27 @@ function readSpecies(file: string): { count: number | null; error: string | null
 
 function findDrains(layout: Layout): DrainFile[] {
   const found = new Map<string, DrainFile>();
-  const add = (file: string) => {
+  const add = (file: string, checkout: 'ops' | 'live') => {
     const when = mtimeIfExists(file);
     if (when === null) return;
-    found.set(path.resolve(file), { path: file, mtimeMs: when });
+    found.set(path.resolve(file), { path: file, mtimeMs: when, checkout });
   };
-  add(path.join(layout.cwd, 'state', 'DRAIN'));
+  add(path.join(layout.cwd, 'state', 'DRAIN'), 'ops');
+  if (layout.liveRepoDir && path.resolve(layout.liveRepoDir) !== path.resolve(layout.cwd)) {
+    add(path.join(layout.liveRepoDir, 'state', 'DRAIN'), 'live');
+    const liveRuns = path.join(layout.liveRepoDir, 'live-runs');
+    if (path.resolve(liveRuns) !== path.resolve(layout.liveRunsDir) && fs.existsSync(liveRuns)) {
+      for (const name of fs.readdirSync(liveRuns)) {
+        if (name.endsWith('.drain')) add(path.join(liveRuns, name), 'live');
+      }
+    }
+  }
+  const runsCheckout = layout.liveRepoDir && path.resolve(layout.liveRunsDir).startsWith(path.resolve(layout.liveRepoDir))
+    ? 'live'
+    : 'ops';
   if (fs.existsSync(layout.liveRunsDir)) {
     for (const name of fs.readdirSync(layout.liveRunsDir)) {
-      if (name.endsWith('.drain')) add(path.join(layout.liveRunsDir, name));
+      if (name.endsWith('.drain')) add(path.join(layout.liveRunsDir, name), runsCheckout);
     }
   }
   return [...found.values()];
@@ -616,6 +725,99 @@ function findRuns(dir: string): RunMeta[] {
     });
   }
   return runs;
+}
+
+function runStart(run: RunMeta): number {
+  return run.startedAt ?? run.mtimeMs;
+}
+
+function defaultBaseline(runs: RunMeta[]): number | null {
+  const live = runs.filter(run => !run.local);
+  if (live.length === 0) return null;
+  const newest = live.reduce((best, run) => runStart(run) >= runStart(best) ? run : best);
+  return runStart(newest);
+}
+
+function assignRuns(games: SentinelContext['games'], runs: RunMeta[]): SentinelContext['games'] {
+  const live = runs.filter(run => !run.local).sort((a, b) => runStart(a) - runStart(b));
+  return games.map(game => {
+    if (game.runId) return game;
+    if (game.ts === null || live.length === 0) return game;
+    let match: RunMeta | null = null;
+    for (const run of live) {
+      if (runStart(run) <= game.ts) match = run;
+    }
+    if (!match) return game;
+    return { ...game, runId: game.runId ?? match.runId, gitSha: game.gitSha ?? match.gitSha ?? null };
+  });
+}
+
+function readCheckouts(layout: Layout, opsGit: GitStatus, liveGit: GitStatus | undefined): CheckoutStatus[] {
+  const checkouts: CheckoutStatus[] = [{ role: 'ops', dir: layout.cwd, git: opsGit }];
+  if (!layout.liveRepoDir) return checkouts;
+  if (path.resolve(layout.liveRepoDir) === path.resolve(layout.cwd)) return checkouts;
+  checkouts.push({
+    role: 'live',
+    dir: layout.liveRepoDir,
+    git: liveGit ?? readGit(layout.liveRepoDir),
+  });
+  return checkouts;
+}
+
+function findLocks(layout: Layout): LockSnapshot[] {
+  const locks: LockSnapshot[] = [];
+  const seen = new Set<string>();
+  const addDir = (dir: string, checkout: 'ops' | 'live') => {
+    if (!fs.existsSync(dir)) return;
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.startsWith('ladder-') || !name.endsWith('.lock')) continue;
+      const file = path.join(dir, name);
+      const resolved = path.resolve(file);
+      if (seen.has(resolved)) continue;
+      seen.add(resolved);
+      locks.push(readLock(file, checkout, dir));
+    }
+  };
+  addDir(path.join(layout.cwd, 'state'), 'ops');
+  if (layout.liveRepoDir && path.resolve(layout.liveRepoDir) !== path.resolve(layout.cwd)) {
+    addDir(path.join(layout.liveRepoDir, 'state'), 'live');
+  }
+  return locks;
+}
+
+function readLock(file: string, checkout: 'ops' | 'live', dir: string): LockSnapshot {
+  let parsed: Record<string, unknown> = {};
+  try {
+    const body = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
+    if (body && typeof body === 'object' && !Array.isArray(body)) parsed = body as Record<string, unknown>;
+  } catch {
+    parsed = {};
+  }
+  return {
+    path: file,
+    checkout,
+    dir,
+    pid: typeof parsed.pid === 'number' ? parsed.pid : null,
+    username: typeof parsed.username === 'string' ? parsed.username : null,
+    startedAt: typeof parsed.startedAt === 'string' ? parsed.startedAt : null,
+    host: typeof parsed.host === 'string' ? parsed.host : null,
+  };
+}
+
+function readSummary(file: string): RunSummary | null {
+  if (!fs.existsSync(file)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.games !== 'number') return null;
+    return {
+      games: parsed.games,
+      wins: typeof parsed.wins === 'number' ? parsed.wins : null,
+      gitSha: typeof parsed.gitSha === 'string' ? parsed.gitSha : null,
+      requested: typeof parsed.requested === 'number' ? parsed.requested : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function mtimeIfExists(file: string): number | null {
