@@ -3,10 +3,12 @@ import { PolicySpec, decide } from '../engine/exact/policies.js';
 import { PokemonSet } from '@pkmn/sim';
 import {
   SideId,
+  choiceAllowed,
   legalChoices,
   safeChoose,
   startRandomBattle,
 } from '../engine/exact/battle-utils.js';
+import { absorb, emptyTotals, type JevTotals, type JevTrace } from '../llm/jev-solo/stats.js';
 
 export interface GameJob {
   index: number;
@@ -38,9 +40,18 @@ export interface GameResult {
   p2Predicted: number;
   p2Answered: number;
   decisions?: Array<{ side: SideId; turn: number; choice: string; scores?: Array<{ choice: string; score: number }> }>;
+  p1Jev?: JevTotals;
+  p2Jev?: JevTotals;
 }
 
 const MAX_LOOPS = 800;
+
+function noteJev(result: GameResult, side: SideId, trace: JevTrace | undefined): void {
+  if (!trace) return;
+  const key = side === 'p1' ? 'p1Jev' : 'p2Jev';
+  if (!result[key]) result[key] = emptyTotals();
+  absorb(result[key], trace);
+}
 
 function notePlay(
   result: GameResult,
@@ -107,7 +118,8 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         const decision = await decide(job.p1, battle, 'p1', rng);
         result.p1TurnTimes.push(decision.ms);
         notePlay(result, 'p1', p1Legal, decision);
-        if (!p1Legal.includes(decision.choice)) result.p1Invalid++;
+        noteJev(result, 'p1', decision.jev);
+        if (!choiceAllowed(battle, 'p1', decision.choice)) result.p1Invalid++;
         const ok = safeChoose(battle, 'p1', decision.choice);
         if (!ok) result.p1Invalid++;
         if (job.logDecisions && result.decisions && result.winner === 'tie') {
@@ -118,7 +130,8 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         const decision = await decide(job.p2, battle, 'p2', rng);
         result.p2TurnTimes.push(decision.ms);
         notePlay(result, 'p2', p2Legal, decision);
-        if (!p2Legal.includes(decision.choice)) result.p2Invalid++;
+        noteJev(result, 'p2', decision.jev);
+        if (!choiceAllowed(battle, 'p2', decision.choice)) result.p2Invalid++;
         const ok = safeChoose(battle, 'p2', decision.choice);
         if (!ok) result.p2Invalid++;
       }

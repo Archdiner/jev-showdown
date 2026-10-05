@@ -105,7 +105,7 @@ Preflight (log in, print named/locked and the current rating, exit):
 Real ladder, from a residential or university network (this process never stores the password):
   SHOWDOWN_USERNAME=bot SHOWDOWN_PASSWORD=secret npm run ladder -- --games 10 --format gen9randombattle --engine max-damage --concurrency 1
 
-Engines: max-damage (default; won a local head-to-head) or search (Bot.selectAction).
+Engines: max-damage (default; won a local head-to-head), search (Bot.selectAction), or jev (Jev chooses among legal actions; a failed call plays the first legal action).
 --concurrency K keeps up to K battles on one login (default 1, max ${MAX_LADDER_CONCURRENCY}).
 A proxy lock, ban, or ‽/! name exits immediately and does not reconnect.
 

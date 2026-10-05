@@ -121,10 +121,20 @@ export function hpEval(battle: Battle, sideId: SideId): number {
   return score;
 }
 
+/** A request-legal choice, including `move N terastallize` when tera is allowed. */
+export function choiceAllowed(battle: Battle, sideId: SideId, choice: string): boolean {
+  const legal = legalChoices(battle, sideId);
+  if (legal.includes(choice)) return true;
+  const base = choice.replace(/ terastallize$/, '');
+  if (base === choice || !legal.includes(base)) return false;
+  const req = battle.getSide(sideId).activeRequest as { active?: Array<{ canTerastallize?: unknown }>; forceSwitch?: unknown } | null;
+  return !!req && !req.forceSwitch && !!req.active?.[0]?.canTerastallize;
+}
+
 export function safeChoose(battle: Battle, sideId: SideId, choice: string): boolean {
   const legal = legalChoices(battle, sideId);
   if (legal.length === 0) return true;
-  const pick = legal.includes(choice) ? choice : legal[0];
+  const pick = choiceAllowed(battle, sideId, choice) ? choice : legal[0];
   try {
     if (battle.choose(sideId, pick)) return pick === choice;
   } catch {

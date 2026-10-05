@@ -19,6 +19,8 @@ describe('ladder concurrency', () => {
   it('names the live engines', () => {
     expect(parseEngine('search')).toBe('search');
     expect(parseEngine('maxdamage')).toBe('max-damage');
+    expect(parseEngine('jev')).toBe('jev');
+    expect(parseEngine('jev-solo')).toBe('jev');
     expect(() => parseEngine('stockfish')).toThrow(/Unknown engine/);
   });
 

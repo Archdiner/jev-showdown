@@ -1,0 +1,17 @@
+{
+  "id": "jev-solo",
+  "question": "choice",
+  "criteria": "planner",
+  "blocks": {
+    "sides": { "enabled": true },
+    "set-inference": { "enabled": true },
+    "damage-matrix": { "enabled": true },
+    "switch-ins": { "enabled": true },
+    "speed-tiers": { "enabled": true },
+    "field": { "enabled": true },
+    "history": { "enabled": true },
+    "switch-odds": { "enabled": true },
+    "win-conditions": { "enabled": true },
+    "meta-guidance": { "enabled": true }
+  }
+}
