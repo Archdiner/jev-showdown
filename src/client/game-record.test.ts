@@ -153,6 +153,28 @@ describe('ladder game records', () => {
     else process.env.JEV_GIT_SHA = previous;
   });
 
+  it('reads the private turn clock into the game timer margin', () => {
+    const lines = [
+      '|player|p1|BotAlpha|1|1073',
+      '|player|p2|Rival|2|1400',
+      '|inactive|Time left: 150 sec this turn | 150 sec total | 60 sec grace',
+      '|inactive|Time left: 37 sec this turn | 90 sec total',
+      '|inactive|Rival has 4 seconds left.',
+      '|inactive|BotAlpha has 20 seconds left.',
+      '|win|BotAlpha',
+    ];
+    expect(factsFromTranscript(lines, 'BotAlpha').minTimerMarginSec).toBe(20);
+    expect(buildLadderGameRecord(input({
+      minTimerMarginSec: null,
+      lines,
+      latencies: [10],
+    })).minTimerMarginSec).toBe(20);
+    expect(buildLadderGameRecord(input({
+      minTimerMarginSec: 12,
+      lines,
+    })).minTimerMarginSec).toBe(12);
+  });
+
   it('reads opponent, timer, and rating from a transcript without inventing defaults', () => {
     const facts = factsFromTranscript([
       '|player|p1|BotAlpha|1|1073',

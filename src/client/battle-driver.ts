@@ -162,6 +162,11 @@ export class BattleDriver extends EventEmitter {
 
     const clock = ourClockUpdate(line, this.options.username);
     if (clock !== undefined) room.secondsLeft = clock;
+    if (typeof clock === 'number') {
+      room.minTimerMarginSec = room.minTimerMarginSec === null
+        ? clock
+        : Math.min(room.minTimerMarginSec, clock);
+    }
 
     room.lines.push(line);
     this.observePlayers(room, line);
@@ -420,6 +425,11 @@ export class BattleDriver extends EventEmitter {
 
     const latencyMs = Date.now() - startedAt;
     room.latencies.push(latencyMs);
+    if (typeof room.secondsLeft === 'number') {
+      room.minTimerMarginSec = room.minTimerMarginSec === null
+        ? room.secondsLeft
+        : Math.min(room.minTimerMarginSec, room.secondsLeft);
+    }
     if (room.ended || (rqid !== null && room.answered.has(rqid))) {
       this.emit('decision', {
         battleId: room.roomId,

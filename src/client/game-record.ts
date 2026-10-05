@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { configIdOf } from '../config/hash.js';
 import { toID } from './ids.js';
+import { ourClockUpdate } from './inactive-clock.js';
 import { parseRatingLine, parseReplayUrl } from './showdown-client.js';
 import { percentile } from './live-metrics.js';
 
@@ -263,7 +264,7 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     eloAfter: input.eloAfter,
     gxe: typeof input.gxe === 'number' && Number.isFinite(input.gxe) ? input.gxe : null,
     durationMs: Math.max(0, ts - input.startedAt),
-    ...latencyFields(input.latencies, input.minTimerMarginSec),
+    ...latencyFields(input.latencies, tighterMargin(input.minTimerMarginSec, timerMarginSec(input.lines, input.username))),
     engine: input.engine,
     configId: input.configId,
     configHash: input.configHash,
@@ -358,6 +359,26 @@ export interface TranscriptFacts {
   replayUrl: string | null;
 }
 
+/**
+ * Smallest turn clock #39 records for us: the private `Time left: N sec`
+ * line, or a public line that names us. Opponent clocks are ignored.
+ */
+export function timerMarginSec(lines: string[], username: string): number | null {
+  let margin: number | null = null;
+  for (const line of lines) {
+    const clock = ourClockUpdate(line, username);
+    if (typeof clock !== 'number') continue;
+    margin = margin === null ? clock : Math.min(margin, clock);
+  }
+  return margin;
+}
+
+function tighterMargin(passed: number | null, observed: number | null): number | null {
+  if (passed === null || !Number.isFinite(passed)) return observed;
+  if (observed === null || !Number.isFinite(observed)) return passed;
+  return Math.min(passed, observed);
+}
+
 /** Read the shared game fields out of a Showdown transcript. Does not invent Elo or GXE. */
 export function factsFromTranscript(lines: string[], username: string): TranscriptFacts {
   const players: Record<string, { name: string; rating: number | null }> = {};
@@ -369,7 +390,6 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
   let eloBefore: number | null = null;
   let eloAfter: number | null = null;
   let gxe: number | null = null;
-  let minTimerMarginSec: number | null = null;
   let replayId: string | null = null;
   let replayUrl: string | null = null;
 
@@ -402,13 +422,6 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
       gxe = pipe[2] === undefined ? null : Number(pipe[2]);
     }
 
-    const seconds = line.match(/(\d+) seconds left/);
-    const aboutUs = line.includes(username) || /You have/i.test(line);
-    if (line.startsWith('|inactive|') && seconds && aboutUs) {
-      const value = Number(seconds[1]);
-      minTimerMarginSec = minTimerMarginSec === null ? value : Math.min(minTimerMarginSec, value);
-    }
-
     const replay = parseReplayUrl(line);
     if (replay) {
       replayId = replay.id;
@@ -433,7 +446,7 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
     invalidChoices,
     crashes,
     winner,
-    minTimerMarginSec,
+    minTimerMarginSec: timerMarginSec(lines, username),
     replayId,
     replayUrl,
   };
