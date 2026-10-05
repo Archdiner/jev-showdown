@@ -1,0 +1,194 @@
+{
+ "low": {
+  "n": 68,
+  "turns_median": 22.0,
+  "hard_switch_rate": 13.0,
+  "hard_switch_early": 16.9,
+  "hard_switch_mid": 14.0,
+  "hard_switch_late": 10.0,
+  "double_hard_switch_per_turn": 0.4,
+  "moves_total": 2482,
+  "pivot_move_share": 2.9,
+  "setup_move_share": 8.9,
+  "status_move_share": 3.7,
+  "hazard_move_share": 2.3,
+  "removal_move_share": 1.1,
+  "antisetup_move_share": 1.0,
+  "recovery_move_share": 6.1,
+  "setup_uses_turn<=3_pct": 19.9,
+  "player_tera_rate": 52.9,
+  "tera_turn_median": 12.0,
+  "tera_turn_frac_of_game_median": 0.48,
+  "tera_own_alive_median": 4.5,
+  "tera_offensive_stab_pct": 38.9,
+  "tera_with_setup_pct": 5.6,
+  "tera_other_defensive_pct": 55.6,
+  "tera_first_wins_pct": 37.5,
+  "only_one_tera_that_side_wins_pct": 47.4,
+  "games_with_any_hazard_pct": 42.6,
+  "first_hazard_turn_median": 3,
+  "first_hazard_setter_wins_pct": 55.2,
+  "only_side_with_hazards_wins_pct": 62.5,
+  "endgame_priority_share": 3.1,
+  "overall_priority_share": 2.5,
+  "winner_mons_left_median": 3.0,
+  "top_pivots": [
+   [
+    "uturn",
+    33
+   ],
+   [
+    "flipturn",
+    25
+   ],
+   [
+    "voltswitch",
+    11
+   ],
+   [
+    "shedtail",
+    3
+   ],
+   [
+    "partingshot",
+    1
+   ]
+  ],
+  "turn1_hard_switch_pct": 22.4,
+  "faint_from_le33pct_hp_pct": 43.2,
+  "faint_from_ge80pct_hp_pct": 26.8,
+  "tera_when_ahead_even_behind_pct": [
+   30,
+   37,
+   33
+  ]
+ },
+ "hi": {
+  "n": 260,
+  "turns_median": 31.0,
+  "hard_switch_rate": 23.1,
+  "hard_switch_early": 32.0,
+  "hard_switch_mid": 26.0,
+  "hard_switch_late": 19.4,
+  "double_hard_switch_per_turn": 2.5,
+  "moves_total": 13199,
+  "pivot_move_share": 4.0,
+  "setup_move_share": 9.0,
+  "status_move_share": 3.7,
+  "hazard_move_share": 2.7,
+  "removal_move_share": 1.2,
+  "antisetup_move_share": 1.4,
+  "recovery_move_share": 9.1,
+  "setup_uses_turn<=3_pct": 6.0,
+  "player_tera_rate": 79.8,
+  "tera_turn_median": 20,
+  "tera_turn_frac_of_game_median": 0.68,
+  "tera_own_alive_median": 4,
+  "tera_offensive_stab_pct": 42.9,
+  "tera_with_setup_pct": 12.5,
+  "tera_other_defensive_pct": 44.6,
+  "tera_first_wins_pct": 40.5,
+  "only_one_tera_that_side_wins_pct": 39.1,
+  "games_with_any_hazard_pct": 53.5,
+  "first_hazard_turn_median": 4,
+  "first_hazard_setter_wins_pct": 46.8,
+  "only_side_with_hazards_wins_pct": 45.8,
+  "endgame_priority_share": 1.8,
+  "overall_priority_share": 2.0,
+  "winner_mons_left_median": 2.0,
+  "top_pivots": [
+   [
+    "uturn",
+    296
+   ],
+   [
+    "voltswitch",
+    96
+   ],
+   [
+    "flipturn",
+    94
+   ],
+   [
+    "shedtail",
+    19
+   ],
+   [
+    "partingshot",
+    18
+   ]
+  ],
+  "turn1_hard_switch_pct": 32.3,
+  "faint_from_le33pct_hp_pct": 41.8,
+  "faint_from_ge80pct_hp_pct": 19.0,
+  "tera_when_ahead_even_behind_pct": [
+   23,
+   39,
+   38
+  ]
+ },
+ "mid": {
+  "n": 63,
+  "turns_median": 26,
+  "hard_switch_rate": 18.9,
+  "hard_switch_early": 22.1,
+  "hard_switch_mid": 23.4,
+  "hard_switch_late": 14.6,
+  "double_hard_switch_per_turn": 0.9,
+  "moves_total": 2615,
+  "pivot_move_share": 3.4,
+  "setup_move_share": 10.1,
+  "status_move_share": 4.1,
+  "hazard_move_share": 2.5,
+  "removal_move_share": 1.2,
+  "antisetup_move_share": 2.4,
+  "recovery_move_share": 5.3,
+  "setup_uses_turn<=3_pct": 17.9,
+  "player_tera_rate": 67.5,
+  "tera_turn_median": 17,
+  "tera_turn_frac_of_game_median": 0.68,
+  "tera_own_alive_median": 4,
+  "tera_offensive_stab_pct": 30.6,
+  "tera_with_setup_pct": 17.6,
+  "tera_other_defensive_pct": 51.8,
+  "tera_first_wins_pct": 48.4,
+  "only_one_tera_that_side_wins_pct": 36.8,
+  "games_with_any_hazard_pct": 50.8,
+  "first_hazard_turn_median": 6.5,
+  "first_hazard_setter_wins_pct": 56.2,
+  "only_side_with_hazards_wins_pct": 55.6,
+  "endgame_priority_share": 1.8,
+  "overall_priority_share": 2.1,
+  "winner_mons_left_median": 3.0,
+  "top_pivots": [
+   [
+    "uturn",
+    44
+   ],
+   [
+    "partingshot",
+    18
+   ],
+   [
+    "flipturn",
+    14
+   ],
+   [
+    "voltswitch",
+    11
+   ],
+   [
+    "teleport",
+    1
+   ]
+  ],
+  "turn1_hard_switch_pct": 26.0,
+  "faint_from_le33pct_hp_pct": 45.6,
+  "faint_from_ge80pct_hp_pct": 19.2,
+  "tera_when_ahead_even_behind_pct": [
+   24,
+   33,
+   43
+  ]
+ }
+}
