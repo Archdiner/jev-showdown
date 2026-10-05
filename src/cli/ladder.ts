@@ -17,7 +17,7 @@ import {
   resolveConcurrencyLimit,
   selectLiveEngine,
 } from '../client/concurrency-config.js';
-import { LadderQueue } from '../client/ladder-queue.js';
+import { isAlreadySearching, isSearchRejection, LadderQueue } from '../client/ladder-queue.js';
 import {
   drainWatchPaths,
   installDrainSignals,
@@ -27,6 +27,7 @@ import {
   shouldFinishSeries,
   watchDrainFiles,
 } from '../client/drain.js';
+import { LiveMetrics } from '../client/live-metrics.js';
 
 interface LadderOptions {
   games: number;
@@ -196,6 +197,7 @@ async function makePlayer(input: {
   label: string;
   engine: EngineName;
   autoSearch?: boolean;
+  metrics?: LiveMetrics;
 }): Promise<{ client: ShowdownClient; driver: BattleDriver; decisions: DecisionClient; queue: LadderQueue }> {
   fs.mkdirSync(input.opts.logDir, { recursive: true });
   const config = engineConfig(input.opts);
@@ -230,9 +232,13 @@ async function makePlayer(input: {
     console.error(`[ladder] ${block.message}`);
     process.exit(1);
   });
-  client.on('popup', (message: string) => queue.notePopup(message));
+  client.on('popup', (message: string) => {
+    queue.notePopup(message);
+    if (isSearchRejection(message) && !isAlreadySearching(message)) input.metrics?.noteThrottle(message);
+  });
   client.on('lobby', (line: string) => queue.noteLobby(line));
   driver.on('battleStart', (roomId: string) => queue.noteBattle(roomId));
+  input.metrics?.attach(driver);
   await decisions.start();
   await client.connect();
   console.log(`[${input.label}] logged in as ${input.username} engine=${input.engine} concurrency=${input.opts.concurrency}`);
@@ -262,6 +268,7 @@ async function playSeries(
   games: number,
   concurrency: number,
   drain: LiveDrain,
+  metrics: LiveMetrics | null,
   onContinue?: () => void,
 ): Promise<GameSummary[]> {
   const finished = new Map<string, GameSummary>();
@@ -319,6 +326,7 @@ async function playSeries(
     const consider = (summary: GameSummary) => {
       if (finished.has(summary.battleId)) return;
       finished.set(summary.battleId, summary);
+      metrics?.noteGame(summary);
       console.log(
         `[ladder] ${finished.size}/${games} ${summary.outcome} vs ${summary.opponent ?? '?'} ` +
         `turns=${summary.turns} invalid=${summary.invalidChoices} crashes=${summary.crashes} ` +
@@ -354,7 +362,7 @@ async function playSeries(
   });
 }
 
-async function runLocalSeries(opts: LadderOptions, drain: LiveDrain): Promise<GameSummary[]> {
+async function runLocalSeries(opts: LadderOptions, drain: LiveDrain, metrics: LiveMetrics): Promise<GameSummary[]> {
   console.log(`[ladder] starting local pokemon-showdown on port ${opts.port}`);
   const server = await startLocalServer(opts.port);
   const shutdown = async () => {
@@ -375,6 +383,7 @@ async function runLocalSeries(opts: LadderOptions, drain: LiveDrain): Promise<Ga
       opts,
       label: 'alpha',
       engine: opts.engine,
+      metrics,
     });
     const bravo = await makePlayer({
       username: 'BotBravo',
@@ -385,6 +394,7 @@ async function runLocalSeries(opts: LadderOptions, drain: LiveDrain): Promise<Ga
       opts,
       label: 'bravo',
       engine: opts.opponentEngine ?? opts.engine,
+      metrics,
     });
 
     const summaries = await playSeries(
@@ -395,6 +405,7 @@ async function runLocalSeries(opts: LadderOptions, drain: LiveDrain): Promise<Ga
       opts.games,
       opts.concurrency,
       drain,
+      metrics,
     );
 
     await alpha.driver.stop();
@@ -407,7 +418,7 @@ async function runLocalSeries(opts: LadderOptions, drain: LiveDrain): Promise<Ga
   }
 }
 
-async function runRemote(opts: LadderOptions, drain: LiveDrain): Promise<GameSummary[]> {
+async function runRemote(opts: LadderOptions, drain: LiveDrain, metrics: LiveMetrics): Promise<GameSummary[]> {
   const local = opts.local;
   const username = opts.username || (local ? 'BotAlpha' : process.env.SHOWDOWN_USERNAME || '');
   const password = local ? '' : (process.env.SHOWDOWN_PASSWORD || '');
@@ -429,6 +440,7 @@ async function runRemote(opts: LadderOptions, drain: LiveDrain): Promise<GameSum
     label: toID(username) || 'ladder',
     engine: opts.engine,
     autoSearch: !opts.accept && !opts.challenge,
+    metrics,
   });
 
   if (opts.accept) watchChallenges(player.client, player.queue, opts.challenge);
@@ -445,6 +457,7 @@ async function runRemote(opts: LadderOptions, drain: LiveDrain): Promise<GameSum
     opts.games,
     opts.concurrency,
     drain,
+    metrics,
     opts.challenge
       ? () => player.client.challenge(opts.challenge, opts.format)
       : undefined,
@@ -599,13 +612,16 @@ async function main(): Promise<void> {
   await dataLoader.load(gen9RandomBattle);
 
   const session = openDrain(opts.engine);
+  const metrics = openLiveMetrics(opts);
   try {
     const summaries = opts.local && !opts.server && !opts.accept && !opts.challenge
-      ? await runLocalSeries(opts, session.drain)
-      : await runRemote(opts, session.drain);
+      ? await runLocalSeries(opts, session.drain, metrics)
+      : await runRemote(opts, session.drain, metrics);
+    metrics.finish({ games: summaries.length, requested: opts.games });
     report(summaries, opts, session.drain);
   } finally {
     session.close();
+    await metrics.close();
   }
 }
 
@@ -638,6 +654,13 @@ function openDrain(engine: string): { drain: LiveDrain; close(): void } {
       stopSignals();
     },
   };
+}
+
+function openLiveMetrics(opts: LadderOptions): LiveMetrics {
+  const runId = `${Date.now()}-${opts.engine}`;
+  const filePath = path.join(opts.logDir, 'metrics.jsonl');
+  console.log(`[ladder] metrics ${filePath}`);
+  return new LiveMetrics(filePath, { runId, engine: opts.engine, concurrency: opts.concurrency });
 }
 
 main().catch(err => {

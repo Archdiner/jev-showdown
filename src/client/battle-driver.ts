@@ -295,6 +295,7 @@ export class BattleDriver extends EventEmitter {
     }));
 
     let decision;
+    const startedAt = Date.now();
     const tightTimer = room.secondsLeft !== null && room.secondsLeft <= 4;
     try {
       if (tightTimer) {
@@ -321,7 +322,17 @@ export class BattleDriver extends EventEmitter {
       };
     }
 
-    if (room.ended || (rqid !== null && room.answered.has(rqid))) return;
+    const latencyMs = Date.now() - startedAt;
+    if (room.ended || (rqid !== null && room.answered.has(rqid))) {
+      this.emit('decision', {
+        battleId: room.roomId,
+        turn: state.turn,
+        latencyMs,
+        secondsLeft: room.secondsLeft,
+        fallback: Boolean(decision.fallback),
+      });
+      return;
+    }
 
     const safe = sanitizeAction(decision.action, request, legal) ?? pickBestLegal(state, legal);
     const adjusted = !sameAction(safe, decision.action);
@@ -347,6 +358,7 @@ export class BattleDriver extends EventEmitter {
       choice,
       score: decision.score,
       searchMs: decision.timeMs,
+      latencyMs,
       fallback: decision.fallback || adjusted,
       mismatches: mismatchData(mismatches),
       opponentRoles: roles,
@@ -354,6 +366,13 @@ export class BattleDriver extends EventEmitter {
       secondsLeft: room.secondsLeft,
     });
     room.mismatchCount += mismatches.length;
+    this.emit('decision', {
+      battleId: room.roomId,
+      turn: state.turn,
+      latencyMs,
+      secondsLeft: room.secondsLeft,
+      fallback: decision.fallback || adjusted,
+    });
     this.sendChoice(room, choice, rqid, safe, false);
   }
 
