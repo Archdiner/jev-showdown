@@ -2,6 +2,8 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { pidAlive as processAlive } from '../../client/ladder-run.js';
+import { GraphDB } from '../../graph/db.js';
+import { readLabels } from '../labels-read.js';
 import { observeGames } from './games.js';
 import {
   DEFAULTS,
@@ -88,6 +90,7 @@ export function loadContext(layout: Layout, options: LoadOptions = {}): Sentinel
     games: assignRuns(observeGames(rows), findRuns(layout.liveRunsDir)),
     heartbeats: heartbeatRows(rows),
     circuits: readCircuits(path.join(layout.opsDir, 'circuits.json')),
+    approvedConfigIds: approvedConfigIds(layout.graphDb),
     circuitsPath: path.join(layout.opsDir, 'circuits.json'),
     speciesCount: species.count,
     speciesPath,
@@ -486,6 +489,20 @@ function readCircuits(file: string): SentinelContext['circuits'] {
     return parsed as SentinelContext['circuits'];
   } catch {
     return {};
+  }
+}
+
+function approvedConfigIds(graphDb: string): string[] | null {
+  if (!fs.existsSync(graphDb)) return null;
+  try {
+    const db = new GraphDB(graphDb);
+    try {
+      return readLabels(db).map(label => label.configId);
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null;
   }
 }
 
