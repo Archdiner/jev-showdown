@@ -26,6 +26,8 @@ The ladder rating parser now reads GXE from the HTML popup `(GXE: …)` and from
 
 Local smoke, no key required: `npx tsx src/llm/strategist-engine-smoke.ts`
 
+Twenty-game screen against exact 1-ply, with the gateway key: `npx tsx src/llm/strategist-engine-screen.ts 20`
+
 ## Strategist
 
 Grok 4.7 (`spacexai/grok-4.7`) reads the situation brief and returns one legal action plus a game plan, as JSON. The action may be a move, a switch, or Terastallize when the request allows it. A missing key, a timeout (20s), unusable JSON, or an action that is not legal falls back to exact 1-ply search. The plan is kept on the battle and sent again next turn.
