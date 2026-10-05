@@ -29,6 +29,7 @@ import {
 } from '../client/drain.js';
 import { LiveMetrics } from '../client/live-metrics.js';
 import { SearchAdmission, admissionSettings, ConcurrencyGovernor } from '../client/concurrency-governor.js';
+import { configHash, currentGitSha } from '../client/game-record.js';
 
 interface LadderOptions {
   games: number;
@@ -244,6 +245,11 @@ async function makePlayer(input: {
     logDir: input.opts.logDir,
     decisionTimeoutMs: input.opts.decisionMs ?? (input.local ? 1500 : 12000),
     replayDir: path.join(input.opts.logDir, 'replays'),
+    configId: null,
+    configHash: configHash({ engine: input.engine, ...config }),
+    gitSha: currentGitSha(),
+    concurrency: input.opts.concurrency,
+    localServer: input.local,
   });
   const queue = new LadderQueue(client, input.formatId, input.opts.concurrency, message => {
     console.warn(`[${input.label}] ${message}`);

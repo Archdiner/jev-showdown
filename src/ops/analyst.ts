@@ -13,7 +13,8 @@ import { enqueue } from './queue.js';
 
 interface LiveGame {
   id: string;
-  winner: 'win' | 'loss' | 'tie';
+  winner?: string | null;
+  outcome?: 'win' | 'loss' | 'tie';
   log?: string;
   inputLog?: string;
   configId?: string;
@@ -49,7 +50,8 @@ async function reviewGame(paths: OpsPaths, game: LiveGame): Promise<void> {
   const counts = readCounts(paths);
   observeLog(game.log || '', counts);
   writePriors(paths, counts);
-  if (game.winner !== 'loss') return;
+  const outcome = game.outcome ?? game.winner;
+  if (outcome !== 'loss') return;
 
   const mined = mineCritical(paths, game);
   const calcText = mined

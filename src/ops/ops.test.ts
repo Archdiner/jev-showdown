@@ -246,9 +246,31 @@ describe('local ladder dry run', () => {
       });
       expect(summary.games).toBe(1);
       expect(summary.rating).not.toBeUndefined();
-      const games = readJsonl<{ rating: number; gxe: number; configId: string; variantId?: string }>(paths.liveGames);
+      const games = readJsonl<{
+        schema: string;
+        source: string;
+        kind: string;
+        gxe: number | null;
+        eloAfter: number | null;
+        endReason: string;
+        latencyP50Ms: number | null;
+        minTimerMarginSec: number | null;
+        configId: string;
+        variantId?: string;
+        opponent: string | null;
+      }>(paths.liveGames);
       expect(games).toHaveLength(1);
+      expect(games[0]).toMatchObject({
+        schema: 'jev.ladder-game.v1',
+        source: 'ops',
+        kind: 'ladder-game',
+      });
       expect(games[0].gxe).toEqual(expect.any(Number));
+      expect(games[0].eloAfter).toEqual(expect.any(Number));
+      expect(games[0].endReason).toEqual(expect.any(String));
+      expect(games[0]).toHaveProperty('latencyP50Ms');
+      expect(games[0]).toHaveProperty('minTimerMarginSec');
+      expect(games[0].gxe).not.toBe(50);
       expect(['switch-depth2', 'llm-blocks']).toContain(games[0].variantId);
       const screen = statusReport(paths);
       expect(screen).toContain('rating');

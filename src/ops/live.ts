@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import { LadderSession } from '../config/adapters.js';
 import { buildBot } from '../config/bot.js';
 import { resolveConcurrencyLimit } from '../client/concurrency-config.js';
+import { buildLadderGameRecord, currentGitSha, factsFromTranscript } from '../client/game-record.js';
 import { ShowdownClient } from '../client/showdown-client.js';
 import { allocate, nextCircuit, type Allocatable, type CircuitState, clampExplore } from './allocate.js';
 import { openDb } from './db.js';
@@ -35,19 +36,9 @@ export interface LiveSummary {
   skipped?: string;
 }
 
-interface LiveGameRecord {
-  kind: 'live-game';
-  id: string;
-  ts: number;
-  configId: string;
-  configPath: string;
-  /** Thompson arm for this game. Absent when the variant pool is empty. */
-  variantId?: string;
-  winner: 'win' | 'loss' | 'tie';
-  rating: number;
-  gxe: number;
-  inputLog: string;
-  log: string;
+interface RoomWatch {
+  startedAt: number;
+  latencies: number[];
 }
 
 interface Seat {
@@ -80,7 +71,8 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   const limits = { maxLosses: opts.maxLosses ?? 5, maxDrop: opts.maxDrop ?? 40, window: opts.window ?? 10 };
   const circuits = readCircuits(paths);
   const variantPool = loadVariantPool(paths);
-  const variantCounts: Record<string, ArmCount> = countsFromLiveGames(readJsonl<LiveGameRecord>(paths.liveGames));
+  const variantCounts: Record<string, ArmCount> = countsFromLiveGames(readJsonl(paths.liveGames));
+  const gitSha = currentGitSha();
   process.env.JEV_LOG_DIR = paths.root;
 
   const server = opts.server || (local
@@ -101,6 +93,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   const pending: Seat[] = [];
   const sessions = new Map<string, { config: Allocatable; variantId: string | null; session: LadderSession }>();
   const transcripts = new Map<string, string[]>();
+  const watches = new Map<string, RoomWatch>();
   const sides = new Map<string, 'p1' | 'p2'>();
 
   const timeoutMs = opts.timeoutMs ?? 120_000;
@@ -140,6 +133,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
         const bucket = transcripts.get(room) || [];
         bucket.push(line);
         transcripts.set(room, bucket);
+        if (!watches.has(room)) watches.set(room, { startedAt: Date.now(), latencies: [] });
       }
       if (line.startsWith('|rating|')) {
         const parts = line.split('|');
@@ -173,7 +167,10 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
         };
         sessions.set(room, current);
       }
+      const choiceStarted = Date.now();
       void current.session.onRequest(room, request, transcript(room), side).then(choice => {
+        const row = watches.get(room);
+        if (row) row.latencies.push(Date.now() - choiceStarted);
         client.choose(room, choice);
       }).catch(error => {
         beat(paths, 'live', 'error', error instanceof Error ? error.message : String(error));
@@ -187,26 +184,59 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
       active = Math.max(0, active - 1);
       finished += 1;
       if (current) {
-        const outcome = classify(winner, username);
-        const record: LiveGameRecord = {
-          kind: 'live-game',
-          id: `${room}-${Date.now()}`,
-          ts: Date.now(),
+        const lines = transcripts.get(room) || [];
+        const facts = factsFromTranscript(lines, username);
+        const watched = watches.get(room);
+        const text = lines.join('\n');
+        const record = buildLadderGameRecord({
+          startedAt: watched?.startedAt ?? Date.now(),
+          battleId: room,
+          format: 'gen9randombattle',
+          username,
+          opponent: facts.opponent,
+          opponentRating: facts.opponentRating,
+          lines,
+          winner: facts.winner ?? winner,
+          turns: facts.turns,
+          invalidChoices: facts.invalidChoices,
+          crashes: facts.crashes,
+          fallbacks: 0,
+          mismatches: 0,
+          eloBefore: facts.eloBefore,
+          eloAfter: facts.eloAfter,
+          gxe: facts.gxe,
+          latencies: watched?.latencies ?? [],
+          minTimerMarginSec: facts.minTimerMarginSec,
+          engine: current.session.bot.layerIds.search,
           configId: current.config.configId,
+          configHash: current.session.bot.configId,
+          gitSha,
+          concurrency: slots,
+          replayId: facts.replayId,
+          replayUrl: facts.replayUrl,
+          localReplayPath: null,
+          localServer: local,
+          disconnected: false,
+          logPath: paths.liveGames,
+          source: 'ops',
           configPath: current.config.configPath,
-          winner: outcome,
-          rating: rating ?? 1000,
-          gxe: gxe ?? 50,
-          inputLog: inputLogFromTranscript(transcript(room)) || '',
-          log: transcript(room).slice(-6000),
-        };
-        if (current.variantId) record.variantId = current.variantId;
+          variantId: current.variantId ?? undefined,
+          inputLog: inputLogFromTranscript(text) || '',
+          log: text.slice(-6000),
+        });
         appendJsonl(paths.liveGames, record);
-        observeVariant(variantCounts, current.variantId, outcome);
-        circuits[current.config.configId] = nextCircuit(circuits[current.config.configId], outcome, record.rating, limits);
+        observeVariant(variantCounts, current.variantId, record.outcome);
+        circuits[current.config.configId] = nextCircuit(
+          circuits[current.config.configId],
+          record.outcome,
+          record.eloAfter,
+          limits,
+        );
         writeCircuits(paths, circuits);
-        beat(paths, 'live', 'ok', `${current.config.configId} ${outcome} rating ${record.rating}`);
+        beat(paths, 'live', 'ok', `${current.config.configId} ${record.outcome} rating ${record.eloAfter ?? 'n/a'}`);
       }
+      transcripts.delete(room);
+      watches.delete(room);
       if (finished >= target) {
         finish({ games: finished, rating, gxe });
         return;

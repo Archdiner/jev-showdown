@@ -36,13 +36,15 @@ export function allocate(configs: Allocatable[], rng: () => number, exploreRate 
 export function nextCircuit(
   state: CircuitState | undefined,
   outcome: 'win' | 'loss' | 'tie',
-  rating: number,
+  rating: number | null,
   limits: { maxLosses: number; maxDrop: number; window: number }
 ): CircuitState {
   const prior = state ?? { consecutiveLosses: 0, ratings: [], pulled: false };
   if (prior.pulled) return prior;
   const consecutiveLosses = outcome === 'loss' ? prior.consecutiveLosses + 1 : 0;
-  const ratings = [...prior.ratings, rating].slice(-Math.max(2, limits.window));
+  const ratings = typeof rating === 'number' && Number.isFinite(rating)
+    ? [...prior.ratings, rating].slice(-Math.max(2, limits.window))
+    : prior.ratings;
   const drop = ratings.length >= 2 ? ratings[0] - ratings[ratings.length - 1] : 0;
   if (consecutiveLosses >= limits.maxLosses) {
     return { consecutiveLosses, ratings, pulled: true, reason: `${consecutiveLosses} consecutive losses` };

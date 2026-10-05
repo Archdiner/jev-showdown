@@ -67,12 +67,15 @@ export function observeVariant(
 }
 
 export function countsFromLiveGames(
-  records: Array<{ variantId?: string; winner?: string }>,
+  records: Array<{ variantId?: string; winner?: string; outcome?: string }>,
 ): Record<string, ArmCount> {
   const counts: Record<string, ArmCount> = {};
   for (const record of records) {
-    if (record.winner === 'win' || record.winner === 'loss' || record.winner === 'tie') {
-      observeVariant(counts, record.variantId, record.winner);
+    const outcome = record.outcome === 'win' || record.outcome === 'loss' || record.outcome === 'tie'
+      ? record.outcome
+      : record.winner;
+    if (outcome === 'win' || outcome === 'loss' || outcome === 'tie') {
+      observeVariant(counts, record.variantId, outcome);
     }
   }
   return counts;

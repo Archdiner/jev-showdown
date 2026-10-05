@@ -1,3 +1,4 @@
+import { recordedElo, recordedOutcome } from '../client/game-record.js';
 import { openDb } from './db.js';
 import { readJsonl, type OpsPaths } from './paths.js';
 import { listJobs } from './queue.js';
@@ -5,8 +6,10 @@ import { listJobs } from './queue.js';
 interface LiveRow {
   ts: number;
   configId: string;
-  winner: 'win' | 'loss' | 'tie';
-  rating: number;
+  winner?: string | null;
+  outcome?: 'win' | 'loss' | 'tie';
+  rating?: number | null;
+  eloAfter?: number | null;
 }
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -37,17 +40,24 @@ export function dailyReport(paths: OpsPaths, now = Date.now()): string {
   if (games.length === 0) {
     sentences.push('No live games were recorded in the last day.');
   } else {
-    const first = games[0].rating;
-    const last = games[games.length - 1].rating;
-    const direction = last > first ? 'up' : last < first ? 'down' : 'flat';
-    sentences.push(`Rating moved ${direction} from ${first} to ${last} across ${games.length} live games.`);
+    const rated = games
+      .map(game => recordedElo(game))
+      .filter((value): value is number => value !== null);
+    if (rated.length === 0) {
+      sentences.push(`No rating was reported across ${games.length} live games.`);
+    } else {
+      const first = rated[0];
+      const last = rated[rated.length - 1];
+      const direction = last > first ? 'up' : last < first ? 'down' : 'flat';
+      sentences.push(`Rating moved ${direction} from ${first} to ${last} across ${games.length} live games.`);
+    }
   }
 
   const ids = [...new Set(games.map(game => game.configId))];
   if (ids.length === 0) sentences.push('No per-config win rate yet.');
   for (const id of ids) {
     const rows = games.filter(game => game.configId === id);
-    const wins = rows.filter(game => game.winner === 'win').length;
+    const wins = rows.filter(game => recordedOutcome(game) === 'win').length;
     const rate = rows.length ? Math.round((wins / rows.length) * 100) : 0;
     sentences.push(`${id} won ${rate}% of ${rows.length} games.`);
   }

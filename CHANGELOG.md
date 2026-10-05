@@ -1,5 +1,9 @@
 # Changelog
 
+## Each finished game is one JSONL record
+
+`logs/ladder/games.jsonl` and `ops live`'s `live-games.jsonl` append the same `jev.ladder-game.v1` fields when a battle finishes. The row has the opponent and their pre-game rating, our Elo before and after, GXE when the line includes it, why the game ended, wall-clock duration, and which engine, config, git commit, and concurrency ran it. Decision timing uses the live-metrics names: per-turn `latencyMs`, and `latencyP50Ms`, `latencyP95Ms`, `latencyP99Ms`, `latencyMaxMs`, and `minTimerMarginSec` on the game. Missing Elo and GXE stay null. Turns, invalid choices, crashes, fallbacks, and the ladder stdout line are unchanged.
+
 ## Ladder uses the promoted engines
 
 `npm run ladder -- --engine search` and `--engine exact` call `exactSearch` with the gate champion `EXACT_1PLY` (8 samples). `--engine max-damage` calls `maxDamageChoice` from `@smogon/calc`. The ladder builds that choice from the live request, so the move index is the one the server asked for. Concurrency profiles, drain, and live metrics are unchanged.
