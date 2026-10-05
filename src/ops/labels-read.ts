@@ -31,3 +31,22 @@ export function readLabels(db: GraphDB): LabelView[] {
   }
   return [...byId.values()];
 }
+
+/** Newest superseded champion first. The active label is not included. */
+export function readSupersededChampions(db: GraphDB): LabelView[] {
+  const rows = db.getNodesByType('Champion', 'superseded')
+    .filter(node => node.type === 'Champion')
+    .sort((a, b) => b.updated_at - a.updated_at);
+  const out: LabelView[] = [];
+  const seen = new Set<string>();
+  for (const node of rows) {
+    if (node.type !== 'Champion') continue;
+    const meta = (node.metadata ?? {}) as { configId?: string };
+    const configPath = node.config_path || '';
+    const configId = meta.configId || configPath;
+    if (!configId || seen.has(configId)) continue;
+    seen.add(configId);
+    out.push({ configId, configPath, labels: ['champion', 'live-approved'] });
+  }
+  return out;
+}

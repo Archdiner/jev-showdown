@@ -11,11 +11,25 @@ import {
 } from '../client/ladder-run.js';
 import { LadderQueue } from '../client/ladder-queue.js';
 import { parseRatingLine, ShowdownClient } from '../client/showdown-client.js';
-import { allocate, nextCircuit, type Allocatable, type CircuitState, clampExplore } from './allocate.js';
+import {
+  allocate,
+  baselineFromGames,
+  emptyCircuitBook,
+  noteOutcome,
+  parseCircuitBook,
+  releaseChampionPulls,
+  selectionPool,
+  type Allocatable,
+  type CircuitBook,
+  type CircuitLimits,
+  type CircuitScope,
+  type CircuitState,
+  clampExplore,
+} from './allocate.js';
 import { startLocalServer, type LocalServer } from './local-server.js';
 import { openDb } from './db.js';
 import { beat } from './heartbeat.js';
-import { readLabels } from './labels-read.js';
+import { readLabels, readSupersededChampions } from './labels-read.js';
 import { appendJsonl, readJsonl, type OpsPaths } from './paths.js';
 import { inputLogFromTranscript, localSimBridge } from './sim-bridge.js';
 import { countsFromLiveGames, loadVariantPool, observeVariant, thompsonDraw, type ArmCount } from './variants.js';
@@ -157,8 +171,15 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   const target = opts.games ?? (opts.once ? 1 : Number.POSITIVE_INFINITY);
   const slots = liveSlotLimit(opts);
   const exploreRate = clampExplore(opts.exploreRate ?? 0.15);
-  const limits = { maxLosses: opts.maxLosses ?? 5, maxDrop: opts.maxDrop ?? 40, window: opts.window ?? 10 };
-  const circuits = readCircuits(paths);
+  const limits: CircuitLimits = {
+    maxLosses: opts.maxLosses,
+    maxDrop: opts.maxDrop ?? 40,
+    window: opts.window ?? 10,
+  };
+  const book = readCircuitBook(paths);
+  const scope: CircuitScope = local ? 'local' : 'ladder';
+  if (releaseChampionPulls(book[scope], approved)) writeCircuitBook(paths, book);
+  const knownGood = knownGoodChampions(paths);
   const variantPool = loadVariantPool(paths);
   const variantCounts: Record<string, ArmCount> = countsFromLiveGames(readJsonl(paths.liveGames));
   const gitSha = currentGitSha();
@@ -209,7 +230,8 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   const timeoutMs = opts.timeoutMs ?? 120_000;
   const bounded = opts.once === true || (typeof opts.games === 'number' && Number.isFinite(opts.games));
   let queue!: LadderQueue;
-  const hasOpenConfig = () => allocate(withPulls(approved, circuits), () => 0, exploreRate) !== null;
+  const pool = () => selectionPool(approved, book[scope], knownGood, Date.now());
+  const hasOpenConfig = () => approved.length > 0 && allocate(pool(), () => 0, exploreRate) !== null;
   queue = new LadderQueue(
     client,
     'gen9randombattle',
@@ -249,7 +271,9 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
         return;
       }
       if (!hasOpenConfig() && queue.activeBattles === 0) {
-        finish({ games: finished, rating, gxe, skipped: 'every approved config is pulled' });
+        const skipped = 'every approved config is pulled';
+        beat(paths, 'live', 'error', skipped);
+        finish({ games: finished, rating, gxe, skipped });
         return;
       }
       queue.fill();
@@ -301,7 +325,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
       const side = seat.choice;
       let current = sessions.get(room);
       if (!current) {
-        const config = allocate(withPulls(approved, circuits), Math.random, exploreRate);
+        const config = allocate(pool(), Math.random, exploreRate);
         if (!config) {
           const choice = fallbackChoice(request);
           if (choice) client.choose(room, choice);
@@ -384,13 +408,26 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
         });
         appendJsonl(paths.liveGames, record);
         observeVariant(variantCounts, current.variantId, record.outcome);
-        circuits[current.config.configId] = nextCircuit(
-          circuits[current.config.configId],
+        const role = current.config.labels.includes('champion') ? 'champion' : 'challenger';
+        const updated = noteOutcome(
+          book,
+          scope,
+          current.config.configId,
           record.outcome,
-          local ? null : record.eloAfter,
-          limits,
+          record.eloAfter,
+          {
+            ...limits,
+            role,
+            baselineWinRate: baselineFromGames(scopedOutcomes(paths, current.config.configId, scope)),
+            now: Date.now(),
+          },
         );
-        writeCircuits(paths, circuits);
+        book.ladder = updated.ladder;
+        book.local = updated.local;
+        writeCircuitBook(paths, book);
+        if (role === 'champion') {
+          syncChampionRegression(paths, current.config, book[scope][current.config.configId]);
+        }
         beat(paths, 'live', 'ok', local
           ? `${current.config.configId} ${record.outcome} local`
           : `${current.config.configId} ${record.outcome} rating ${record.eloAfter ?? 'n/a'}`);
@@ -445,8 +482,65 @@ function approvedConfigs(paths: OpsPaths): Allocatable[] {
   }
 }
 
-function withPulls(configs: Allocatable[], circuits: Record<string, CircuitState>): Allocatable[] {
-  return configs.map(config => ({ ...config, pulled: circuits[config.configId]?.pulled }));
+function knownGoodChampions(paths: OpsPaths): Allocatable[] {
+  const db = openDb(paths);
+  try {
+    return readSupersededChampions(db).map(label => ({
+      configId: label.configId,
+      configPath: label.configPath,
+      labels: label.labels,
+    }));
+  } finally {
+    db.close();
+  }
+}
+
+function scopedOutcomes(paths: OpsPaths, configId: string, scope: CircuitScope): Array<'win' | 'loss' | 'tie'> {
+  const rows = readJsonl<{ configId?: string; outcome?: string; localServer?: boolean }>(paths.liveGames);
+  const outcomes: Array<'win' | 'loss' | 'tie'> = [];
+  for (const row of rows) {
+    if (row.configId !== configId) continue;
+    const localGame = row.localServer === true;
+    if (scope === 'local' ? !localGame : localGame) continue;
+    if (row.outcome === 'win' || row.outcome === 'loss' || row.outcome === 'tie') outcomes.push(row.outcome);
+  }
+  return outcomes;
+}
+
+/** A champion streak that is unlikely at the baseline becomes a regression node. A broken streak closes it. */
+function syncChampionRegression(paths: OpsPaths, config: Allocatable, state: CircuitState | undefined): void {
+  const db = openDb(paths);
+  try {
+    const id = `regression-circuit-${config.configId}`;
+    const existing = db.getNode(id);
+    const now = Date.now();
+    if (state?.regression) {
+      if (existing?.status === 'detected') return;
+      db.addNode({
+        id,
+        type: 'Learning',
+        status: 'detected',
+        title: 'Champion loss streak',
+        description: state.reason || 'champion streak',
+        created_at: existing?.created_at ?? now,
+        updated_at: now,
+        insight: `${config.configId} is past the baseline loss streak. It stays playable.`,
+        evidence: config.configPath,
+        confidence: 'medium',
+        metadata: { opsKind: 'regression', configId: config.configId, configPath: config.configPath, source: 'circuit' },
+      });
+      return;
+    }
+    if (!existing || existing.status !== 'detected' || existing.type !== 'Learning') return;
+    db.addNode({
+      ...existing,
+      status: 'done',
+      updated_at: now,
+      insight: `${config.configId} streak ended. The config stays playable.`,
+    });
+  } finally {
+    db.close();
+  }
 }
 
 /** Keep the last real Elo. A rating update that omits GXE clears GXE instead of keeping a stale number. */
@@ -478,11 +572,11 @@ function classify(winner: string | null, username: string): 'win' | 'loss' | 'ti
   return strip(winner) === strip(username) ? 'win' : 'loss';
 }
 
-function readCircuits(paths: OpsPaths): Record<string, CircuitState> {
-  if (!fs.existsSync(paths.circuits)) return {};
-  return JSON.parse(fs.readFileSync(paths.circuits, 'utf8')) as Record<string, CircuitState>;
+function readCircuitBook(paths: OpsPaths): CircuitBook {
+  if (!fs.existsSync(paths.circuits)) return emptyCircuitBook();
+  return parseCircuitBook(JSON.parse(fs.readFileSync(paths.circuits, 'utf8')) as unknown);
 }
 
-function writeCircuits(paths: OpsPaths, circuits: Record<string, CircuitState>): void {
-  fs.writeFileSync(paths.circuits, JSON.stringify(circuits, null, 2));
+function writeCircuitBook(paths: OpsPaths, book: CircuitBook): void {
+  fs.writeFileSync(paths.circuits, JSON.stringify(book, null, 2));
 }

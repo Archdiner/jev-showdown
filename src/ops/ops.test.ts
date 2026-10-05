@@ -1,7 +1,18 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { allocate, nextCircuit } from './allocate.js';
+import { WebSocketServer } from 'ws';
+import {
+  allocate,
+  effectiveState,
+  nextCircuit,
+  noteOutcome,
+  parseCircuitBook,
+  releaseChampionPulls,
+  selectionPool,
+  streakLimit,
+  type CircuitState,
+} from './allocate.js';
 import { countsFromLiveGames, loadVariantPool, thompsonDraw } from './variants.js';
 import { runAnalyst } from './analyst.js';
 import { openDb } from './db.js';
@@ -55,7 +66,127 @@ describe('traffic and circuit breakers', () => {
     expect(allocate([champion, explorer], () => 0.5, 0.15)?.configId).toBe('champ');
     expect(allocate([champion, explorer], () => 0.05, 0.15)?.configId).toBe('exp');
     expect(allocate([{ ...champion, pulled: true }, explorer], () => 0.9)?.configId).toBe('exp');
-    expect(allocate([{ ...champion, pulled: true }], () => 0.1)).toBeNull();
+    expect(allocate([{ ...champion, pulled: true }], () => 0.1)?.configId).toBe('champ');
+  });
+
+  test('a champion with a 20% baseline stays playable after five losses and live keeps scheduling', async () => {
+    const limits = { maxLosses: 5, maxDrop: 40, window: 10, baselineWinRate: 0.2, role: 'champion' as const };
+    let state: CircuitState | undefined;
+    for (let index = 0; index < 5; index++) state = nextCircuit(state, 'loss', 1000, limits);
+    expect(state?.pulled).toBe(false);
+    expect(state?.regression).toBeFalsy();
+    expect(state?.consecutiveLosses).toBe(5);
+    expect(streakLimit(0.2)).toBe(14);
+
+    let notable: CircuitState | undefined;
+    for (let index = 0; index < 5; index++) {
+      notable = nextCircuit(notable, 'loss', 1500, { maxDrop: 40, window: 10, baselineWinRate: 0.5, role: 'champion' });
+    }
+    expect(notable?.pulled).toBe(false);
+    expect(notable?.regression).toBe(true);
+    const active = { configId: 'new', configPath: 'configs/champion.yaml', labels: ['champion', 'live-approved'] };
+    const prior = { configId: 'old', configPath: 'configs/old.yaml', labels: ['champion', 'live-approved'] };
+    expect(selectionPool([active], { new: notable! }, [prior], Date.now())[0]?.configId).toBe('old');
+    const stuck = selectionPool([active], { new: notable! }, [], Date.now());
+    expect(stuck[0]?.configId).toBe('new');
+    expect(allocate(stuck, () => 0)).not.toBeNull();
+    expect(allocate([{ ...active, pulled: true }], () => 0)).not.toBeNull();
+
+    const paths = tempPaths();
+    judge(paths, {
+      configPath: 'configs/champion.yaml',
+      action: 'champion',
+      wins: 250,
+      losses: 100,
+      invalid: 0,
+      crashes: 0,
+      diagnostics: { passed: 1, failed: 0, total: 1 },
+    });
+    const labeled = labelsOf(paths)[0];
+    const seeded = {
+      consecutiveLosses: 5,
+      ratings: [] as number[],
+      pulled: true,
+      reason: '5 consecutive losses',
+    };
+    fs.writeFileSync(paths.circuits, JSON.stringify({ [labeled.configId]: seeded }));
+    const book = parseCircuitBook(JSON.parse(fs.readFileSync(paths.circuits, 'utf8')));
+    expect(book.local[labeled.configId]).toBeUndefined();
+    const ladder = { ...book.ladder };
+    expect(releaseChampionPulls(ladder, [{ ...labeled, labels: labeled.labels }])).toBe(true);
+    expect(ladder[labeled.configId]?.pulled).toBe(false);
+    expect(selectionPool(
+      [{ configId: labeled.configId, configPath: labeled.configPath, labels: labeled.labels }],
+      book.ladder,
+      [],
+      Date.now(),
+    ).some(config => config.pulled)).toBe(false);
+
+    const server = await rejectingServer();
+    try {
+      const summary = await runLive({
+        paths,
+        local: true,
+        server: server.url,
+        username: 'localbot',
+        timeoutMs: 800,
+      });
+      expect(summary.skipped).toBe('window');
+      expect(summary.skipped).not.toBe('every approved config is pulled');
+      expect(server.searches()).toBeGreaterThan(0);
+    } finally {
+      await server.close();
+    }
+  }, 20_000);
+
+  test('a challenger pull follows the baseline win rate and cools down, and local losses stay off the ladder breaker', () => {
+    const limits = {
+      maxDrop: 40,
+      window: 10,
+      baselineWinRate: 0.2,
+      role: 'challenger' as const,
+      now: 1_000,
+      cooldownMs: 50,
+    };
+    let state: CircuitState | undefined;
+    for (let index = 0; index < 5; index++) state = nextCircuit(state, 'loss', null, limits);
+    expect(state?.pulled).toBe(false);
+    for (let index = 0; index < 9; index++) state = nextCircuit(state, 'loss', null, limits);
+    expect(state?.consecutiveLosses).toBe(14);
+    expect(state?.pulled).toBe(true);
+    expect(state?.cooldownUntil).toBe(1_050);
+    const cooled = effectiveState(state, 1_050);
+    expect(cooled?.pulled).toBe(false);
+    expect(cooled?.consecutiveLosses).toBe(0);
+    const resumed = nextCircuit(state, 'loss', null, { ...limits, now: 1_050 });
+    expect(resumed.pulled).toBe(false);
+    expect(resumed.consecutiveLosses).toBe(1);
+
+    let book = parseCircuitBook({
+      champ: { consecutiveLosses: 2, ratings: [1400, 1390], pulled: false },
+    });
+    for (let index = 0; index < 5; index++) {
+      book = noteOutcome(book, 'local', 'champ', 'loss', 900, {
+        maxDrop: 40,
+        window: 10,
+        baselineWinRate: 0.2,
+        role: 'champion',
+      });
+    }
+    expect(book.ladder.champ).toEqual({ consecutiveLosses: 2, ratings: [1400, 1390], pulled: false });
+    expect(book.local.champ?.consecutiveLosses).toBe(5);
+    expect(book.local.champ?.ratings).toEqual([]);
+    expect(book.local.champ?.pulled).toBe(false);
+
+    const dropped = nextCircuit(
+      { consecutiveLosses: 0, ratings: [1600], pulled: false },
+      'loss',
+      1500,
+      { maxDrop: 40, window: 5, role: 'champion', baselineWinRate: 0.5 },
+    );
+    expect(dropped.pulled).toBe(false);
+    expect(dropped.regression).toBe(true);
+    expect(dropped.reason).toContain('rating drop');
   });
 
   test('consecutive losses or a rating drop pull a config', () => {
@@ -490,6 +621,31 @@ function scriptedGame(
     p2Predicted: 0,
     p2Answered: 0,
   } as unknown as GameResult;
+}
+
+async function rejectingServer() {
+  const wss = new WebSocketServer({ port: 0 });
+  await new Promise<void>(resolve => wss.once('listening', () => resolve()));
+  const address = wss.address();
+  if (!address || typeof address === 'string') throw new Error('no port');
+  let searches = 0;
+  wss.on('connection', socket => {
+    socket.send('|challstr|local\n');
+    socket.on('message', data => {
+      const text = data.toString();
+      const trn = text.match(/\/trn ([^,|]+)/);
+      if (trn) socket.send(`|updateuser| ${trn[1].trim()}|1|1\n`);
+      if (text.includes('/search')) {
+        searches += 1;
+        socket.send('|popup|Due to high load, you are limited to 5 games at the same time.\n');
+      }
+    });
+  });
+  return {
+    searches: () => searches,
+    url: `ws://127.0.0.1:${address.port}/showdown/websocket`,
+    close: () => new Promise<void>(resolve => wss.close(() => resolve())),
+  };
 }
 
 function labelsOf(paths: ReturnType<typeof tempPaths>) {

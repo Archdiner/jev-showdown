@@ -102,8 +102,8 @@ export const CHECKS: InvariantCheck[] = [
   {
     id: 'circuits-all-pulled',
     severity: 'P1',
-    title: 'circuits.json has pulled every config, so ops live is idle',
-    suggestedFix: 'A pull is a loss streak or a rating drop on one config. Clear the pull on the champion after the cause is fixed, or the live loop keeps skipping search.',
+    title: 'ops live is idle because every approved config is pulled',
+    suggestedFix: 'A loss streak must not pull the champion, and a challenger pull cools down. Local and ladder breakers are separate files inside circuits.json. This fires when live logged the skip, or when every approved config in a scope is still pulled.',
     detect: circuitsAllPulled,
   },
   {
@@ -435,18 +435,103 @@ function analystLogDir(ctx: SentinelContext): CheckHit[] {
   return hits;
 }
 
+const PULL_SKIP = 'every approved config is pulled';
+
 function circuitsAllPulled(ctx: SentinelContext): CheckHit[] {
-  const circuits = ctx.circuits;
-  if (!circuits) return [];
-  const entries = Object.entries(circuits);
-  if (entries.length === 0) return [];
-  const open = entries.filter(([, state]) => !state?.pulled);
-  if (open.length > 0) return [];
-  return [{
-    key: 'all-pulled',
+  const hits: CheckHit[] = [];
+  const reported = reportedAllPulled(ctx);
+  if (reported) hits.push(reported);
+  for (const scope of circuitScopes(ctx.circuits)) {
+    const pulled = scopePulled(ctx, scope.states);
+    if (!pulled) continue;
+    const key = scope.name === 'legacy' && !ctx.approvedConfigIds ? 'all-pulled' : `${scope.name}-approved`;
+    hits.push({
+      key,
+      detail: pulled.detail,
+      evidence: [{ file: ctx.circuitsPath, detail: pulled.evidence }],
+    });
+  }
+  return hits;
+}
+
+function reportedAllPulled(ctx: SentinelContext): CheckHit | null {
+  const evidence: Evidence[] = [];
+  for (const row of ctx.rows) {
+    const value = row.value;
+    if (!value) continue;
+    const skipped = text(value.skipped);
+    const detail = text(value.detail);
+    // Exact text only. Incident rows quote this phrase inside a longer detail, and those must not re-page.
+    const matched = skipped === PULL_SKIP || detail === PULL_SKIP;
+    if (!matched || !inLookback(ctx, numberOf(value.ts))) continue;
+    evidence.push({ file: row.file, line: row.line, detail: skipped ?? detail ?? PULL_SKIP });
+  }
+  if (evidence.length === 0) return null;
+  return {
+    key: 'live-reported',
+    detail: `ops live reported ${PULL_SKIP} (${evidence.length} ${evidence.length === 1 ? 'line' : 'lines'})`,
+    evidence: evidence.slice(0, 8),
+  };
+}
+
+interface ScopeStates {
+  name: string;
+  states: Record<string, { pulled?: boolean; reason?: string; cooldownUntil?: number }>;
+}
+
+function circuitScopes(raw: SentinelContext['circuits']): ScopeStates[] {
+  if (!raw) return [];
+  if (raw.version === 2 && (isBucket(raw.ladder) || isBucket(raw.local))) {
+    const scopes: ScopeStates[] = [];
+    for (const name of ['ladder', 'local'] as const) {
+      const bucket = raw[name];
+      if (!isBucket(bucket)) continue;
+      scopes.push({ name, states: bucket });
+    }
+    return scopes;
+  }
+  const states: ScopeStates['states'] = {};
+  for (const [id, value] of Object.entries(raw)) {
+    if (!isCircuitState(value)) continue;
+    states[id] = value;
+  }
+  if (Object.keys(states).length === 0) return [];
+  return [{ name: 'legacy', states }];
+}
+
+function isBucket(value: unknown): value is ScopeStates['states'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).some(isCircuitState);
+}
+
+function isCircuitState(value: unknown): value is ScopeStates['states'][string] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const row = value as { pulled?: unknown; consecutiveLosses?: unknown };
+  return typeof row.pulled === 'boolean' || typeof row.consecutiveLosses === 'number';
+}
+
+function scopePulled(ctx: SentinelContext, states: ScopeStates['states']): { detail: string; evidence: string } | null {
+  const stillPulled = (id: string) => isEffectivelyPulled(states[id], ctx.now);
+  if (ctx.approvedConfigIds && ctx.approvedConfigIds.length > 0) {
+    if (!ctx.approvedConfigIds.every(stillPulled)) return null;
+    return {
+      detail: `every approved config is pulled (${ctx.approvedConfigIds.map(id => `${id}: ${states[id]?.reason ?? 'pulled'}`).join('; ')})`,
+      evidence: `${ctx.approvedConfigIds.length} approved configs pulled`,
+    };
+  }
+  if (ctx.approvedConfigIds) return null;
+  const entries = Object.entries(states);
+  if (entries.length === 0 || entries.some(([id]) => !stillPulled(id))) return null;
+  return {
     detail: `every config in circuits.json is pulled (${entries.map(([id, state]) => `${id}: ${state?.reason ?? 'pulled'}`).join('; ')})`,
-    evidence: [{ file: ctx.circuitsPath, detail: `${entries.length} configs pulled` }],
-  }];
+    evidence: `${entries.length} configs pulled`,
+  };
+}
+
+function isEffectivelyPulled(state: { pulled?: boolean; cooldownUntil?: number } | undefined, now: number): boolean {
+  if (!state?.pulled) return false;
+  if (typeof state.cooldownUntil === 'number' && now >= state.cooldownUntil) return false;
+  return true;
 }
 
 function mixedRatings(ctx: SentinelContext): CheckHit[] {

@@ -138,7 +138,9 @@ export interface SentinelContext {
   rows: LogRow[];
   games: ObservedGame[];
   heartbeats: Array<Record<string, unknown> & { file: string; line: number }>;
-  circuits: Record<string, { pulled?: boolean; reason?: string }> | null;
+  circuits: Record<string, unknown> | null;
+  /** Active gatekeeper labels. Null when the graph could not be read. */
+  approvedConfigIds: string[] | null;
   circuitsPath: string;
   speciesCount: number | null;
   speciesPath: string;
