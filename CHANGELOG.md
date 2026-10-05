@@ -1,5 +1,9 @@
 # Changelog
 
+## Rating and GXE stay null when the server omits them
+
+The ladder rating parser now reads GXE from the HTML popup `(GXE: …)` and from a `|rating|elo|gxe` line. If that number is not there, `gxe` is null. A missing rating stays null. The client does not fill in 1000 or 50. Each parsed update is a `rating` event in the per-battle JSONL, and the game `result` copies Elo before/after, GXE, and `gxeSource`. `ops live` writes the same nulls on its live-game row and does not feed a stand-in Elo into the circuit breaker.
+
 ## Replay links are confirmed before the game row is written
 
 `/savereplay` still asks the Showdown server to upload the battle. The game row keeps `replayUrl` only when that upload comes back as a `replay.pokemonshowdown.com` link, and it is written as soon as the link arrives (the public client waits up to 8 seconds). `replayId` is always the battle's replay id, including when the server never confirms the upload. The raw protocol log stays on disk at `localReplayPath`. A local server is `replayStatus: "local-only"` and does not wait on a public URL.

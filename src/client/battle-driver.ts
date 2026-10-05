@@ -23,7 +23,7 @@ import {
 import { alignToRequest, cloneGameState, mismatchData, overlayProtocol } from './tracked-state.js';
 import { FoeMon, LivePosition } from './decision-battle.js';
 import { safeError, toID } from './ids.js';
-import { appendGameRecord, buildLadderGameRecord, gxeOf, LadderGameRecord } from './game-record.js';
+import { appendGameRecord, buildLadderGameRecord, LadderGameRecord } from './game-record.js';
 
 export type { LadderGameRecord as GameSummary } from './game-record.js';
 
@@ -58,7 +58,7 @@ interface RoomState {
   winner: string | null;
   turns: number;
   replay: ReplayNotice | null;
-  elo: { before: number; after: number } | null;
+  elo: { before: number | null; after: number | null; gxe: number | null; gxeSource: 'html' | 'rating-line' | 'missing' } | null;
   gxe: number | null;
   startedAt: number;
   latencies: number[];
@@ -169,9 +169,29 @@ export class BattleDriver extends EventEmitter {
     }
 
     const rating = parseRatingLine(line);
-    if (rating && toID(rating.username) === toID(this.options.username)) {
-      room.elo = { before: rating.before, after: rating.after };
-      room.gxe = gxeOf(rating);
+    if (rating && (!rating.username || toID(rating.username) === toID(this.options.username))) {
+      room.elo = {
+        before: rating.before,
+        after: rating.after,
+        gxe: rating.gxe,
+        gxeSource: rating.gxeSource,
+      };
+      room.gxe = rating.gxe;
+      const opponentSide = room.ourSide === 'p1' ? 'p2' : room.ourSide === 'p2' ? 'p1' : null;
+      room.log.write({
+        type: 'rating',
+        kind: 'rating',
+        battleId: room.roomId,
+        format: this.options.format.id,
+        username: rating.username ?? this.options.username,
+        before: rating.before,
+        after: rating.after,
+        gxe: rating.gxe,
+        gxeSource: rating.gxeSource,
+        opponent: opponentSide ? room.players[opponentSide] ?? null : null,
+        opponentRating: opponentSide ? room.preRating[opponentSide] ?? null : null,
+        fabricated: false,
+      });
     }
 
     if (line.startsWith('|request|')) {
@@ -600,7 +620,11 @@ export class BattleDriver extends EventEmitter {
       logPath: room.log.filePath,
     });
 
-    room.log.write({ type: 'result', ...summary });
+    room.log.write({
+      type: 'result',
+      ...summary,
+      gxeSource: room.elo?.gxeSource ?? 'missing',
+    });
     appendGameRecord(this.options.logDir, summary);
     this.options.decisions.closeBattle(room.roomId);
     await room.log.close();

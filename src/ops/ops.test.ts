@@ -9,7 +9,7 @@ import { runFactory } from './factory.js';
 import { bootstrapChampion, judge, sprt } from './gatekeeper.js';
 import { readLabels } from './labels-read.js';
 import { startLocalServer } from './local-server.js';
-import { liveSlotLimit, runLive } from './live.js';
+import { liveSlotLimit, recordedRating, rememberRating, runLive } from './live.js';
 import { appendJsonl, opsPaths, readJsonl } from './paths.js';
 import { observeLog, emptyCounts, countsToPriors } from './priors.js';
 import { claimNext, completeJob, enqueue, listJobs } from './queue.js';
@@ -71,6 +71,25 @@ describe('traffic and circuit breakers', () => {
     );
     expect(dropped.pulled).toBe(true);
     expect(dropped.reason).toContain('rating drop');
+  });
+
+  test('a missing rating is not stored as 1000 and does not move the window', () => {
+    const held: { rating?: number; gxe?: number } = { rating: 1400, gxe: 60 };
+    rememberRating(held, { after: 1412, gxe: null });
+    expect(held.rating).toBe(1412);
+    expect(held.gxe).toBeUndefined();
+    expect(recordedRating(undefined, undefined)).toEqual({ rating: null, gxe: null });
+    expect(recordedRating(held.rating, held.gxe)).toEqual({ rating: 1412, gxe: null });
+
+    const state = nextCircuit(
+      { consecutiveLosses: 0, ratings: [1400], pulled: false },
+      'loss',
+      null,
+      { maxLosses: 5, maxDrop: 40, window: 5 },
+    );
+    expect(state.ratings).toEqual([1400]);
+    expect(state.consecutiveLosses).toBe(1);
+    expect(state.pulled).toBe(false);
   });
 });
 
