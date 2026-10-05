@@ -8,20 +8,26 @@ import { z } from 'zod';
  *
  * Null is allowed when:
  * - `opponent`, `opponentRating`: the server omitted the other `|player|` line or its rating.
+ *   A null opponent rating sets `opponentRatingReason` to `unreported`.
  * - `winner`: `outcome` is `tie`. A win or a loss names the winner.
- * - `eloBefore`: the rating line had no previous number. A number here requires `eloAfter`.
- * - `eloAfter`: the server sent no rating. A number for `gxe` or `eloBefore` requires it.
+ * - `eloBefore`: the rating line had no previous number.
+ * - `eloAfter`: the update is missing or does not match the result. That null sets
+ *   `eloAfterReason` to `unreported`. A number for `gxe` or `eloBefore` with a null
+ *   `eloAfter` is allowed only with that reason. Never invent 1000 or -1.
  * - `gxe`: the rating line had no GXE. Never invent 50.
  * - `latencyP50Ms`, `latencyP95Ms`, `latencyP99Ms`, `latencyMaxMs`: `decisions` is 0.
  *   When `decisions` is greater than 0 they are numbers.
- * - `minTimerMarginSec`: `decisions` is 0, or `replayStatus` is `local-only`
- *   (the local server does not run the ladder timer). A public game that chose
- *   a move has the timer on, so null is a dropped clock.
- * - `configId`, `configHash`, `gitSha`: the batch did not resolve them.
+ * - `configHash`: the batch did not resolve it.
  * - `replayId`: no room id was available. A normal ladder row sets it.
- * - `replayUrl`: `replayStatus` is `unconfirmed` or `local-only`. `confirmed` requires
- *   `https://replay.pokemonshowdown.com/…` and `replayUploaded: true`.
  * - `localReplayPath`: the raw log was not written.
+ *
+ * `replayUrl` is never null. `confirmed` is `https://replay.pokemonshowdown.com/…`
+ * with `replayUploaded: true`. `unconfirmed` is that same public URL, or `unavailable`
+ * with `replayUnavailableReason: unrecognized-room-id`. `local-only` is a local log
+ * path (or `local-only`) with `replayUnavailableReason: local-server`.
+ *
+ * `minTimerMarginSec` is always a number. When no timer line arrived it is the
+ * opening clock 150 and `minTimerMarginReason` is `no-timer-update`.
  *
  * `turns` is 0 only for `disconnect`, `crash`, or `unknown` with `decisions` 0.
  * A KO, forfeit, or timer loss with 0 turns is a phantom record.
@@ -41,8 +47,11 @@ const endReasonSchema = z.enum([
 ]);
 
 const nullableNumber = z.number().finite().nullable();
+const nullableReason = z.string().min(1).nullable().optional();
 const PLAYED_END = new Set(['ko', 'opponent-forfeit', 'our-forfeit', 'our-timer', 'opponent-timer', 'tie']);
 const LATENCY_KEYS = ['latencyP50Ms', 'latencyP95Ms', 'latencyP99Ms', 'latencyMaxMs'] as const;
+const PUBLIC_REPLAY = /^https:\/\/replay\.pokemonshowdown\.com\/[a-z0-9-]+/i;
+const OPENING_CLOCK_SEC = 150;
 
 export const ladderGameRecordSchema = z.object({
   schema: z.literal(LADDER_GAME_SCHEMA_ID),
@@ -57,6 +66,7 @@ export const ladderGameRecordSchema = z.object({
   username: z.string().min(1),
   opponent: z.string().min(1).nullable(),
   opponentRating: nullableNumber,
+  opponentRatingReason: nullableReason,
   outcome: z.enum(['win', 'loss', 'tie']),
   endReason: endReasonSchema,
   winner: z.string().min(1).nullable(),
@@ -67,6 +77,7 @@ export const ladderGameRecordSchema = z.object({
   mismatches: z.number().int().nonnegative(),
   eloBefore: nullableNumber,
   eloAfter: nullableNumber,
+  eloAfterReason: nullableReason,
   gxe: nullableNumber,
   durationMs: z.number().finite().nonnegative(),
   decisions: z.number().int().nonnegative(),
@@ -74,14 +85,16 @@ export const ladderGameRecordSchema = z.object({
   latencyP95Ms: nullableNumber,
   latencyP99Ms: nullableNumber,
   latencyMaxMs: nullableNumber,
-  minTimerMarginSec: nullableNumber,
+  minTimerMarginSec: z.number().finite(),
+  minTimerMarginReason: nullableReason,
   engine: z.string().min(1),
   configId: z.string().min(1).nullable(),
   configHash: z.string().min(1).nullable(),
   gitSha: z.string().min(1).nullable(),
   concurrency: z.number().int().positive(),
   replayId: z.string().min(1).nullable(),
-  replayUrl: z.string().min(1).nullable(),
+  replayUrl: z.string().min(1),
+  replayUnavailableReason: nullableReason,
   localReplayPath: z.string().min(1).nullable(),
   replayUploaded: z.boolean(),
   replayStatus: z.enum(['confirmed', 'unconfirmed', 'local-only']),
@@ -130,26 +143,46 @@ export const ladderGameRecordSchema = z.object({
     if (row.decisions > 0 && value === null) fail(key, 'latency is required when decisions is greater than 0');
   }
 
-  const publicGame = row.replayStatus !== 'local-only';
-  if (publicGame && row.decisions > 0 && row.minTimerMarginSec === null) {
-    fail('minTimerMarginSec', 'a public game that chose a move must record the timer margin');
+  if (row.minTimerMarginReason === 'no-timer-update' && row.minTimerMarginSec !== OPENING_CLOCK_SEC) {
+    fail('minTimerMarginSec', 'no-timer-update records the opening clock of 150 seconds');
   }
 
-  if (row.eloBefore !== null && row.eloAfter === null) {
-    fail('eloAfter', 'eloAfter is required when eloBefore is set');
-  }
-  if (row.gxe !== null && row.eloAfter === null) {
-    fail('eloAfter', 'eloAfter is required when gxe is set');
+  if (row.eloAfter === null) {
+    if ((row.eloBefore !== null || row.gxe !== null) && row.eloAfterReason !== 'unreported') {
+      fail('eloAfter', 'eloAfter may be null when eloBefore or gxe is set only with eloAfterReason unreported');
+    }
+  } else if (row.eloAfterReason) {
+    fail('eloAfterReason', 'eloAfterReason is null when eloAfter is a number');
   }
 
   if (row.replayStatus === 'confirmed') {
-    if (!row.replayUrl || !/^https:\/\/replay\.pokemonshowdown\.com\/[a-z0-9-]+/i.test(row.replayUrl)) {
+    if (!PUBLIC_REPLAY.test(row.replayUrl)) {
       fail('replayUrl', 'confirmed games require a https://replay.pokemonshowdown.com/ URL');
     }
     if (!row.replayUploaded) fail('replayUploaded', 'confirmed games set replayUploaded');
+    if (row.replayUnavailableReason) {
+      fail('replayUnavailableReason', 'confirmed games leave replayUnavailableReason null');
+    }
+  } else if (row.replayStatus === 'local-only') {
+    if (row.replayUploaded) fail('replayUploaded', 'a local game does not upload a public replay');
+    if (PUBLIC_REPLAY.test(row.replayUrl)) {
+      fail('replayUrl', 'a local game stores a local log path, not a public replay URL');
+    }
+    if (row.replayUnavailableReason !== 'local-server') {
+      fail('replayUnavailableReason', 'a local game sets replayUnavailableReason to local-server');
+    }
   } else {
-    if (row.replayUrl !== null) fail('replayUrl', 'replayUrl is null unless replayStatus is confirmed');
     if (row.replayUploaded) fail('replayUploaded', 'replayUploaded is false unless a replay URL was confirmed');
+    const unavailable = row.replayUrl === 'unavailable';
+    if (!unavailable && !PUBLIC_REPLAY.test(row.replayUrl)) {
+      fail('replayUrl', 'an unconfirmed public game stores a replay.pokemonshowdown.com URL or unavailable');
+    }
+    if (unavailable && row.replayUnavailableReason !== 'unrecognized-room-id') {
+      fail('replayUnavailableReason', 'an unrecognized room sets replayUnavailableReason to unrecognized-room-id');
+    }
+    if (!unavailable && row.replayUnavailableReason) {
+      fail('replayUnavailableReason', 'a synthesized public replay leaves replayUnavailableReason null');
+    }
   }
 });
 

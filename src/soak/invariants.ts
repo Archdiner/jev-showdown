@@ -69,8 +69,15 @@ export function evaluateSoak(observation: SoakObservation): string[] {
     if (record.turns < 1) {
       failures.push(`${record.battleId} is a phantom 0-turn record`);
     }
-    if (record.replayStatus !== 'local-only' || record.replayUrl !== null) {
-      failures.push(`${record.battleId} replayStatus=${record.replayStatus} replayUrl=${record.replayUrl}`);
+    if (
+      record.replayStatus !== 'local-only'
+      || record.replayUnavailableReason !== 'local-server'
+      || !record.replayUrl
+      || /^https:\/\/replay\.pokemonshowdown\.com\//i.test(record.replayUrl)
+    ) {
+      failures.push(
+        `${record.battleId} replayStatus=${record.replayStatus} replayUrl=${record.replayUrl} reason=${record.replayUnavailableReason}`,
+      );
     }
     if (observation.requireRating && (record.eloAfter === null || record.gxe === null)) {
       failures.push(`${record.battleId} missing rating eloAfter=${record.eloAfter} gxe=${record.gxe}`);
