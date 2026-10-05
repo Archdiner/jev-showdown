@@ -1,4 +1,5 @@
 import { Battle as ClientBattle, Pokemon as ClientPokemon } from '@pkmn/client';
+import { parsePublic } from '../engine/hybrid/protocol.js';
 import { FoeMon, LivePosition, StatBoosts } from './decision-battle.js';
 
 export type ViewerSide = 'p1' | 'p2';
@@ -27,6 +28,7 @@ function snap(mon: ClientPokemon): FoeMon | null {
     moves: [...(mon.moves || [])],
     boosts: boostsOf(mon),
     fainted: mon.fainted || mon.hp <= 0,
+    terastallized: mon.terastallized || undefined,
   };
 }
 
@@ -39,6 +41,7 @@ export function livePositionFromClient(
   battle: ClientBattle,
   request: unknown,
   ourSide: ViewerSide,
+  lines?: readonly string[],
 ): LivePosition {
   const foeSide = ourSide === 'p2' ? battle.p1 : battle.p2;
   const ours = ourSide === 'p2' ? battle.p2 : battle.p1;
@@ -49,11 +52,26 @@ export function livePositionFromClient(
     .map(mon => snap(mon))
     .filter((mon): mon is FoeMon => !!mon);
   const weather = battle.currentWeather();
-  return {
+  const position: LivePosition = {
     request,
     foeActive,
     foeBench,
     ourBoosts: ours?.active?.[0] ? boostsOf(ours.active[0]) : undefined,
     weather: weather ? String(weather) : undefined,
+    turn: typeof battle.turn === 'number' ? battle.turn : undefined,
   };
+  if (lines && lines.length) {
+    const notes = parsePublic(lines, ourSide);
+    position.myHazards = notes.myHazards;
+    position.foeHazards = notes.foeHazards;
+    for (const mon of [position.foeActive, ...position.foeBench]) {
+      if (!mon) continue;
+      const id = mon.species.toLowerCase().replace(/[^a-z0-9]+/g, '');
+      if (notes.hazardChip.has(id)) mon.hazardChip = true;
+      if (notes.statusMove.has(id)) mon.statusMove = true;
+      const speed = notes.speed.get(id);
+      if (speed) mon.speed = speed;
+    }
+  }
+  return position;
 }

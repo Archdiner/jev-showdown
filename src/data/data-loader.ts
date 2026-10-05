@@ -11,7 +11,7 @@ export class DataLoader {
   private loaded = false;
   private format?: Format;
 
-  private constructor() {}
+  constructor(private readonly dataDir?: string) {}
 
   static getInstance(): DataLoader {
     if (!DataLoader.instance) {
@@ -29,7 +29,7 @@ export class DataLoader {
 
     this.format = format;
     
-    const dataDir = path.join(process.cwd(), 'data');
+    const dataDir = this.dataDir ?? path.join(process.cwd(), 'data');
     const setsPath = path.join(dataDir, 'gen9-sets.json');
     const statsPath = path.join(dataDir, 'gen9-stats.json');
 

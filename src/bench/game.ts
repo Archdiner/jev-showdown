@@ -5,6 +5,7 @@ import { isBotSpec } from '../config/load.js';
 import { hazardScore } from '../config/layers/battle.js';
 import {
   hpEval,
+  isPlayableChoice,
   legalChoices,
   safeChoose,
   startRandomBattle,
@@ -68,6 +69,10 @@ export interface GameResult {
   p1Switches: number;
   p1Predicted: number;
   p1Answered: number;
+  p1LlmCostUsd: number;
+  p1Timeouts: number;
+  p2LlmCostUsd: number;
+  p2Timeouts: number;
   p2Decisions: number;
   p2Switches: number;
   p2Predicted: number;
@@ -150,6 +155,10 @@ export async function runGame(job: GameJob): Promise<GameResult> {
     p1Switches: 0,
     p1Predicted: 0,
     p1Answered: 0,
+    p1LlmCostUsd: 0,
+    p1Timeouts: 0,
+    p2LlmCostUsd: 0,
+    p2Timeouts: 0,
     p2Decisions: 0,
     p2Switches: 0,
     p2Predicted: 0,
@@ -180,7 +189,7 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         if (decision.viewMiss) result.p1ViewMiss++;
         result.p1TurnTimes.push(decision.ms);
         notePlay(result, 'p1', p1Legal, decision);
-        if (!p1Legal.includes(decision.choice) && decision.choice !== 'default') result.p1Invalid++;
+        if (!isPlayableChoice(battle, 'p1', decision.choice) && decision.choice !== 'default') result.p1Invalid++;
         const ok = safeChoose(battle, 'p1', decision.choice);
         if (!ok) result.p1Invalid++;
         result.decisions?.push({
@@ -196,7 +205,7 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         if (decision.viewMiss) result.p2ViewMiss++;
         result.p2TurnTimes.push(decision.ms);
         notePlay(result, 'p2', p2Legal, decision);
-        if (!p2Legal.includes(decision.choice) && decision.choice !== 'default') result.p2Invalid++;
+        if (!isPlayableChoice(battle, 'p2', decision.choice) && decision.choice !== 'default') result.p2Invalid++;
         const ok = safeChoose(battle, 'p2', decision.choice);
         if (!ok) result.p2Invalid++;
         result.decisions?.push({
@@ -222,6 +231,12 @@ export async function runGame(job: GameJob): Promise<GameResult> {
     result.error = error instanceof Error ? error.message : String(error);
   }
 
+  const p1Metrics = p1.bot?.metrics?.() ?? { llmCostUsd: 0, timeouts: 0 };
+  const p2Metrics = p2.bot?.metrics?.() ?? { llmCostUsd: 0, timeouts: 0 };
+  result.p1LlmCostUsd = p1Metrics.llmCostUsd;
+  result.p1Timeouts = p1Metrics.timeouts;
+  result.p2LlmCostUsd = p2Metrics.llmCostUsd;
+  result.p2Timeouts = p2Metrics.timeouts;
   p1.bot?.endGame({ winner: result.winner, turns: result.turns, invalid: result.p1Invalid, situations: { ...result.p1Situations } });
   p2.bot?.endGame({
     winner: result.winner === 'p1' ? 'p2' : result.winner === 'p2' ? 'p1' : 'tie',

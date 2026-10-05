@@ -1,5 +1,6 @@
 import { PRNG, type Battle } from '@pkmn/sim';
-import { legalChoices, type SideId } from '../engine/exact/battle-utils.js';
+import { appendTeraChoices, legalChoices, type SideId } from '../engine/exact/battle-utils.js';
+import { readHybridMetrics } from '../engine/hybrid/search.js';
 import { battleToState } from '../engine/exact/search.js';
 import { blendCandidates } from '../llm/blend.js';
 import { toAdvisorCandidates } from '../llm/state-summary.js';
@@ -51,6 +52,7 @@ export interface BuiltBot {
   reviewLoss(text: string, opts?: Parameters<LossReviewer['review']>[1]): Promise<ReviewResult>;
   beginGame(game: { gameId: string; seed: number; opponentConfigId?: string }): void;
   endGame(game: Omit<GameLogRecord, 'ts' | 'kind' | 'configId' | 'layerIds' | 'env' | 'gameId' | 'seed'> & { gameId?: string }): void;
+  metrics(): { llmCostUsd: number; timeouts: number };
 }
 
 export type ConfigSource = string | BotSpec | LoadedConfig | RawConfig;
@@ -110,6 +112,9 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
         situations: game.situations,
       });
     },
+    metrics() {
+      return readHybridMetrics(base.search);
+    },
     async reviewLoss(text, opts) {
       const model = loaded.config.models.params.roles.lossReviewer.models[0];
       if (!runtime.llmAllowed) return { ok: false, error: 'llm_disabled_by_env', model };
@@ -123,8 +128,13 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
       const active = activeConfig === loaded.config ? base : implsOf(activeConfig);
       const activeLayerIds = layerIdsOf(activeConfig);
       const plan = await planFor(active, activeConfig, input, client, spend, runtime);
-      const legal = legalChoices(input.battle, input.side);
-      const budget = Math.min(activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs);
+      const plain = legalChoices(input.battle, input.side);
+      const legal = active.search.id === 'hybrid' ? appendTeraChoices(input.battle, input.side, plain) : plain;
+      const budget = Math.min(
+        activeConfig.search.params.timeBudgetMs,
+        runtime.timeLimitMs,
+        input.budgetMs ?? Number.POSITIVE_INFINITY,
+      );
       const trace = legal.length === 0
         ? { choice: 'default', scores: [] as Array<{ choice: string; score: number }>, predictedSwitch: undefined, answersPredictedSwitch: undefined }
         : await active.search.search(input.battle, input.side, {
@@ -134,7 +144,10 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
           rng,
           rating: input.rating,
           variantId: input.variantId,
-          deadlineMs: searchDeadline(Date.now(), activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs),
+          deadlineMs: searchDeadline(Date.now(), activeConfig.search.params.timeBudgetMs, budget),
+          hybrid: activeConfig.hybrid?.params,
+          llmAllowed: runtime.llmAllowed,
+          llmCostCapUsd: runtime.llmCostCapUsd,
         });
       let scores = trace.scores.length ? trace.scores : [{ choice: trace.choice, score: 0 }];
       let choice = applyPolicies(active, input.battle, input.side, legal, plan, scores);
@@ -149,6 +162,7 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
           advisorSource = advised.source;
         }
       }
+      if (active.search.id === 'hybrid' && legal.includes(trace.choice)) choice = trace.choice;
       const ms = Date.now() - started;
       active.context.remember(input.battle, input.side, choice);
       const decision: AttributedDecision = {

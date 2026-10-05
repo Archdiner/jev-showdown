@@ -64,6 +64,8 @@ export interface DecisionInput {
   rating?: number;
   /** Arm drawn for this live game. Search and advisors may read it; they do not have to. */
   variantId?: string;
+  /** Remaining decision budget, usually the Showdown timer minus a margin. */
+  budgetMs?: number;
 }
 
 export interface AttributedDecision {

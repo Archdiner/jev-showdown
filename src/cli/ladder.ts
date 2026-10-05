@@ -184,7 +184,7 @@ Preflight (log in, print named/locked and the current rating, exit):
 Real ladder, from a residential or university network (this process never stores the password):
   SHOWDOWN_USERNAME=bot SHOWDOWN_PASSWORD=secret npm run ladder -- --games 10 --format gen9randombattle --engine max-damage --concurrency 1
 
-Engines: max-damage (default; @smogon/calc maxDamageChoice), search (exact 1-ply, the gate champion; exact is an alias), or grok (search + LLM prior, concurrency 1).
+Engines: max-damage (default; @smogon/calc maxDamageChoice), search (exact 1-ply, the gate champion; exact is an alias), hybrid (configs/hybrid.yaml sampled-world search plus LLM layers; not the champion), or grok (search + LLM prior, concurrency 1).
 --labeled-champion loads the gatekeeper's active champion at batch start and plays that file for every game in the batch. It stays off unless you pass it.
 --rollback plays the builtin policy for --engine even when a champion label is valid.
 A missing label, a file whose hash no longer matches the label, or two active champions rolls back to that builtin policy and logs the reason.
@@ -241,10 +241,11 @@ async function makePlayer(input: {
 }): Promise<{ client: ShowdownClient; driver: BattleDriver; decisions: DecisionClient; queue: LadderQueue }> {
   fs.mkdirSync(input.opts.logDir, { recursive: true });
   const config = engineConfig(input.opts);
+  const hybrid = input.engine === 'hybrid';
   const decisions = new DecisionClient({
     config,
     engine: input.engine,
-    timeoutMs: input.opts.decisionMs ?? (input.local ? 1500 : 12000),
+    timeoutMs: input.opts.decisionMs ?? (input.local ? (hybrid ? 8000 : 1500) : (hybrid ? 15000 : 12000)),
     workers: input.opts.concurrency,
     championConfigPath: input.identity.championConfigPath,
   });
@@ -264,7 +265,7 @@ async function makePlayer(input: {
     engineName: input.engine,
     decisions,
     logDir: input.opts.logDir,
-    decisionTimeoutMs: input.opts.decisionMs ?? (input.local ? 1500 : 12000),
+    decisionTimeoutMs: input.opts.decisionMs ?? (input.local ? (hybrid ? 8000 : 1500) : (hybrid ? 15000 : 12000)),
     replayDir: path.join(input.opts.logDir, 'replays'),
     configId: input.identity.configId,
     configHash: input.identity.configHash,

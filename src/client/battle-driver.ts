@@ -499,7 +499,7 @@ export class BattleDriver extends EventEmitter {
   }
 
   private livePosition(room: RoomState, request: any): LivePosition {
-    return livePositionFromClient(room.battle, request, room.ourSide === 'p2' ? 'p2' : 'p1');
+    return livePositionFromClient(room.battle, request, room.ourSide === 'p2' ? 'p2' : 'p1', room.lines);
   }
 
   private reconcile(room: RoomState, request: any): StateMismatch[] {

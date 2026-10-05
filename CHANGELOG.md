@@ -1,5 +1,13 @@
 # Changelog
 
+## Hybrid search plus an optional game plan
+
+`configs/hybrid.yaml` is a live engine (`--engine hybrid`). It samples the opponent's hidden sets from the gen9 randbats table, locks revealed moves, ability, and item, drops Assault Vest after a status move and Heavy-Duty Boots after hazard chip, and soft-reweights Choice Scarf from speed order. Each sampled world is an exact `@pkmn/sim` battle. Our actions and their replies form a small payoff matrix; regret matching mixes the replies; worlds are averaged by probability. Terastallize is a legal line only for this search. A Tera hold keeps it off early unless the KO rate or the plan says otherwise.
+
+Three blocks are separate config flags. The game plan is asynchronous (turn 1, faints, new reveals, and every few turns) and becomes a preserve bonus and a Tera timing prior. Opponent modelling reweights the sampler from the plan's style. Final judgment may pick among the top three only when their scores sit inside a margin. The default judge is `alibaba/qwen3.8-27b` on Cerebras with reasoning effort medium and no forced temperature. The planner option is `anthropic/claude-opus-5.5` at low effort. A timeout falls back to the search move. Bench profiles are `hybrid-core` (search only), `hybrid-plan` (plan and opponent model), and `hybrid` (all three). Self-play stays hidden-information for both sides, including exact-1ply. Randbats data under 500 species fails the search. The data-loader and belief-tracker tests write a temp directory.
+
+Honest-bench numbers are in the pull request.
+
 ## Stale battle rooms do not block the drain
 
 A room left over from an earlier session is rejoined when the runner logs in. If its newest `|t:|` is more than 70 minutes old, the client forfeits it and does not deliver its lines, so it is not an in-progress game and does not use a concurrency slot. A room with no `|t:|` (a local battle) stays live. A battle id that already has a result is not counted again, so a second `game_start` cannot hold the drain. The first SIGTERM or SIGUSR1 still drains real games; once every real game has a result the process exits.

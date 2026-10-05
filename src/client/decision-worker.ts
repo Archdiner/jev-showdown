@@ -25,7 +25,10 @@ function send(message: WorkerResponse): void {
 
 async function init(_config: BotConfig, engine: EngineName, championConfigPath?: string | null): Promise<void> {
   engineName = engine;
-  champion = championConfigPath ? buildBot(championConfigPath, 'ladder') : null;
+  const configPath = engine === 'hybrid'
+    ? (championConfigPath || 'configs/hybrid.yaml')
+    : championConfigPath;
+  champion = configPath ? buildBot(configPath, 'ladder') : null;
   await dataLoader.load(gen9RandomBattle);
   send({ type: 'ready' });
 }
@@ -42,8 +45,12 @@ async function decide(message: DecideRequest): Promise<void> {
   if (!battles.has(message.battleId)) openBattle(message.battleId);
   const started = Date.now();
   try {
-    const picked = await chooseLive(engineName, message.position, message.legal, champion);
-    const known = message.legal.some(candidate => sameAction(candidate, picked.action));
+    const picked = await chooseLive(engineName, message.position, message.legal, champion, message.searchTimeMs);
+    const plain = picked.action.type === 'move'
+      ? { type: 'move' as const, moveIndex: picked.action.moveIndex }
+      : picked.action;
+    const known = message.legal.some(candidate => sameAction(candidate, picked.action))
+      || (picked.action.type === 'move' && picked.action.terastallize && message.legal.some(candidate => sameAction(candidate, plain)));
     if (!known) {
       send({
         type: 'decision',

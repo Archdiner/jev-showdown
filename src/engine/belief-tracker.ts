@@ -5,8 +5,8 @@ export class BeliefTracker {
   private beliefs: Map<string, PokemonBelief> = new Map();
   private stats: RandbatsStats;
 
-  constructor() {
-    this.stats = dataLoader.getStats();
+  constructor(stats?: RandbatsStats) {
+    this.stats = stats ?? dataLoader.getStats();
   }
 
   initializeBelief(

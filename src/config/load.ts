@@ -107,6 +107,9 @@ function materialize(raw: RawConfig, fallbackName: string): ResolvedConfig {
     advisor: component('advisor', raw.advisor?.id ?? 'jev', raw.advisor?.params),
     models: component('models', raw.models?.id ?? 'catalog', raw.models?.params),
     metaController: component('metaController', raw.metaController?.id ?? 'static', raw.metaController?.params),
+    ...(raw.hybrid
+      ? { hybrid: component('hybrid', raw.hybrid.id ?? 'layers', raw.hybrid.params) }
+      : {}),
   };
 }
 

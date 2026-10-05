@@ -16,6 +16,9 @@ function policy(name: string): BenchPlayer {
   if (name === 'random') return { kind: 'random' };
   if (name === 'maxdamage') return { kind: 'maxdamage' };
   if (name === 'legacy') return { kind: 'legacy' };
+  if (name === 'hybrid' || name === 'hybrid-full' || name === 'hybrid-plan' || name === 'hybrid-core') {
+    return specForAlias(name, 'ladder');
+  }
   if (name === 'exact') return { kind: 'exact', config: EXACT_1PLY };
   if (name === 'switch') return { kind: 'exact', config: SWITCH_DEPTH2 };
   if (name.startsWith('exact')) {

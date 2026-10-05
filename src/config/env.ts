@@ -62,7 +62,7 @@ export const EnvSchema = z.object({
 
 const STRATEGY_KEYS = [
   'agent', 'search', 'evaluator', 'opponentModel', 'policies',
-  'context', 'advisor', 'models', 'metaController', 'extends',
+  'context', 'advisor', 'models', 'metaController', 'hybrid', 'extends',
 ];
 
 export function assertEnvOnly(raw: unknown): EnvProfile {
