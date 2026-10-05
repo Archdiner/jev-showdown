@@ -1,0 +1,5 @@
+name: random
+agent:
+  id: balanced
+search:
+  id: random

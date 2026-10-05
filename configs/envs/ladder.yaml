@@ -1,0 +1,7 @@
+name: ladder
+timeLimitMs: 8000
+network: showdown
+logSink: file
+llm:
+  allowed: true
+  costCapUsd: 1

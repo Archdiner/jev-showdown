@@ -39,6 +39,29 @@ export function blendCandidates(
     };
   }
 
+  if (config.mode === 'veto-blunders') {
+    const threshold = config.blunderThreshold ?? 0.25;
+    const ranked = searchOrder.map(candidate => row(candidate, assessment, candidate.searchScore));
+    const top = ranked[0];
+    const topScore = top ? assessment.scores[top.id] : undefined;
+    if (top && topScore != null && topScore <= threshold) {
+      const safe = ranked.filter(candidate => {
+        const score = assessment.scores[candidate.id];
+        return score == null || score > threshold;
+      });
+      const pick = safe[0];
+      if (pick && pick.id !== top.id) {
+        const rest = ranked.filter(candidate => candidate.id !== pick.id);
+        return {
+          ranked: [{ ...pick, blendedScore: pick.searchScore + 1 }, ...rest],
+          source: 'veto-blunders',
+          degraded: false,
+        };
+      }
+    }
+    return { ranked, source: 'search', degraded: false };
+  }
+
   if (config.mode === 'tiebreaker') {
     const best = searchOrder[0]?.searchScore ?? 0;
     const ranked = searchOrder.map(candidate => {

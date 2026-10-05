@@ -1,89 +1,73 @@
 #!/usr/bin/env node
 
-import { Bot } from '../bot/bot.js';
+import { buildBot } from '../config/bot.js';
+import { LadderSession } from '../config/adapters.js';
 import { ShowdownClient } from '../client/showdown-client.js';
-import { BattleLogger } from '../learning/battle-logger.js';
-import { dataLoader } from '../data/data-loader.js';
-import { BotConfig } from '../types/index.js';
+
+function opt(name: string): string | undefined {
+  const hit = process.argv.find(arg => arg.startsWith(`--${name}=`));
+  return hit ? hit.slice(name.length + 3) : undefined;
+}
 
 async function main() {
-  const username = process.env.SHOWDOWN_USERNAME;
-  const password = process.env.SHOWDOWN_PASSWORD;
+  if (process.argv.includes('--help')) {
+    console.log(`usage: npm run ladder -- [--local] [--config=configs/champion.yaml]
+  --local   ws://localhost:8000/showdown/websocket and the local env profile
+  --config  strategy file. The same file is used on the local server and the ladder.
+Env profiles change time, network, and LLM permission. They do not change configId.
+Choices come from buildBot. If the room has no reconstructed battle, the turn is not played.`);
+    return;
+  }
 
-  if (!username || !password) {
-    console.error('Error: SHOWDOWN_USERNAME and SHOWDOWN_PASSWORD must be set');
-    console.error('Set them in a .env file or environment variables');
+  const local = process.argv.includes('--local');
+  const configPath = opt('config') || 'configs/champion.yaml';
+  const env = local ? 'local' : 'ladder';
+  const username = process.env.SHOWDOWN_USERNAME || (local ? 'localbot' : '');
+  const password = process.env.SHOWDOWN_PASSWORD || '';
+  if (!username || (!local && !password)) {
+    console.error('Set SHOWDOWN_USERNAME and SHOWDOWN_PASSWORD. --local may omit the password.');
     process.exit(1);
   }
 
-  console.log('Loading data...');
-  
-  const { gen9RandomBattle } = await import('../formats/gen9-randombattle.js');
-  await dataLoader.load(gen9RandomBattle);
-
-  const config: BotConfig = {
-    searchTimeMs: 5000,
-    searchIterations: 1000,
-    explorationConstant: 1.4,
-    sampledWorlds: 10,
-    useTeraHeuristic: true,
-    useLLMPrior: false,
-  };
-
-  const logger = new BattleLogger();
-  const bot = new Bot(config, gen9RandomBattle, logger);
-  await bot.initialize();
+  const bot = buildBot(configPath, env);
+  const session = new LadderSession(bot);
+  console.log(`configId=${bot.configId} env=${env} file=${configPath}`);
 
   const client = new ShowdownClient({
     username,
     password,
     format: 'gen9randombattle',
+    local,
+    server: local ? 'ws://localhost:8000/showdown/websocket' : undefined,
   });
 
-  console.log('Connecting to Pokemon Showdown...');
   await client.connect();
-
   console.log(`Logged in as ${username}`);
-  console.log('Searching for battles...');
-  
   client.searchBattle();
 
-  client.on('battleStart', (room) => {
-    console.log(`Battle started: ${room}`);
-    bot.startBattle(room);
+  client.on('request', (room: string, request: unknown) => {
+    const side = client.sideFor(room) ?? 'p1';
+    void session.onRequest(room, request, client.transcript(room), side).then(choice => {
+      client.choose(room, choice);
+      console.log(`${room} ${side} ${choice} configId=${bot.configId}`);
+    }).catch(error => {
+      console.error(`${room} no choice: ${error instanceof Error ? error.message : error}`);
+    });
   });
 
-  client.on('request', (room, request) => {
-    console.log(`Turn ${request.rqid || '?'} in ${room}`);
-  });
-
-  client.on('battleEnd', (room, winner) => {
+  client.on('battleEnd', (room: string, winner: string | null) => {
     console.log(`Battle ended: ${room}, winner: ${winner || 'tie'}`);
-    
-    const outcome = winner === username ? 'win' : winner ? 'loss' : 'tie';
-    bot.endBattle(outcome, winner || 'unknown', 0);
-    
-    setTimeout(() => {
-      console.log('Searching for next battle...');
-      client.searchBattle();
-    }, 5000);
+    setTimeout(() => client.searchBattle(), 5000);
   });
 
-  client.on('disconnect', () => {
-    console.log('Disconnected. Exiting...');
-    logger.close();
-    process.exit(0);
-  });
-
+  client.on('disconnect', () => process.exit(0));
   process.on('SIGINT', () => {
-    console.log('\nShutting down...');
     client.disconnect();
-    logger.close();
     process.exit(0);
   });
 }
 
 main().catch(err => {
-  console.error('Error:', err);
+  console.error(err);
   process.exit(1);
 });

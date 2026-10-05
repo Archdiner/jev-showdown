@@ -1,6 +1,7 @@
-import { PolicySpec } from '../engine/exact/policies.js';
-import { EXACT_1PLY, ExactConfig } from '../engine/exact/search.js';
+import { specForAlias } from '../config/aliases.js';
+import type { BotSpec } from '../config/interfaces.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
+import { EXACT_1PLY } from '../engine/exact/search.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
 import { GameJob, GameResult } from './game.js';
 import { p99, runGamesParallel } from './pool.js';
@@ -10,24 +11,11 @@ function arg(name: string, fallback: string): string {
   return hit ? hit.slice(name.length + 3) : fallback;
 }
 
-function policy(name: string): PolicySpec {
-  if (name === 'random') return { kind: 'random' };
-  if (name === 'maxdamage') return { kind: 'maxdamage' };
-  if (name === 'legacy') return { kind: 'legacy' };
-  const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',') ;
-  if (name === 'exact' || name.startsWith('exact')) {
-    const config: ExactConfig = {
-      depth: Number(depth) || EXACT_1PLY.depth,
-      opponentModel: model === 'uniform' ? 'uniform' : 'max-damage',
-      evalMode: evalMode === 'full' ? 'full' : 'hp',
-      errorAsLoss: name.includes(',loss'),
-    };
-    return { kind: 'exact', config };
-  }
-  throw new Error(`Unknown policy ${name}`);
+function policy(name: string): BotSpec {
+  return specForAlias(name, 'selfplay');
 }
 
-function pairedJobs(pairs: number, a: PolicySpec, b: PolicySpec, seedStart: number): GameJob[] {
+function pairedJobs(pairs: number, a: BotSpec, b: BotSpec, seedStart: number): GameJob[] {
   const jobs: GameJob[] = [];
   for (let i = 0; i < pairs; i++) {
     const seed = seedStart + i;
@@ -52,7 +40,7 @@ function pairedJobs(pairs: number, a: PolicySpec, b: PolicySpec, seedStart: numb
   return jobs;
 }
 
-export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate: PolicySpec): {
+export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate: BotSpec): {
   wins: number;
   losses: number;
   ties: number;

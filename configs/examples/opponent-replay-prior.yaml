@@ -1,0 +1,5 @@
+name: opponent-replay-prior
+extends: ../champion.yaml
+opponentModel:
+  behavior:
+    id: replay-prior

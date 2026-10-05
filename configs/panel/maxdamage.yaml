@@ -1,0 +1,5 @@
+name: maxdamage
+agent:
+  id: balanced
+search:
+  id: max-damage

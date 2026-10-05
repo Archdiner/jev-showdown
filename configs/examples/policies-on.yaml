@@ -1,0 +1,27 @@
+name: policies-on
+extends: ../champion.yaml
+policies:
+  teraPolicy:
+    id: heuristic
+    params:
+      enabled: true
+  hazardPolicy:
+    id: heuristic
+    params:
+      enabled: true
+  sacPolicy:
+    id: heuristic
+    params:
+      enabled: true
+  switchPolicy:
+    id: heuristic
+    params:
+      enabled: true
+  leadPolicy:
+    id: heuristic
+    params:
+      enabled: true
+  endgamePolicy:
+    id: heuristic
+    params:
+      enabled: true

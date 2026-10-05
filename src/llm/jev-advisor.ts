@@ -1,12 +1,24 @@
 import type { GatewayClient } from './gateway-client.js';
 import type { EvaluateQuestion } from './gateway-client.js';
 import { JEV_MODEL_ID } from './models.js';
-import { buildBattleFacts } from './battle-facts.js';
-import { toAdvisorCandidates } from './state-summary.js';
+import { buildBattleFacts, type BattleFacts } from './battle-facts.js';
+import { capEvaluationState, toAdvisorCandidates } from './state-summary.js';
 import type { AdvisorAssessment, AdvisorCandidate } from './types.js';
 import type { GameState, RandbatsStats } from '../types/index.js';
 import type { ScoredAction } from './types.js';
 import { dataLoader } from '../data/data-loader.js';
+
+export interface AdviseOptions {
+  /** Extra context from the config context layer, prepended to the calc sheet. */
+  contextText?: string;
+  /** Use these facts instead of rebuilding the calc sheet. */
+  facts?: BattleFacts;
+  questions?: {
+    bestAction?: boolean;
+    opponentWillSwitch?: boolean;
+    score?: boolean;
+  };
+}
 
 const SCORE_LEVELS = [
   'blunder: clearly the wrong action',
@@ -30,48 +42,69 @@ export class JevAdvisor {
     state: GameState,
     scored: ScoredAction[],
     topK: number,
-    pools?: RandbatsStats
+    pools?: RandbatsStats,
+    options?: AdviseOptions
   ): Promise<{ assessment: AdvisorAssessment; candidates: AdvisorCandidate[] }> {
     const candidates = toAdvisorCandidates(scored, topK);
-    const assessment = await this.advise(state, candidates, pools);
+    const assessment = await this.advise(state, candidates, pools, options);
     return { assessment, candidates };
   }
 
-  async advise(state: GameState, candidates: AdvisorCandidate[], pools?: RandbatsStats): Promise<AdvisorAssessment> {
+  async advise(
+    state: GameState,
+    candidates: AdvisorCandidate[],
+    pools?: RandbatsStats,
+    options?: AdviseOptions
+  ): Promise<AdvisorAssessment> {
     if (candidates.length === 0) {
       return emptyAssessment(this.model, true, 'no_candidates');
     }
 
-    const facts = buildBattleFacts(state, candidates, pools ?? loadedPools());
-    const questions: Record<string, EvaluateQuestion> = {
-      bestAction: {
+    const facts = options?.facts ?? buildBattleFacts(state, candidates, pools ?? loadedPools());
+    const ask = {
+      bestAction: options?.questions?.bestAction !== false,
+      opponentWillSwitch: options?.questions?.opponentWillSwitch !== false,
+      score: options?.questions?.score !== false,
+    };
+    const questions: Record<string, EvaluateQuestion> = {};
+    if (ask.bestAction) {
+      questions.bestAction = {
         type: 'choice',
         instructions:
           'Which candidate is best this turn? Use only the damage rolls, accuracy, priority, speed, and search scores in the state. ' +
           'Do not apply a type matchup that the state does not already state as a damage number.',
         criteria: Object.fromEntries(candidates.map(candidate => [candidate.id, facts.criteria[candidate.id] ?? candidate.label])),
-      },
-      opponentWillSwitch: {
+      };
+    }
+    if (ask.opponentWillSwitch) {
+      questions.opponentWillSwitch = {
         type: 'boolean',
         instructions: 'Will the opponent switch to a different Pokemon this turn?',
         criteria: {
           true: 'the opponent switches',
           false: 'the opponent stays in and acts with the active Pokemon',
         },
-      },
-    };
-
-    for (const candidate of candidates) {
-      questions[`score_${candidate.id}`] = {
-        type: 'score',
-        instructions: `How good is this action given these calc numbers: ${facts.criteria[candidate.id] ?? candidate.label}`,
-        criteria: SCORE_LEVELS,
       };
     }
+    if (ask.score) {
+      for (const candidate of candidates) {
+        questions[`score_${candidate.id}`] = {
+          type: 'score',
+          instructions: `How good is this action given these calc numbers: ${facts.criteria[candidate.id] ?? candidate.label}`,
+          criteria: SCORE_LEVELS,
+        };
+      }
+    }
+    if (Object.keys(questions).length === 0) {
+      return emptyAssessment(this.model, true, 'no_questions');
+    }
 
+    const stateText = capEvaluationState(
+      [options?.contextText?.trim(), facts.text.trim()].filter(Boolean).join('\n')
+    );
     const result = await this.client.evaluate({
       model: this.model,
-      state: facts.text,
+      state: stateText,
       questions,
     });
 
@@ -105,11 +138,13 @@ export class JevAdvisor {
       }
     }
 
-    if (Object.keys(scores).length === 0 && Object.keys(probabilities).length === 0) {
+    if (Object.keys(scores).length === 0 && Object.keys(probabilities).length === 0 && Object.keys(booleans).length === 0) {
       return emptyAssessment(this.model, true, 'unusable_answers', result.metrics.latencyMs, result.metrics.costUsd);
     }
 
-    fillFromSibling(candidates, scores, probabilities);
+    if (Object.keys(scores).length > 0 || Object.keys(probabilities).length > 0) {
+      fillFromSibling(candidates, scores, probabilities);
+    }
 
     return {
       model: result.data.model || this.model,

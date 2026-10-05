@@ -1,5 +1,5 @@
 import { GraphDB } from './db.js';
-import { specFromId } from '../engine/exact/policies.js';
+import { specForAlias } from '../config/aliases.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
 import { GameJob, GameResult as BenchGame } from '../bench/game.js';
 import { runGamesParallel } from '../bench/pool.js';
@@ -186,8 +186,8 @@ export class Gate {
     // baseline, so we do not also replay champion-v0: that engine rebuilds
     // a battle per node and the rebuild rejects the choice.
     void champion;
-    const challengerSpec = specFromId(challenger);
-    const opponentSpec = specFromId(opponent);
+    const challengerSpec = specForAlias(challenger, 'gate');
+    const opponentSpec = specForAlias(opponent, 'gate');
     const jobs: GameJob[] = [];
     const labels: Array<{ p1: string; p2: string }> = [];
 

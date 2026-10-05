@@ -72,6 +72,18 @@ npm run graph -- render             # export graph
 
 See `src/graph/gate.ts` for full gate spec.
 
+## Config layer
+
+`buildBot(config)` is the only bot factory: self-play, the gate, regression snapshots, the obvious-move guardrail, `npm run ladder -- --local`, and `npm run ladder -- --config <file>`. `configId` hashes the strategy file. Env profiles `selfplay`, `gate`, `local`, and `ladder` set time, network, logging, and whether LLM calls are allowed. They do not change the move. A time limit marks `overBudget` after the choice.
+
+Add a component: register it in `src/config/layers` with a zod params schema, add a YAML example under `configs/examples`, run `npm run exp -- validate`. Do not special-case a species, a move, or a fixture position.
+
+Position pools are generated from seeded random games and labeled by an exact search of depth at least 2, or mined from losses. `splitFor` holds out 20%. Sweeps and bandits score game win rate plus the dev set. Held-out agreement and live results are the gatekeeper (`npm run exp -- run` only). The analyst writes a mechanism or an eval term. Promotion stays `npm run gate`.
+
+`npm run exp -- validate|run|sweep|ablate|tournament|leaderboard|diff`.
+
+The live client implements `LiveBattleBridge`. A new search registers an id in the search layer and does not add an entry point. The advisor calls `JevAdvisor` and `GatewayClient`. Loss review calls `LossReviewer`.
+
 ## Where Creativity Allowed
 
 ✓ New hypotheses (strategy, eval, search improvements)  

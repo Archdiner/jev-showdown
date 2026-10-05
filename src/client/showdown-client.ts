@@ -6,6 +6,8 @@ export interface ShowdownConfig {
   username: string;
   password: string;
   format?: string;
+  /** Guest login against a local server. Skips the play.pokemonshowdown.com assertion. */
+  local?: boolean;
 }
 
 export class ShowdownClient extends EventEmitter {
@@ -13,7 +15,10 @@ export class ShowdownClient extends EventEmitter {
   private config: ShowdownConfig;
   private challstr?: string;
   private connected = false;
+  private loggedIn = false;
   private battleRooms = new Set<string>();
+  private transcripts = new Map<string, string[]>();
+  private sides = new Map<string, 'p1' | 'p2'>();
 
   constructor(config: ShowdownConfig) {
     super();
@@ -62,45 +67,79 @@ export class ShowdownClient extends EventEmitter {
     });
   }
 
+  transcript(room: string): string {
+    return (this.transcripts.get(room) || []).join('\n');
+  }
+
+  sideFor(room: string): 'p1' | 'p2' | undefined {
+    return this.sides.get(room);
+  }
+
+  choose(room: string, choice: string): void {
+    const body = choice.startsWith('/') ? choice : `/choose ${choice}`;
+    this.send(`${room}|${body}`);
+  }
+
   private async handleMessage(message: string): Promise<void> {
     const lines = message.split('\n');
-    
+    const room = lines[0]?.startsWith('>') ? lines[0].slice(1) : '';
+    if (room) {
+      const bucket = this.transcripts.get(room) || [];
+      bucket.push(message);
+      this.transcripts.set(room, bucket);
+    }
+
     for (const line of lines) {
       if (line.startsWith('|challstr|')) {
         this.challstr = line.slice(11);
       } else if (line.startsWith('|updateuser|')) {
         const parts = line.split('|');
         if (parts[2] !== ' Guest') {
+          this.loggedIn = true;
           this.emit('login', parts[2]);
         }
+      } else if (line.startsWith('|player|') && room) {
+        const parts = line.split('|');
+        const slot = parts[2];
+        const name = (parts[3] || '').trim();
+        if ((slot === 'p1' || slot === 'p2') && name && this.sameUser(name)) {
+          this.sides.set(room, slot);
+        }
       } else if (line.startsWith('|init|battle')) {
-        const room = lines[0].slice(1);
-        this.battleRooms.add(room);
+        if (room) this.battleRooms.add(room);
         this.emit('battleStart', room);
       } else if (line.startsWith('|request|')) {
         const requestData = JSON.parse(line.slice(9));
-        const room = lines[0].slice(1);
+        const side = requestData?.side?.id;
+        if (room && (side === 'p1' || side === 'p2')) this.sides.set(room, side);
         this.emit('request', room, requestData);
       } else if (line.startsWith('|win|')) {
         const winner = line.slice(5);
-        const room = lines[0].slice(1);
         this.emit('battleEnd', room, winner);
-        this.battleRooms.delete(room);
+        if (room) this.battleRooms.delete(room);
       } else if (line.startsWith('|tie')) {
-        const room = lines[0].slice(1);
         this.emit('battleEnd', room, null);
-        this.battleRooms.delete(room);
+        if (room) this.battleRooms.delete(room);
       }
 
-      if (lines[0].startsWith('>')) {
-        this.emit('battleMessage', lines[0].slice(1), line);
-      }
+      if (room) this.emit('battleMessage', room, line);
     }
+  }
+
+  private sameUser(name: string): boolean {
+    const strip = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return strip(name) === strip(this.config.username);
   }
 
   private async login(): Promise<void> {
     if (!this.challstr) {
       throw new Error('No challstr available');
+    }
+
+    if (this.config.local || !this.config.password) {
+      this.send(`|/trn ${this.config.username},0,`);
+      this.loggedIn = true;
+      return;
     }
 
     try {
@@ -120,6 +159,7 @@ export class ShowdownClient extends EventEmitter {
       const data = JSON.parse(text.slice(1));
 
       if (data.actionsuccess) {
+        this.loggedIn = true;
         this.send(`|/trn ${this.config.username},0,${data.assertion}`);
       } else {
         throw new Error(`Login failed: ${data.assertion || 'Unknown error'}`);
@@ -169,7 +209,7 @@ export class ShowdownClient extends EventEmitter {
   }
 
   private isLoggedIn(): boolean {
-    return false;
+    return this.loggedIn;
   }
 
   isConnected(): boolean {

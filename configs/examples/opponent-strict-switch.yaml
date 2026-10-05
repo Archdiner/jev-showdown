@@ -1,0 +1,7 @@
+name: opponent-strict-switch
+extends: ../champion.yaml
+opponentModel:
+  setInference:
+    id: strict
+  behavior:
+    id: switch-prone

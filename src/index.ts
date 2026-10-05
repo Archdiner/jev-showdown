@@ -1,4 +1,8 @@
 export { Bot } from './bot/bot.js';
+export { buildBot } from './config/bot.js';
+export { specForAlias } from './config/aliases.js';
+export { ENV_PROFILES } from './config/env.js';
+export type { BotSpec, LiveBattleBridge } from './config/interfaces.js';
 export { ShowdownClient } from './client/showdown-client.js';
 export { BattleLogger } from './learning/battle-logger.js';
 export { SelfPlayHarness } from './learning/self-play.js';

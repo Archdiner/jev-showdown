@@ -1,0 +1,9 @@
+name: advisor-jev-tiebreak
+extends: ../champion.yaml
+advisor:
+  params:
+    enabled: true
+    blend: tiebreak
+    trigger:
+      mode: gap
+      gap: 50

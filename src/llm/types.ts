@@ -1,6 +1,6 @@
 import type { Action, GameState } from '../types/index.js';
 
-export type BlendMode = 'off' | 'prior' | 'tiebreaker';
+export type BlendMode = 'off' | 'prior' | 'tiebreaker' | 'veto-blunders';
 
 export interface BlendConfig {
   /** Default is off. Champion stays off; a gate challenger opts in. */
@@ -11,6 +11,8 @@ export interface BlendConfig {
   tieEpsilon: number;
   /** How many leading search actions are sent to the advisor. */
   topK: number;
+  /** Advisor score at or below this is vetoed when mode is `veto-blunders`. */
+  blunderThreshold?: number;
 }
 
 export const DEFAULT_BLEND_CONFIG: BlendConfig = {
@@ -86,6 +88,6 @@ export interface RankedCandidate {
 export interface BlendOutcome {
   action: Action;
   ranked: RankedCandidate[];
-  source: 'search' | 'prior' | 'tiebreaker';
+  source: 'search' | 'prior' | 'tiebreaker' | 'veto-blunders';
   degraded: boolean;
 }

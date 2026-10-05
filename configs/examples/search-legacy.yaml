@@ -1,0 +1,4 @@
+name: search-legacy
+extends: ../champion.yaml
+search:
+  id: legacy

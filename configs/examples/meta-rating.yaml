@@ -1,0 +1,12 @@
+name: meta-rating
+extends: ../champion.yaml
+metaController:
+  id: rating
+  params:
+    ratingBands:
+      - min: 0
+        max: 1400
+        agentId: balanced
+      - min: 1400
+        max: 3000
+        searchDepth: 2

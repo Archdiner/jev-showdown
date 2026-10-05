@@ -1,5 +1,9 @@
 # Changelog
 
+## Config layer
+
+Bots are built only with `buildBot(config)`. The same file and configId are used in self-play, the gate, diagnostics, the local server, and the ladder. Env profiles change time limits, logging, and LLM permission, not the strategy. `npm run exp` runs, sweeps, ablates, and compares configs. Sweeps use win rate and the dev position set. Held-out positions and live results are checked by the gatekeeper and are not tuning targets. A loss becomes a general mechanism or eval term. The gate is still the only promotion path.
+
 ## LLM layer (branch `cursor/llm-layer`)
 
 Search stays in charge. Two models sit beside it and can be turned off:

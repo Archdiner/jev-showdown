@@ -1,0 +1,6 @@
+name: search-risk-averse
+extends: ../champion.yaml
+search:
+  params:
+    risk: risk-averse
+    variancePenalty: 0.5

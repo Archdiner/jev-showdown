@@ -1,0 +1,14 @@
+name: meta-archetype
+extends: ../champion.yaml
+metaController:
+  id: archetype
+  params:
+    archetypes:
+      setup:
+        agentId: attrition
+      hazard:
+        searchDepth: 2
+      offense:
+        agentId: hyper-offense
+      balanced:
+        searchDepth: 1

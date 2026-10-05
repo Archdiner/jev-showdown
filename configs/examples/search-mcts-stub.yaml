@@ -1,0 +1,4 @@
+name: search-mcts-stub
+extends: ../champion.yaml
+search:
+  id: mcts-stub

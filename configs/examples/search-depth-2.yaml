@@ -1,0 +1,6 @@
+name: search-depth-2
+extends: ../champion.yaml
+search:
+  id: depth-n
+  params:
+    depth: 2

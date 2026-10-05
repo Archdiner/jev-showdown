@@ -1,0 +1,7 @@
+name: gate
+timeLimitMs: 2000
+network: none
+logSink: graph
+llm:
+  allowed: false
+  costCapUsd: 0
