@@ -72,6 +72,7 @@ export type EvaluatorParams = z.infer<typeof EvaluatorParamsSchema>;
 export const SetInferenceParamsSchema = z.object({
   minRoleWeight: z.number().min(0).max(1).default(0),
   maxCandidates: z.number().int().positive().default(12),
+  beliefUpdaterEnabled: z.boolean().default(false),
 }).strict();
 export type SetInferenceParams = z.infer<typeof SetInferenceParamsSchema>;
 

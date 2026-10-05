@@ -140,6 +140,7 @@ export class SetInference {
   private damageUpdates = new Map<string, number>();
   private speedChecked = false;
   private readonly rng: () => number;
+  private weatherTurns = 0;
 
   constructor(
     readonly stats: RandbatsStats,
@@ -148,9 +149,27 @@ export class SetInference {
       priorOnly?: boolean;
       seed?: number;
       beliefs?: BeliefTracker;
+      beliefUpdaterEnabled?: boolean;
     } = {},
   ) {
     this.rng = mulberry32(options.seed ?? 1);
+  }
+
+  get beliefUpdaterEnabled(): boolean {
+    return this.options.beliefUpdaterEnabled === true && !this.priorOnly;
+  }
+
+  /** Internal accessor for EvidenceUpdater. */
+  getMonEvidence(species: string): MonEvidence | undefined {
+    return this.mon(species);
+  }
+
+  /** Internal mutator for EvidenceUpdater. */
+  updateMonEvidence(species: string, updates: Partial<MonEvidence>): void {
+    const mon = this.mon(species);
+    if (!mon) return;
+    Object.assign(mon, updates);
+    this.writeBelief(this.foeSide(), mon);
   }
 
   get priorOnly(): boolean {
@@ -243,6 +262,7 @@ export class SetInference {
         : (plainOk ? 1 : SPEED_MISS),
     }));
     this.scaleItems(mon, updates);
+    this.writeBelief(this.foeSide(), mon);
   }
 
   noteDamage(obs: DamageObservation): void {
@@ -278,6 +298,7 @@ export class SetInference {
     if (!likelihood) return;
     this.damageUpdates.set(mon.species, used + 1);
     this.scaleItems(mon, [...likelihood.entries()].map(([name, factor]) => ({ name, factor })));
+    this.writeBelief(this.foeSide(), mon);
   }
 
   attachOurTeam(team: OurSet[]): void {
@@ -398,6 +419,13 @@ export class SetInference {
         if (this.tailwind[side] > 0) this.tailwind[side]--;
       }
       if (this.trickRoom > 0) this.trickRoom--;
+      if (this.weather) this.weatherTurns++;
+    }
+    if (cmd === '-weather') {
+      const newWeather = weatherName(parts[1]);
+      if (newWeather !== this.weather) {
+        this.weatherTurns = 0;
+      }
     }
   }
 

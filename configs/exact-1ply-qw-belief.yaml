@@ -1,0 +1,9 @@
+name: exact-1ply-qw-belief
+extends: exact-1ply-qw.yaml
+opponentModel:
+  setInference:
+    id: loose
+    params:
+      beliefUpdaterEnabled: true
+      minRoleWeight: 0
+      maxCandidates: 12
