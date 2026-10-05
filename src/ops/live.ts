@@ -3,6 +3,7 @@ import { fallbackChoice, LadderSession } from '../config/adapters.js';
 import { buildBot } from '../config/bot.js';
 import { resolveConcurrencyLimit } from '../client/concurrency-config.js';
 import { buildLadderGameRecord, currentGitSha, factsFromTranscript } from '../client/game-record.js';
+import { currentHostname, readBatchLabel } from '../client/run-stamp.js';
 import {
   defaultLadderRunDirs,
   publicAccountConflict,
@@ -179,10 +180,13 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
     server = ownedServer.url;
   }
   if (!server) throw new Error('ops live has no server');
-  beat(paths, 'live', 'ok', `${local ? 'local' : 'public'} ${server} user ${username}`);
+  const runId = `${Date.now()}`;
+  const batchLabel = readBatchLabel();
+  const hostname = currentHostname();
+  beat(paths, 'live', 'ok', `${local ? 'local' : 'public'} ${server} user ${username} run ${runId}`);
   console.log(local
-    ? `[ops live] ${server} username=${username} local=yes`
-    : `[ops live] ${server} username=${username} local=no`);
+    ? `[ops live] ${server} username=${username} local=yes run=${runId}`
+    : `[ops live] ${server} username=${username} local=no run=${runId}`);
   const client = new ShowdownClient({
     server,
     username,
@@ -361,6 +365,9 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
           configId: current.config.configId,
           configHash: current.session.bot.configId,
           gitSha,
+          runId,
+          batchLabel,
+          hostname,
           concurrency: slots,
           replayId: facts.replayId,
           replayUrl: facts.replayUrl,

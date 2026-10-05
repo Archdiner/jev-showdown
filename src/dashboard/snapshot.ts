@@ -4,6 +4,7 @@ import type { OpsPaths } from '../ops/paths.js';
 import { dailyReport } from '../ops/report.js';
 import { statusReport } from '../ops/status.js';
 import type { DashboardPaths } from './paths.js';
+import { groupByRunId } from '../client/game-record.js';
 import { classifyLoss, parseLog, parseSummary, runnerFromName, type GameRecord, type Heartbeat, type LatencySummary } from './parse.js';
 import { reportGames, type GameReport } from './games.js';
 import { sprt, wilson } from './stats.js';
@@ -43,6 +44,7 @@ export interface Snapshot {
     gxe: number | null;
     recent: GameRecord[];
     variants: VariantRow[];
+    byRun: ReturnType<typeof groupByRunId>;
     report: GameReport;
   };
   ops: {
@@ -162,6 +164,9 @@ function combine(a: GameRecord, b: GameRecord): GameRecord {
     configHash: pick(primary.configHash, other.configHash),
     engine: pick(primary.engine, other.engine),
     gitSha: pick(primary.gitSha, other.gitSha),
+    runId: pick(primary.runId, other.runId),
+    batchLabel: pick(primary.batchLabel, other.batchLabel),
+    hostname: pick(primary.hostname, other.hostname),
     concurrency: pick(primary.concurrency, other.concurrency),
     invalid: pick(primary.invalid, other.invalid),
     crashes: pick(primary.crashes, other.crashes),
@@ -382,6 +387,7 @@ export function buildSnapshot(paths: DashboardPaths, now = Date.now()): Snapshot
     gxe: latestGxe,
     recent: ordered,
     variants,
+    byRun: groupByRunId(unique),
     report: reportGames(unique),
   };
 

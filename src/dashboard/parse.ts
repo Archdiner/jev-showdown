@@ -43,6 +43,9 @@ export interface GameRecord {
   configHash: string | null;
   engine: string | null;
   gitSha: string | null;
+  runId: string | null;
+  batchLabel: string | null;
+  hostname: string | null;
   concurrency: number | null;
   runner: string | null;
   invalid: number | null;
@@ -160,6 +163,9 @@ export function parseLadderLine(line: string, hint: { source: string; runner: st
     configHash: null,
     engine: hint.engine,
     gitSha: null,
+    runId: null,
+    batchLabel: null,
+    hostname: null,
     concurrency: null,
     runner: hint.runner || match[1],
     invalid: Number(match[7]),
@@ -220,6 +226,9 @@ export function parseJsonRecord(row: Record<string, unknown>, hint: { source: st
       configHash: str(row.configHash) || str(row.config_hash),
       engine,
       gitSha: str(row.gitSha) || str(row.git) || str(row.commit),
+      runId: str(row.runId),
+      batchLabel: str(row.batchLabel),
+      hostname: str(row.hostname),
       concurrency: num(row.concurrency),
       runner: str(row.runner) || hint.runner,
       invalid: num(row.invalidChoices) ?? num(row.invalid),
@@ -233,7 +242,13 @@ export function parseJsonRecord(row: Record<string, unknown>, hint: { source: st
 
 export function parseSummary(value: unknown, source: string): GameRecord[] {
   if (!value || typeof value !== 'object') return [];
-  const body = value as { engine?: unknown; results?: unknown };
+  const body = value as {
+    engine?: unknown;
+    results?: unknown;
+    runId?: unknown;
+    batchLabel?: unknown;
+    hostname?: unknown;
+  };
   if (!Array.isArray(body.results)) return [];
   const games: GameRecord[] = [];
   for (const item of body.results) {
@@ -262,6 +277,9 @@ export function parseSummary(value: unknown, source: string): GameRecord[] {
       configHash: str(row.configHash),
       engine,
       gitSha: str(row.gitSha),
+      runId: str(row.runId) || str(body.runId),
+      batchLabel: str(row.batchLabel) || str(body.batchLabel),
+      hostname: str(row.hostname) || str(body.hostname),
       concurrency: num(row.concurrency),
       runner: 'ladder',
       invalid: num(row.invalidChoices),
