@@ -12,3 +12,5 @@ battles.db
 coverage/
 .vscode/
 .idea/
+live-runs/
+state/DRAIN

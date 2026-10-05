@@ -12,6 +12,15 @@ import { startLocalServer } from '../client/local-server.js';
 import { safeError, toID } from '../client/ids.js';
 import { clampConcurrency, EngineName, MAX_LADDER_CONCURRENCY, parseEngine } from '../client/engines.js';
 import { LadderQueue } from '../client/ladder-queue.js';
+import {
+  drainWatchPaths,
+  installDrainSignals,
+  LiveDrain,
+  runDrainFile,
+  runMetaFile,
+  shouldFinishSeries,
+  watchDrainFiles,
+} from '../client/drain.js';
 
 interface LadderOptions {
   games: number;
@@ -99,6 +108,13 @@ Real ladder, from a residential or university network (this process never stores
 Engines: max-damage (default; won a local head-to-head) or search (Bot.selectAction).
 --concurrency K keeps up to K battles on one login (default 1, max ${MAX_LADDER_CONCURRENCY}).
 A proxy lock, ban, or ‽/! name exits immediately and does not reconnect.
+
+Graceful drain (finish in-progress games, never /forfeit, then exit):
+  kill -USR1 <pid>    or    kill -TERM <pid>
+  touch state/DRAIN
+  touch live-runs/<runId>.drain
+The runner prints <pid> and <runId> at startup. A second SIGTERM or SIGUSR1 exits immediately.
+SIGINT still disconnects right away and does not send /forfeit.
 
 Local server, two clients, N games:
   npm run ladder -- --local --games 10 --format gen9randombattle --concurrency 4
@@ -196,14 +212,60 @@ async function playSeries(
   players: Array<{ client: ShowdownClient; driver: BattleDriver; queue: LadderQueue; name: string }>,
   games: number,
   concurrency: number,
+  drain: LiveDrain,
   onContinue?: () => void,
 ): Promise<GameSummary[]> {
   const finished = new Map<string, GameSummary>();
   return new Promise((resolve, reject) => {
     const waves = Math.ceil(games / Math.max(1, concurrency));
-    const timer = setTimeout(() => {
+    let settled = false;
+    let timer = setTimeout(onTimeout, Math.max(300000, waves * 180000));
+
+    function activeGames(): number {
+      return players.reduce((sum, player) => sum + player.queue.activeBattles, 0);
+    }
+
+    function succeed(): void {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      for (const player of players) player.queue.stop();
+      resolve([...finished.values()]);
+    }
+
+    function onTimeout(): void {
+      if (drain.isDraining) {
+        console.warn(`[ladder] stopped waiting with ${activeGames()} game(s) still in progress`);
+        succeed();
+        return;
+      }
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       reject(new Error(`Timed out after ${finished.size}/${games} games`));
-    }, Math.max(300000, waves * 180000));
+    }
+
+    const tryClose = () => {
+      if (!shouldFinishSeries({
+        finished: finished.size,
+        requested: games,
+        draining: drain.isDraining,
+        active: activeGames(),
+      })) return;
+      succeed();
+    };
+
+    const stopSearching = () => {
+      for (const player of players) player.queue.drain();
+    };
+
+    drain.onDrain(reason => {
+      console.log(`[ladder] draining (${reason}); in-progress games will finish`);
+      stopSearching();
+      clearTimeout(timer);
+      timer = setTimeout(onTimeout, 30 * 60 * 1000);
+      tryClose();
+    });
 
     const consider = (summary: GameSummary) => {
       if (finished.has(summary.battleId)) return;
@@ -213,40 +275,37 @@ async function playSeries(
         `turns=${summary.turns} invalid=${summary.invalidChoices} crashes=${summary.crashes} ` +
         `fallbacks=${summary.fallbacks} elo=${summary.eloAfter ?? 'n/a'}`,
       );
-      if (finished.size >= games) {
-        for (const player of players) player.queue.stop();
-        finishIfDrained();
+      if (finished.size >= games || drain.isDraining) {
+        stopSearching();
+        tryClose();
         return;
       }
       for (const player of players) player.queue.fill();
       onContinue?.();
     };
 
-    const finishIfDrained = () => {
-      if (finished.size < games) return;
-      if (players.some(player => player.queue.activeBattles > 0)) return;
-      clearTimeout(timer);
-      for (const player of players) player.queue.stop();
-      resolve([...finished.values()]);
-    };
-
     for (const player of players) {
       player.driver.on('gameEnd', (summary: GameSummary) => {
         player.queue.noteEnd(summary.battleId);
         if (finished.has(summary.battleId)) {
-          if (finished.size < games) player.queue.fill();
-          else finishIfDrained();
+          if (finished.size < games && !drain.isDraining) player.queue.fill();
+          else tryClose();
           return;
         }
         consider(summary);
       });
+    }
+    if (drain.isDraining) {
+      stopSearching();
+      tryClose();
+      return;
     }
     for (const player of players) player.queue.fill();
     onContinue?.();
   });
 }
 
-async function runLocalSeries(opts: LadderOptions): Promise<GameSummary[]> {
+async function runLocalSeries(opts: LadderOptions, drain: LiveDrain): Promise<GameSummary[]> {
   console.log(`[ladder] starting local pokemon-showdown on port ${opts.port}`);
   const server = await startLocalServer(opts.port);
   const shutdown = async () => {
@@ -286,6 +345,7 @@ async function runLocalSeries(opts: LadderOptions): Promise<GameSummary[]> {
       ],
       opts.games,
       opts.concurrency,
+      drain,
     );
 
     await alpha.driver.stop();
@@ -298,7 +358,7 @@ async function runLocalSeries(opts: LadderOptions): Promise<GameSummary[]> {
   }
 }
 
-async function runRemote(opts: LadderOptions): Promise<GameSummary[]> {
+async function runRemote(opts: LadderOptions, drain: LiveDrain): Promise<GameSummary[]> {
   const local = opts.local;
   const username = opts.username || (local ? 'BotAlpha' : process.env.SHOWDOWN_USERNAME || '');
   const password = local ? '' : (process.env.SHOWDOWN_PASSWORD || '');
@@ -335,6 +395,7 @@ async function runRemote(opts: LadderOptions): Promise<GameSummary[]> {
     [{ client: player.client, driver: player.driver, queue: player.queue, name: username }],
     opts.games,
     opts.concurrency,
+    drain,
     opts.challenge
       ? () => player.client.challenge(opts.challenge, opts.format)
       : undefined,
@@ -345,7 +406,7 @@ async function runRemote(opts: LadderOptions): Promise<GameSummary[]> {
   return summaries;
 }
 
-function report(summaries: GameSummary[], opts: LadderOptions): void {
+function report(summaries: GameSummary[], opts: LadderOptions, drain?: LiveDrain): void {
   const invalidChoices = summaries.reduce((sum, game) => sum + game.invalidChoices, 0);
   const crashes = summaries.reduce((sum, game) => sum + game.crashes, 0);
   const fallbacks = summaries.reduce((sum, game) => sum + game.fallbacks, 0);
@@ -359,6 +420,8 @@ function report(summaries: GameSummary[], opts: LadderOptions): void {
     opponentEngine: opts.opponentEngine,
     concurrency: opts.concurrency,
     local: opts.local,
+    drained: drain?.isDraining ?? false,
+    drainReason: drain?.drainReason ?? null,
     invalidChoices,
     crashes,
     fallbacks,
@@ -371,6 +434,11 @@ function report(summaries: GameSummary[], opts: LadderOptions): void {
   fs.writeFileSync(out, JSON.stringify(reportBody, null, 2));
   console.log(`[ladder] games=${summaries.length} invalid=${invalidChoices} crashes=${crashes} fallbacks=${fallbacks} mismatches=${mismatches}`);
   console.log(`[ladder] summary ${out}`);
+  if (drain?.isDraining) {
+    console.log(`[ladder] drained (${drain.drainReason}) after ${summaries.length}/${opts.games} games`);
+    if (invalidChoices > 0 || crashes > 0) process.exitCode = 1;
+    return;
+  }
   if (invalidChoices > 0 || crashes > 0 || summaries.length < opts.games) {
     process.exitCode = 1;
   }
@@ -480,10 +548,46 @@ async function main(): Promise<void> {
   console.log('[ladder] loading randbats data');
   await dataLoader.load(gen9RandomBattle);
 
-  const summaries = opts.local && !opts.server && !opts.accept && !opts.challenge
-    ? await runLocalSeries(opts)
-    : await runRemote(opts);
-  report(summaries, opts);
+  const session = openDrain(opts.engine);
+  try {
+    const summaries = opts.local && !opts.server && !opts.accept && !opts.challenge
+      ? await runLocalSeries(opts, session.drain)
+      : await runRemote(opts, session.drain);
+    report(summaries, opts, session.drain);
+  } finally {
+    session.close();
+  }
+}
+
+function openDrain(engine: string): { drain: LiveDrain; close(): void } {
+  const runId = `${Date.now()}`;
+  const drain = new LiveDrain();
+  const meta = runMetaFile(runId);
+  fs.mkdirSync(path.dirname(meta), { recursive: true });
+  fs.writeFileSync(meta, JSON.stringify({
+    runId,
+    pid: process.pid,
+    engine,
+    drainFile: runDrainFile(runId),
+    globalDrainFile: 'state/DRAIN',
+  }, null, 2));
+  console.log(`[ladder] pid=${process.pid} run=${runId}`);
+  console.log(`[ladder] drain: kill -USR1 ${process.pid}`);
+  console.log(`[ladder] drain: kill -TERM ${process.pid}`);
+  console.log('[ladder] drain: touch state/DRAIN');
+  console.log(`[ladder] drain: touch live-runs/${runId}.drain`);
+  const stopSignals = installDrainSignals(signal => drain.request(signal));
+  const watcher = watchDrainFiles(drainWatchPaths(runId), file => {
+    console.log(`[ladder] drain file ${file}`);
+    drain.request(`file:${file}`);
+  });
+  return {
+    drain,
+    close() {
+      watcher.stop();
+      stopSignals();
+    },
+  };
 }
 
 main().catch(err => {
