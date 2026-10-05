@@ -17,6 +17,14 @@ const FILES: Record<string, string> = {
   mcts: 'configs/examples/search-mcts-stub.yaml',
   simple1ply: 'configs/champion.yaml',
   robust: 'configs/champion.yaml',
+  hybrid: 'configs/hybrid.yaml',
+  'hybrid-full': 'configs/hybrid.yaml',
+  'hybrid-plan': 'configs/hybrid-plan.yaml',
+  'hybrid-core': 'configs/hybrid-core.yaml',
+  'hybrid-every-qwen': 'configs/hybrid-every-qwen.yaml',
+  'hybrid-every-qwen-wide': 'configs/hybrid-every-qwen-wide.yaml',
+  'hybrid-every-opus': 'configs/hybrid-every-opus.yaml',
+  'hybrid-every-grok': 'configs/hybrid-every-grok.yaml',
 };
 
 export function specForAlias(id: string, env: EnvName = 'selfplay'): BotSpec {

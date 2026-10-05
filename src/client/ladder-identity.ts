@@ -67,6 +67,20 @@ export function readActiveChampions(graphPath: string): ChampionLabel[] {
 }
 
 export function builtinIdentity(engine: EngineName, gitSha: string | null): LadderIdentity {
+  if (engine === 'hybrid') {
+    const configPath = 'configs/hybrid.yaml';
+    const loaded = loadConfig(configPath);
+    return Object.freeze({
+      source: 'builtin',
+      configId: loaded.configId,
+      configHash: loaded.configId,
+      gitSha,
+      configPath,
+      engine,
+      championConfigPath: configPath,
+      reason: null,
+    });
+  }
   return Object.freeze({
     source: 'builtin',
     configId: ladderConfigId(engine),

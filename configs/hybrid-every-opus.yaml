@@ -1,0 +1,8 @@
+name: hybrid-every-opus
+extends: hybrid-every-qwen.yaml
+hybrid:
+  id: layers
+  params:
+    model: anthropic/claude-opus-5.5
+    effort: low
+    maxTokens: 4000

@@ -1,0 +1,17 @@
+name: hybrid-every-qwen
+extends: hybrid.yaml
+search:
+  id: hybrid
+  params:
+    timeBudgetMs: 8000
+hybrid:
+  id: layers
+  params:
+    plan: false
+    opponent: false
+    judgment: true
+    everyTurn: true
+    margin: 0.75
+    model: alibaba/qwen3.8-27b
+    effort: medium
+    maxTokens: 10000

@@ -1,0 +1,26 @@
+name: hybrid
+extends: champion.yaml
+search:
+  id: hybrid
+  params:
+    depth: 1
+    samples: 1
+    timeBudgetMs: 7000
+hybrid:
+  id: layers
+  params:
+    worlds: 4
+    samples: 1
+    tera: true
+    maxActions: 8
+    maxReplies: 3
+    regretIterations: 24
+    plan: true
+    opponent: true
+    judgment: true
+    margin: 0.75
+    planEvery: 4
+    model: alibaba/qwen3.8-27b
+    # Opus is the optional planner (effort low). Qwen on Cerebras returns inside a turn.
+    plannerModel: alibaba/qwen3.8-27b
+    maxTokens: 10000

@@ -16,6 +16,26 @@ export function otherSide(side: SideId): SideId {
   return side === 'p1' ? 'p2' : 'p1';
 }
 
+const PLAIN_MOVE = /^move \d+$/;
+
+export function isTeraChoice(choice: string): boolean {
+  return choice.endsWith(' terastallize');
+}
+
+/**
+ * `move N terastallize` for each plain move the request already allows.
+ * Callers that must not burn Tera, including the champion, leave this off.
+ */
+export function appendTeraChoices(battle: Battle, sideId: SideId, choices: string[]): string[] {
+  const req = battle.getSide(sideId).activeRequest as { active?: Array<{ canTerastallize?: string }> } | null;
+  if (!req?.active?.[0]?.canTerastallize) return choices;
+  const extra: string[] = [];
+  for (const choice of choices) {
+    if (PLAIN_MOVE.test(choice)) extra.push(`${choice} terastallize`);
+  }
+  return extra.length ? [...choices, ...extra] : choices;
+}
+
 /** Revival Blessing's follow-up must target a fainted teammate. */
 function isReviving(side: { active: Array<{ position: number } | null>; slotConditions?: Array<Record<string, unknown>> }): boolean {
   const active = side.active[0];
@@ -35,7 +55,7 @@ export function moveSlotIndex(choice: string): number {
 /**
  * Legal choice strings taken from the side's active request.
  * Switches are included unless the pokemon is strictly trapped.
- * `tera` adds `move N terastallize` for each enabled move.
+ * Tera lines are included only when `options.tera` is set.
  */
 export function legalChoices(battle: Battle, sideId: SideId, options?: { tera?: boolean }): string[] {
   const side = battle.getSide(sideId);
@@ -72,7 +92,12 @@ export function legalChoices(battle: Battle, sideId: SideId, options?: { tera?: 
       if (mon && !mon.fainted && !mon.isActive) choices.push(`switch ${i + 1}`);
     }
   }
-  return choices;
+  return options?.tera ? appendTeraChoices(battle, sideId, choices) : choices;
+}
+
+/** True when `battle.choose` would accept the string, including a Tera move. */
+export function isPlayableChoice(battle: Battle, sideId: SideId, choice: string): boolean {
+  return legalChoices(battle, sideId, { tera: isTeraChoice(choice) }).includes(choice);
 }
 
 export function cloneBattle(battle: Battle): Battle {
@@ -145,7 +170,7 @@ export function hpEval(battle: Battle, sideId: SideId): number {
 }
 
 export function safeChoose(battle: Battle, sideId: SideId, choice: string): boolean {
-  const legal = legalChoices(battle, sideId, { tera: choice.includes('terastallize') });
+  const legal = legalChoices(battle, sideId, { tera: isTeraChoice(choice) });
   if (legal.length === 0) return true;
   const pick = legal.includes(choice) ? choice : legal[0];
   try {

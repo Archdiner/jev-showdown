@@ -171,7 +171,10 @@ export function pickBestLegal(state: GameState, legal: Action[]): Action {
 
 /** Strip tera if the request no longer allows it, without changing the move. */
 export function sanitizeAction(action: Action, request: any, legal: Action[]): Action | null {
-  if (isActionLegal(action, request) && legal.some(candidate => sameAction(candidate, action))) {
+  const listed = legal.some(candidate => sameAction(candidate, action));
+  const teraOfListed = action.type === 'move' && action.terastallize
+    && legal.some(candidate => sameAction(candidate, { type: 'move', moveIndex: action.moveIndex }));
+  if (isActionLegal(action, request) && (listed || teraOfListed)) {
     return action;
   }
   if (action.type === 'move' && action.terastallize) {

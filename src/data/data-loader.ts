@@ -23,7 +23,7 @@ export class DataLoader {
   private format?: Format;
   private loadedManifest?: DataManifest;
 
-  private constructor() {}
+  constructor(private readonly dataDir?: string) {}
 
   static getInstance(): DataLoader {
     if (!DataLoader.instance) {
@@ -61,7 +61,7 @@ export class DataLoader {
     if (this.loaded && this.loadedManifest) return this.loadedManifest;
 
     this.format = format;
-    const override = options?.dir ?? options?.dataDir;
+    const override = options?.dir ?? options?.dataDir ?? this.dataDir;
     const dir = override ?? dataDir();
     const setsPath = path.join(dir, 'gen9-sets.json');
     const statsPath = path.join(dir, 'gen9-stats.json');

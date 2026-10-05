@@ -13,9 +13,12 @@ import { register } from '../registry.js';
 import { SearchParamsSchema, type SearchParams } from '../schema.js';
 import { z } from 'zod';
 import type { GamePlan } from '../interfaces.js';
+import type { HybridParams } from '../schema.js';
+import type { RandbatsStats } from '../../types/index.js';
 import type { BehaviorImpl } from './opponent.js';
 import type { EvalImpl } from './evaluator.js';
 import { otherSide } from './battle.js';
+import { createHybridSearch } from '../../engine/hybrid/search.js';
 
 export interface SearchTrace {
   choice: string;
@@ -35,6 +38,12 @@ export interface SearchCtx {
   variantId?: string;
   /** Wall-clock deadline. Search returns the ranking it has when this passes. */
   deadlineMs?: number;
+  /** Sampled-world knobs. Set only for the hybrid search id. */
+  hybrid?: HybridParams;
+  llmAllowed?: boolean;
+  llmCostCapUsd?: number;
+  /** Test override. Production reads the randbats table. */
+  randbats?: RandbatsStats;
 }
 
 export interface SearchImpl {
@@ -43,7 +52,7 @@ export interface SearchImpl {
   search(battle: Battle, side: SideId, ctx: SearchCtx): Promise<SearchTrace>;
 }
 
-const ALGORITHMS = ['greedy-1ply', 'expectimax', 'depth-n', 'mcts-stub', 'random', 'max-damage', 'legacy', QUICK_WIN_SEARCH_ID] as const;
+const ALGORITHMS = ['greedy-1ply', 'expectimax', 'depth-n', 'mcts-stub', 'random', 'max-damage', 'legacy', 'hybrid', QUICK_WIN_SEARCH_ID] as const;
 
 export const SelectiveParamsSchema = SearchParamsSchema.extend({
   topN: z.number().int().min(1).max(12).default(3),
@@ -59,11 +68,13 @@ export function registerSearch(): void {
       id,
       schema: SearchParamsSchema,
       defaults: SearchParamsSchema.parse(id === 'expectimax' ? { opponentModel: 'uniform', depth: 1 } : {}),
-      create: params => ({
-        id,
-        params,
-        search: (battle: Battle, side: SideId, ctx: SearchCtx) => runSearch(id, params, battle, side, ctx),
-      }),
+      create: params => id === 'hybrid'
+        ? createHybridSearch(params)
+        : ({
+          id,
+          params,
+          search: (battle: Battle, side: SideId, ctx: SearchCtx) => runSearch(id, params, battle, side, ctx),
+        }),
     });
   }
 

@@ -53,6 +53,28 @@ export const AgentParamsSchema = z.object({
 }).strict();
 export type AgentParams = z.infer<typeof AgentParamsSchema>;
 
+export const HybridParamsSchema = z.object({
+  worlds: z.number().int().min(1).max(16).default(4),
+  samples: z.number().int().min(1).max(8).default(1),
+  tera: z.boolean().default(true),
+  maxActions: z.number().int().min(2).max(16).default(8),
+  maxReplies: z.number().int().min(1).max(8).default(3),
+  regretIterations: z.number().int().min(1).max(64).default(24),
+  plan: z.boolean().default(false),
+  opponent: z.boolean().default(false),
+  judgment: z.boolean().default(false),
+  /** Call the model every turn. The margin still drops a pick that is too far behind the search. */
+  everyTurn: z.boolean().default(false),
+  margin: z.number().nonnegative().default(0.75),
+  planEvery: z.number().int().min(1).max(20).default(4),
+  model: z.string().min(1).default('alibaba/qwen3.8-27b'),
+  plannerModel: z.string().min(1).default('alibaba/qwen3.8-27b'),
+  /** Grok 4.7 uses `none`. Opus uses `low`. Qwen on Cerebras uses `medium`. */
+  effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh']).default('medium'),
+  maxTokens: z.number().int().positive().default(10000),
+}).strict();
+export type HybridParams = z.infer<typeof HybridParamsSchema>;
+
 export const SearchParamsSchema = z.object({
   depth: z.number().int().min(1).max(3).default(1),
   samples: z.number().int().min(1).max(16).default(1),
@@ -212,6 +234,7 @@ export const RawConfigSchema = z.object({
   advisor: RefSchema.optional(),
   models: RefSchema.optional(),
   metaController: RefSchema.optional(),
+  hybrid: RefSchema.optional(),
 }).strict();
 export type RawConfig = z.infer<typeof RawConfigSchema>;
 
@@ -242,6 +265,8 @@ export interface ResolvedConfig {
   advisor: ComponentRef<AdvisorParams>;
   models: ComponentRef<ModelsParams>;
   metaController: ComponentRef<MetaParams>;
+  /** Present only when the file sets a hybrid block. Omitted from the champion hash. */
+  hybrid?: ComponentRef<HybridParams>;
 }
 
 export const FRONTIER_CHAT = [DEFAULT_REVIEWER_MODEL_ID, 'anthropic/claude-opus-5.5', 'openai/gpt-6.1-sol'];

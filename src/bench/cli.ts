@@ -21,6 +21,9 @@ function policy(name: string): BenchPlayer {
   if (name === 'random') return { kind: 'random' };
   if (name === 'maxdamage') return { kind: 'maxdamage' };
   if (name === 'legacy') return { kind: 'legacy' };
+  if (name === 'hybrid' || name === 'hybrid-full' || name === 'hybrid-plan' || name === 'hybrid-core' || name.startsWith('hybrid-every-')) {
+    return specForAlias(name, 'ladder');
+  }
   if (name === 'exact') return { kind: 'exact', config: EXACT_1PLY };
   if (name === 'fitted' || name === 'fitted-1ply') return { kind: 'exact', config: FITTED_1PLY };
   if (name === 'fitted-depth2' || name === 'fitted-d2') return { kind: 'exact', config: FITTED_DEPTH2 };

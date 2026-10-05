@@ -28,8 +28,11 @@ function send(message: WorkerResponse): void {
 
 async function init(_config: BotConfig, engine: EngineName, championConfigPath?: string | null): Promise<void> {
   engineName = engine;
-  champion = championConfigPath ? buildBot(championConfigPath, 'ladder') : null;
-  if (champion && championConfigPath) bots.set(championConfigPath, champion);
+  const configPath = engine === 'hybrid'
+    ? (championConfigPath || 'configs/hybrid.yaml')
+    : championConfigPath;
+  champion = configPath ? buildBot(configPath, 'ladder') : null;
+  if (champion && configPath) bots.set(configPath, champion);
   await dataLoader.load(gen9RandomBattle);
   send({ type: 'ready' });
 }
@@ -72,8 +75,12 @@ async function decide(message: DecideRequest): Promise<void> {
         quickWins: routed.player.config.search.id === QUICK_WIN_SEARCH_ID,
       }
       : null;
-    const picked = await chooseLive(routed.engine, message.position, message.legal, player);
-    const known = message.legal.some(candidate => sameAction(candidate, picked.action));
+    const picked = await chooseLive(routed.engine, message.position, message.legal, player, message.searchTimeMs);
+    const plain = picked.action.type === 'move'
+      ? { type: 'move' as const, moveIndex: picked.action.moveIndex }
+      : picked.action;
+    const known = message.legal.some(candidate => sameAction(candidate, picked.action))
+      || (picked.action.type === 'move' && picked.action.terastallize && message.legal.some(candidate => sameAction(candidate, plain)));
     if (!known) {
       send({
         type: 'decision',

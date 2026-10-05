@@ -84,7 +84,10 @@ export function ladderDecisionBattle(
 ): SimBattle | null {
   const request = battle.getSide(side).activeRequest;
   if (!request || request.wait || request.teamPreview) return null;
-  return decisionBattleFromViewerLog(battle.log.join('\n'), side, request, options);
+  return decisionBattleFromViewerLog(battle.log.join('\n'), side, request, {
+    ...options,
+    turn: battle.turn,
+  });
 }
 
 /** Replay a spectator log and the side's `|request|` into the ladder's decision battle. */
@@ -92,12 +95,16 @@ export function decisionBattleFromViewerLog(
   log: string,
   side: ViewerSide,
   request: unknown,
-  options?: { quickWins?: boolean },
+  options?: { quickWins?: boolean; turn?: number },
 ): SimBattle | null {
   if (!request || typeof request !== 'object') return null;
-  const client = replayClient(log.split('\n'), side, request);
+  const raw = log.split('\n');
+  const lines = viewerLines(raw, side);
+  const client = replayClient(raw, side, request);
   try {
-    return buildDecisionBattle(livePositionFromClient(client, request, side), options);
+    const position = livePositionFromClient(client, request, side, lines);
+    if (typeof options?.turn === 'number') position.turn = options.turn;
+    return buildDecisionBattle(position, options);
   } catch {
     return null;
   } finally {

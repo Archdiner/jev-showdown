@@ -45,7 +45,7 @@ export function admissionSettings(input: {
   rampTarget?: number | null;
 }): AdmissionSettings {
   const engine = input.engine.trim().toLowerCase();
-  const grok = engine === 'grok' || engine === 'llm';
+  const grok = engine === 'grok' || engine === 'llm' || engine === 'hybrid';
   const ceiling = Math.max(1, Math.floor(input.concurrency));
   const requested = input.rampTarget == null ? ceiling : Math.floor(input.rampTarget);
   const target = Math.max(1, Math.min(requested, ceiling));
