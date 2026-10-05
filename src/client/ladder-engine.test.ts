@@ -88,7 +88,7 @@ describe('ladder engine factory', () => {
     const picked = await chooseLive('search', position, legal);
     const gate = await decide(specFromId('champion-exact-1ply'), cloneBattle(built), 'p1', new PRNG([1, 2, 3, 4] as any));
     expect(picked.action).toEqual(actionFromChoice(gate.choice));
-    expect(legalChoices(built, 'p1')).toContain(gate.choice);
+    expect(legalChoices(built, 'p1', { tera: true })).toContain(gate.choice);
 
     const damage = await chooseLive('max-damage', position, legal);
     expect(damage.action).toEqual(actionFromChoice(maxDamageChoice(cloneBattle(built), 'p1')));

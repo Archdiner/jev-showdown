@@ -16,6 +16,7 @@ import { SearchProfile } from './config.js';
 import switchProfile from '../../../experiments/switch-depth2/config.json' with { type: 'json' };
 import { rankedSwitches } from './matchup.js';
 import { koProbability } from './ko-groups.js';
+import { applyFoePrior, progressPenalty } from './public.js';
 import { pruneReplies, replyDistribution, WeightedChoice } from './switch-model.js';
 import { teamEval } from './team-eval.js';
 import { fittedTeamEval } from './fitted-eval.js';
@@ -74,6 +75,18 @@ export interface ExactConfig {
    * searches leave this unset and finish the node, matching main.
    */
   rolloutDeadline?: boolean;
+  /** Search `move N terastallize` whenever the request still allows it. */
+  tera?: boolean;
+  /**
+   * Demote immune attacks, Choice locks a revealed bench walls, and
+   * status moves when the foe's current moves KO us before we move.
+   */
+  progress?: boolean;
+  /**
+   * Fill an incomplete foe movepool from one randbats set before the
+   * rollout. A four-move set is left as it is.
+   */
+  foePrior?: boolean;
 }
 
 /** True when the deadline has passed and the search already has a score to return. */
@@ -82,6 +95,18 @@ export function searchBudgetExpired(deadlineMs: number | undefined, scored: numb
 }
 
 export const EXACT_1PLY: ExactConfig = {
+  depth: 1,
+  opponentModel: 'max-damage',
+  evalMode: 'hp',
+  errorAsLoss: false,
+  samples: 8,
+  tera: true,
+  progress: true,
+  foePrior: true,
+};
+
+/** Frozen copy of the previous live 1-ply policy, for screens. */
+export const EXACT_1PLY_PREVIOUS: ExactConfig = {
   depth: 1,
   opponentModel: 'max-damage',
   evalMode: 'hp',
@@ -200,7 +225,7 @@ function evaluate(battle: Battle, sideId: SideId, config: ExactConfig): number {
 }
 
 function opponentDistribution(battle: Battle, opp: SideId, config: ExactConfig): WeightedChoice[] {
-  const legal = legalChoices(battle, opp);
+  const legal = legalChoices(battle, opp).filter(choice => !choice.includes('terastallize'));
   if (legal.length === 0) return [];
   if (config.opponentModel === 'switch') {
     return pruneReplies(
@@ -248,7 +273,7 @@ export function reseed(battle: Battle, sample: number): void {
 }
 
 function ownChoices(battle: Battle, sideId: SideId, config: ExactConfig, atRoot: boolean): string[] {
-  const legal = legalChoices(battle, sideId);
+  const legal = legalChoices(battle, sideId, { tera: atRoot && config.tera === true });
   const cap = config.deeperChoices ?? 0;
   if (atRoot || cap <= 0 || legal.length <= cap) return legal;
   const moves = legal.filter(choice => choice.startsWith('move '));
@@ -268,12 +293,13 @@ function ownChoices(battle: Battle, sideId: SideId, config: ExactConfig, atRoot:
  */
 export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig = EXACT_1PLY): SearchTrace {
   if (config.selective && config.depth >= 2) return selectiveDepth2(battle, sideId, config);
-  const mine = ownChoices(battle, sideId, config, true);
+  const working = config.foePrior ? withFoePrior(battle, sideId) : battle;
+  const mine = ownChoices(working, sideId, config, true);
   if (mine.length === 0) return { choice: 'default', scores: [] };
   if (mine.length === 1) return { choice: mine[0], scores: [{ choice: mine[0], score: 0 }] };
 
-  const snap = snapshot(battle);
-  const replies = opponentDistribution(battle, otherSide(sideId), config);
+  const snap = snapshot(working);
+  const replies = opponentDistribution(working, otherSide(sideId), config);
   const switchReply = replies.find(reply => reply.choice.startsWith('switch')) || null;
   const modal = replies.reduce<WeightedChoice | null>((best, reply) => {
     if (!best || reply.prob > best.prob) return reply;
@@ -290,9 +316,10 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
   for (const choice of mine) {
     if (searchBudgetExpired(config.deadlineMs, scores.length)) break;
     const parts = scoreChoice(snap, sideId, choice, config.depth, config, config.samples ?? 1, replies, switchReply?.choice || null);
-    scores.push({ choice, score: parts.mean });
-    if (parts.mean > bestScore) {
-      bestScore = parts.mean;
+    const score = parts.mean - (config.progress ? progressPenalty(working, sideId, choice) : 0);
+    scores.push({ choice, score });
+    if (score > bestScore) {
+      bestScore = score;
       best = choice;
     }
     if (parts.againstSwitch != null && parts.againstSwitch > bestAgainstSwitch) {
@@ -307,6 +334,12 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
     predictedSwitch,
     answersPredictedSwitch: predictedSwitch && best === answer,
   };
+}
+
+function withFoePrior(battle: Battle, sideId: SideId): Battle {
+  const clone = cloneFromSnapshot(snapshot(battle));
+  applyFoePrior(clone, sideId);
+  return clone;
 }
 
 export interface ChoiceScore {

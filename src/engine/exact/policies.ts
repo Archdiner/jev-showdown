@@ -73,12 +73,17 @@ async function legacyChoice(battle: Battle, side: SideId, legal: string[]): Prom
 
 function choiceToAction(choice: string): Action {
   if (choice.startsWith('switch')) return { type: 'switch', switchIndex: Number(choice.slice(7)) };
-  return { type: 'move', moveIndex: moveSlotIndex(choice) + 1 };
+  return {
+    type: 'move',
+    moveIndex: moveSlotIndex(choice) + 1,
+    terastallize: choice.includes('terastallize'),
+  };
 }
 
 function actionToChoice(action: Action): string {
   if (action.type === 'switch') return `switch ${action.switchIndex}`;
-  return `move ${action.moveIndex}`;
+  const tera = action.terastallize ? ' terastallize' : '';
+  return `move ${action.moveIndex}${tera}`;
 }
 
 export function specFromId(id: string): PolicySpec {
