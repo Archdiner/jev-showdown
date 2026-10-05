@@ -1,7 +1,7 @@
 import { legalChoices, safeChoose, startRandomBattle, teamsForSeed } from './battle-utils.js';
 import { EXACT_1PLY, exactSearch } from './search.js';
 
-/** Choices of exactSearch(EXACT_1PLY) on origin/main 85d9e83, seeds 1–8, four turns. */
+/** Choices of exactSearch(EXACT_1PLY) on origin/main 9cc6e63, seeds 1–8, four turns. */
 const GOLDEN: Array<{ seed: number; turns: Array<{ p1?: string; p2?: string }> }> = [
   { seed: 1, turns: [{ p1: 'switch 5', p2: 'move 2' }, { p1: 'switch 2', p2: 'switch 5' }, { p1: 'move 4', p2: 'move 3' }, { p1: 'switch 4', p2: 'switch 2' }] },
   { seed: 2, turns: [{ p1: 'switch 6', p2: 'move 3' }, { p1: 'move 1', p2: 'move 1' }, { p1: 'move 1', p2: 'switch 2' }, { p1: 'switch 6', p2: 'move 2' }] },
