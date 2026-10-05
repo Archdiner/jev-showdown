@@ -11,6 +11,7 @@ function arg(name: string, fallback: string): string {
 }
 
 function policy(name: string): PolicySpec {
+  if (name === 'jev' || name === 'jev-solo') return { kind: 'jev' };
   if (name === 'random') return { kind: 'random' };
   if (name === 'maxdamage') return { kind: 'maxdamage' };
   if (name === 'legacy') return { kind: 'legacy' };

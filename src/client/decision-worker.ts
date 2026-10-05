@@ -44,6 +44,13 @@ async function init(config: BotConfig, engine: EngineName): Promise<void> {
 async function openBattle(battleId: string): Promise<void> {
   if (battles.has(battleId) || !baseConfig) return;
   const config = freshConfig(baseConfig, baseConfig.searchTimeMs);
+  if (engineName === 'jev') {
+    const { JevSoloEngine } = await import('../llm/jev-solo/engine.js');
+    const { loadJevSoloConfig } = await import('../llm/jev-solo/config.js');
+    battles.set(battleId, { config, engine: new JevSoloEngine(loadJevSoloConfig()) });
+    return;
+  }
+
   if (engineName === 'max-damage') {
     battles.set(battleId, {
       config,
@@ -62,6 +69,15 @@ async function openBattle(battleId: string): Promise<void> {
   await bot.initialize();
   bot.startBattle(battleId);
   battles.set(battleId, { config, engine: bot });
+}
+
+function fallbackAction(state: GameState, legal: Action[]): Action {
+  if (engineName === 'jev' || legal.length === 0) return legal[0];
+  try {
+    return pickBestLegal(state, legal);
+  } catch {
+    return legal[0];
+  }
 }
 
 function closeBattle(battleId: string): void {
@@ -90,7 +106,7 @@ async function decide(message: DecideRequest): Promise<void> {
       send({
         type: 'decision',
         id: message.id,
-        action: pickBestLegal(message.state, message.legal),
+        action: fallbackAction(message.state, message.legal),
         score: null,
         timeMs: Date.now() - started,
         fallback: true,
@@ -109,12 +125,7 @@ async function decide(message: DecideRequest): Promise<void> {
     });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    let action = message.legal[0];
-    try {
-      action = pickBestLegal(message.state, message.legal);
-    } catch {
-      // legal[0] is still a request-checked choice
-    }
+    const action = fallbackAction(message.state, message.legal);
     send({
       type: 'decision',
       id: message.id,
