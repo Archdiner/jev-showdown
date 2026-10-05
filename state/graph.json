@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "exported_at": 1791156205669,
+  "exported_at": 1791158863681,
   "nodes": [
     {
       "id": "goal-ladder-1",
@@ -529,6 +529,48 @@
       "rationale": "Random-battle search scores are often close. A fast evaluation model can score the same top-K actions and either nudge the ranking (prior) or break ties, without replacing search.",
       "expected_effect": "Challenger Elo vs the frozen panel rises by about +10 if the prior corrects systematic mistakes, with p99 turn time still under 2s.",
       "test_plan": "Submit experiment-llm-jev-prior against the champion through the gate. Challenger config is experiments/llm-jev-prior/config.json (blend mode prior, weight 0.15, topK 8). Champion stays useLLMPrior false. Paired games, SPRT elo0=0 elo1=+10 alpha=beta=0.05."
+    },
+    {
+      "id": "task-live-ladder",
+      "type": "Task",
+      "status": "done",
+      "title": "Live ladder client",
+      "description": "Websocket ladder client with login, per-room state, legal choices, JSONL logs, replay save, --engine, and --concurrency.",
+      "commit": "6e9948c",
+      "created_at": 1791158863402,
+      "updated_at": 1791158863402,
+      "acceptance_criteria": [
+        "Official action.php login",
+        "One engine instance and JSONL file per battle room",
+        "--concurrency 4 plays at least 12 local games with 0 invalid choices and 0 crashes",
+        "--engine max-damage or search"
+      ],
+      "files": [
+        "src/cli/ladder.ts",
+        "src/client/showdown-client.ts",
+        "src/client/battle-driver.ts",
+        "src/client/decision-client.ts",
+        "src/client/ladder-queue.ts"
+      ]
+    },
+    {
+      "id": "result-live-ladder-c4",
+      "type": "Result",
+      "status": "done",
+      "title": "Concurrency 4 local verification",
+      "description": "15 gen9randombattle games on one login pair at concurrency 4, engine max-damage. invalid=0 crashes=0 fallbacks=0 mismatches=0. Peak of 4 simultaneous battles. Earlier head-to-head: max-damage 12, search 1.",
+      "commit": "6e9948c",
+      "created_at": 1791158863402,
+      "updated_at": 1791158863402,
+      "metrics": {
+        "invalid_choices": 0,
+        "crashes": 0,
+        "fallbacks": 0,
+        "mismatches": 0,
+        "concurrency": 4,
+        "games": 15
+      },
+      "game_count": 15
     }
   ],
   "edges": [
@@ -699,6 +741,20 @@
       "to_node": "decision-loss-reviewer-grok-4-7",
       "type": "supports",
       "created_at": 1791156182746
+    },
+    {
+      "id": "task-live-ladder-produced-result-live-ladder-c4",
+      "from_node": "task-live-ladder",
+      "to_node": "result-live-ladder-c4",
+      "type": "produced",
+      "created_at": 1791158863402
+    },
+    {
+      "id": "task-live-ladder-supports-goal-ladder-1",
+      "from_node": "task-live-ladder",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791158863402
     }
   ]
 }
