@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { allocate, nextCircuit } from './allocate.js';
+import { countsFromLiveGames, loadVariantPool, thompsonDraw } from './variants.js';
 import { runAnalyst } from './analyst.js';
 import { openDb } from './db.js';
 import { runFactory } from './factory.js';
@@ -72,6 +73,58 @@ describe('traffic and circuit breakers', () => {
     expect(dropped.reason).toContain('rating drop');
   });
 });
+
+describe('variant thompson sampling', () => {
+  test('an empty pool draws nothing and a single arm is returned', () => {
+    expect(thompsonDraw([], {}, () => 0.5)).toBeNull();
+    expect(thompsonDraw([{ id: 'switch-depth2' }], {}, () => 0.1)).toBe('switch-depth2');
+    const paths = tempPaths();
+    expect(loadVariantPool(paths)).toEqual([]);
+    fs.writeFileSync(paths.variants, '{');
+    expect(loadVariantPool(paths)).toEqual([]);
+    fs.writeFileSync(paths.variants, JSON.stringify({
+      variants: [
+        { id: 'switch-depth2', alpha: 1, beta: 1 },
+        { id: 'switch-depth2' },
+        { id: 'llm-blocks', alpha: 2, beta: 1 },
+        { id: '' },
+      ],
+    }));
+    expect(loadVariantPool(paths).map(arm => arm.id)).toEqual(['switch-depth2', 'llm-blocks']);
+  });
+
+  test('wins pull later draws toward that arm', () => {
+    const arms = [{ id: 'a' }, { id: 'b' }];
+    const counts = countsFromLiveGames([
+      { variantId: 'a', winner: 'win' },
+      { variantId: 'a', winner: 'win' },
+      { variantId: 'a', winner: 'win' },
+      { variantId: 'a', winner: 'tie' },
+      { variantId: 'b', winner: 'loss' },
+      { variantId: 'b', winner: 'loss' },
+      { variantId: 'b', winner: 'loss' },
+    ]);
+    expect(counts.a).toEqual({ wins: 3, losses: 0 });
+    expect(counts.b).toEqual({ wins: 0, losses: 3 });
+    const rng = mulberry32(7);
+    let picks = 0;
+    const draws = 200;
+    for (let i = 0; i < draws; i++) {
+      if (thompsonDraw(arms, counts, rng) === 'a') picks++;
+    }
+    expect(picks).toBeGreaterThan(draws * 0.8);
+  });
+});
+
+function mulberry32(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 describe('queue', () => {
   test('enqueue is idempotent and a finished job is not claimed again', () => {
@@ -177,6 +230,7 @@ describe('local ladder dry run', () => {
       diagnostics: { passed: 1, failed: 0, total: 1 },
     });
     expect(verdict.labeled).toBe(true);
+    fs.writeFileSync(paths.variants, JSON.stringify({ variants: [{ id: 'switch-depth2' }, { id: 'llm-blocks' }] }));
     const server = await startLocalServer(0);
     try {
       const summary = await runLive({
@@ -192,9 +246,10 @@ describe('local ladder dry run', () => {
       });
       expect(summary.games).toBe(1);
       expect(summary.rating).not.toBeUndefined();
-      const games = readJsonl<{ rating: number; gxe: number; configId: string }>(paths.liveGames);
+      const games = readJsonl<{ rating: number; gxe: number; configId: string; variantId?: string }>(paths.liveGames);
       expect(games).toHaveLength(1);
       expect(games[0].gxe).toEqual(expect.any(Number));
+      expect(['switch-depth2', 'llm-blocks']).toContain(games[0].variantId);
       const screen = statusReport(paths);
       expect(screen).toContain('rating');
       expect(screen).toContain('queue');

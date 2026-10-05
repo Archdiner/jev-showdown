@@ -52,7 +52,8 @@ export class LadderSession {
 
   constructor(
     readonly bot: BuiltBot,
-    private bridge: LiveBattleBridge = inputLogBridge
+    private bridge: LiveBattleBridge = inputLogBridge,
+    private variantId?: string
   ) {}
 
   attach(room: string, battle: Battle, side: SideId): void {
@@ -67,7 +68,12 @@ export class LadderSession {
         `No sim battle for ${room}. cursor/live-client must implement LiveBattleBridge or call attach().`
       );
     }
-    const decision = await this.bot.decide({ battle, side: known?.side ?? side, gameId: room });
+    const decision = await this.bot.decide({
+      battle,
+      side: known?.side ?? side,
+      gameId: room,
+      variantId: this.variantId,
+    });
     return decision.choice;
   }
 }

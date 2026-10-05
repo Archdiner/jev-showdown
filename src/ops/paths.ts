@@ -12,6 +12,7 @@ export interface OpsPaths {
   regressionSuite: string;
   priors: string;
   pool: string;
+  variants: string;
 }
 
 const DEFAULT_ROOT = path.join(process.cwd(), 'state', 'ops');
@@ -36,6 +37,7 @@ export function opsPaths(root = process.env.OPS_DIR || DEFAULT_ROOT): OpsPaths {
     regressionSuite: path.join(root, 'regression-suite.jsonl'),
     priors,
     pool: path.join(root, 'mined-pool.json'),
+    variants: path.join(root, 'variants.json'),
   };
 }
 

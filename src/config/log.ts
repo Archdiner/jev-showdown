@@ -19,6 +19,7 @@ export interface DecisionLogRecord {
   ms: number;
   advisorCalled: boolean;
   overBudget: boolean;
+  variantId?: string;
 }
 
 export interface GameLogRecord {

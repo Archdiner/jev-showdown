@@ -30,6 +30,8 @@ export interface SearchCtx {
   plan: GamePlan | null;
   rng: PRNG;
   rating?: number;
+  /** Live Thompson arm for this game, when the facility drew one. */
+  variantId?: string;
 }
 
 export interface SearchImpl {

@@ -62,6 +62,8 @@ export interface DecisionInput {
   gameId?: string;
   seed?: number;
   rating?: number;
+  /** Arm drawn for this live game. Search and advisors may read it; they do not have to. */
+  variantId?: string;
 }
 
 export interface AttributedDecision {
@@ -77,6 +79,7 @@ export interface AttributedDecision {
   gamePlan: GamePlan | null;
   predictedSwitch?: boolean;
   answersPredictedSwitch?: boolean;
+  variantId?: string;
 }
 
 export interface BotSpec {

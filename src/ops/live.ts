@@ -6,8 +6,9 @@ import { allocate, nextCircuit, type Allocatable, type CircuitState, clampExplor
 import { openDb } from './db.js';
 import { beat } from './heartbeat.js';
 import { readLabels } from './labels-read.js';
-import { appendJsonl, type OpsPaths } from './paths.js';
+import { appendJsonl, readJsonl, type OpsPaths } from './paths.js';
 import { inputLogFromTranscript, localSimBridge } from './sim-bridge.js';
+import { countsFromLiveGames, loadVariantPool, observeVariant, thompsonDraw, type ArmCount } from './variants.js';
 
 export interface LiveOptions {
   paths: OpsPaths;
@@ -39,11 +40,18 @@ interface LiveGameRecord {
   ts: number;
   configId: string;
   configPath: string;
+  /** Thompson arm for this game. Absent when the variant pool is empty. */
+  variantId?: string;
   winner: 'win' | 'loss' | 'tie';
   rating: number;
   gxe: number;
   inputLog: string;
   log: string;
+}
+
+interface Seat {
+  config: Allocatable;
+  variantId: string | null;
 }
 
 export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
@@ -70,6 +78,8 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   const exploreRate = clampExplore(opts.exploreRate ?? 0.15);
   const limits = { maxLosses: opts.maxLosses ?? 5, maxDrop: opts.maxDrop ?? 40, window: opts.window ?? 10 };
   const circuits = readCircuits(paths);
+  const variantPool = loadVariantPool(paths);
+  const variantCounts: Record<string, ArmCount> = countsFromLiveGames(readJsonl<LiveGameRecord>(paths.liveGames));
   process.env.JEV_LOG_DIR = paths.root;
 
   const server = opts.server || (local
@@ -87,8 +97,8 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   let gxe: number | undefined;
   let finished = 0;
   let active = 0;
-  const pending: Allocatable[] = [];
-  const sessions = new Map<string, { config: Allocatable; session: LadderSession }>();
+  const pending: Seat[] = [];
+  const sessions = new Map<string, { config: Allocatable; variantId: string | null; session: LadderSession }>();
   const transcripts = new Map<string, string[]>();
   const sides = new Map<string, 'p1' | 'p2'>();
 
@@ -109,7 +119,8 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
           if (active === 0) finish({ games: finished, rating, gxe, skipped: 'every approved config is pulled' });
           return;
         }
-        pending.push(config);
+        const variantId = thompsonDraw(variantPool, variantCounts, Math.random);
+        pending.push({ config, variantId });
         active += 1;
         client.search();
       }
@@ -151,10 +162,14 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
       if (side === 'p1' || side === 'p2') sides.set(room, side);
       let current = sessions.get(room);
       if (!current) {
-        const config = pending.shift();
-        if (!config) return;
-        const bot = buildBot(config.configPath, local ? 'local' : 'ladder');
-        current = { config, session: new LadderSession(bot, local ? localSimBridge : undefined) };
+        const seat = pending.shift();
+        if (!seat) return;
+        const bot = buildBot(seat.config.configPath, local ? 'local' : 'ladder');
+        current = {
+          config: seat.config,
+          variantId: seat.variantId,
+          session: new LadderSession(bot, local ? localSimBridge : undefined, seat.variantId ?? undefined),
+        };
         sessions.set(room, current);
       }
       void current.session.onRequest(room, request, transcript(room), side).then(choice => {
@@ -184,7 +199,9 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
           inputLog: inputLogFromTranscript(transcript(room)) || '',
           log: transcript(room).slice(-6000),
         };
+        if (current.variantId) record.variantId = current.variantId;
         appendJsonl(paths.liveGames, record);
+        observeVariant(variantCounts, current.variantId, outcome);
         circuits[current.config.configId] = nextCircuit(circuits[current.config.configId], outcome, record.rating, limits);
         writeCircuits(paths, circuits);
         beat(paths, 'live', 'ok', `${current.config.configId} ${outcome} rating ${record.rating}`);

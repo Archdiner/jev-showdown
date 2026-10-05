@@ -127,6 +127,7 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
           plan,
           rng,
           rating: input.rating,
+          variantId: input.variantId,
         });
       let scores = trace.scores.length ? trace.scores : [{ choice: trace.choice, score: 0 }];
       let choice = applyPolicies(active, input.battle, input.side, legal, plan, scores);
@@ -157,6 +158,7 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
         gamePlan: plan,
         predictedSwitch: trace.predictedSwitch,
         answersPredictedSwitch: trace.answersPredictedSwitch,
+        variantId: input.variantId,
       };
       logger.decision({
         ts: Date.now(),
@@ -174,6 +176,7 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
         ms,
         advisorCalled,
         overBudget: decision.overBudget,
+        variantId: input.variantId,
       });
       return decision;
     },
