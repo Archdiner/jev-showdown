@@ -44,28 +44,28 @@ export function registerOpponent(): void {
     layer: 'setInference',
     id: 'strict',
     schema: SetInferenceParamsSchema,
-    defaults: { minRoleWeight: 0.15, maxCandidates: 4 },
+    defaults: { minRoleWeight: 0.15, maxCandidates: 4, beliefUpdaterEnabled: false },
     create: params => inference('strict', params),
   });
   register<SetInferenceParams>({
     layer: 'setInference',
     id: 'loose',
     schema: SetInferenceParamsSchema,
-    defaults: { minRoleWeight: 0, maxCandidates: 12 },
+    defaults: { minRoleWeight: 0, maxCandidates: 12, beliefUpdaterEnabled: false },
     create: params => inference('loose', params),
   });
   register<SetInferenceParams>({
     layer: 'setInference',
     id: 'unconstrained',
     schema: SetInferenceParamsSchema,
-    defaults: { minRoleWeight: 0, maxCandidates: 32 },
+    defaults: { minRoleWeight: 0, maxCandidates: 32, beliefUpdaterEnabled: false },
     create: params => inference('unconstrained', params),
   });
   register<SetInferenceParams>({
     layer: 'setInference',
     id: 'calibrated',
     schema: SetInferenceParamsSchema,
-    defaults: { minRoleWeight: 0, maxCandidates: 12 },
+    defaults: { minRoleWeight: 0, maxCandidates: 12, beliefUpdaterEnabled: false },
     create: params => calibrated(params),
   });
 

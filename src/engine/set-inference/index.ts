@@ -140,6 +140,7 @@ export class SetInference {
   private damageUpdates = new Map<string, number>();
   private speedChecked = false;
   private readonly rng: () => number;
+  private weatherTurns = 0;
 
   constructor(
     readonly stats: RandbatsStats,
@@ -148,9 +149,27 @@ export class SetInference {
       priorOnly?: boolean;
       seed?: number;
       beliefs?: BeliefTracker;
+      beliefUpdaterEnabled?: boolean;
     } = {},
   ) {
     this.rng = mulberry32(options.seed ?? 1);
+  }
+
+  get beliefUpdaterEnabled(): boolean {
+    return this.options.beliefUpdaterEnabled === true && !this.priorOnly;
+  }
+
+  /** Internal accessor for EvidenceUpdater. */
+  getMonEvidence(species: string): MonEvidence | undefined {
+    return this.mon(species);
+  }
+
+  /** Internal mutator for EvidenceUpdater. */
+  updateMonEvidence(species: string, updates: Partial<MonEvidence>): void {
+    const mon = this.mon(species);
+    if (!mon) return;
+    Object.assign(mon, updates);
+    this.writeBelief(this.foeSide(), mon);
   }
 
   get priorOnly(): boolean {
@@ -243,6 +262,7 @@ export class SetInference {
         : (plainOk ? 1 : SPEED_MISS),
     }));
     this.scaleItems(mon, updates);
+    this.writeBelief(this.foeSide(), mon);
   }
 
   noteDamage(obs: DamageObservation): void {
@@ -278,6 +298,7 @@ export class SetInference {
     if (!likelihood) return;
     this.damageUpdates.set(mon.species, used + 1);
     this.scaleItems(mon, [...likelihood.entries()].map(([name, factor]) => ({ name, factor })));
+    this.writeBelief(this.foeSide(), mon);
   }
 
   attachOurTeam(team: OurSet[]): void {
@@ -398,6 +419,13 @@ export class SetInference {
         if (this.tailwind[side] > 0) this.tailwind[side]--;
       }
       if (this.trickRoom > 0) this.trickRoom--;
+      if (this.weather) this.weatherTurns++;
+    }
+    if (cmd === '-weather') {
+      const newWeather = weatherName(parts[1]);
+      if (newWeather !== this.weather) {
+        this.weatherTurns = 0;
+      }
     }
   }
 
@@ -564,7 +592,10 @@ export class SetInference {
     this.readHp(parsed.position, hp);
     if (!this.isFoe(parsed.side)) return;
     this.ensure(name, level);
-    if (countsAsSwitch) this.stayMoves.set(name, []);
+    if (countsAsSwitch) {
+      // Reset the Choice lock tracking when switching out
+      this.stayMoves.set(name, []);
+    }
     this.writeBelief(parsed.side, this.mons.get(name)!);
     if (countsAsSwitch) this.turnActions.push({ side: parsed.side, kind: 'switch', species: name, priority: 0 });
   }
@@ -726,7 +757,15 @@ export class SetInference {
   private onItem(ident: string | undefined, item: string | undefined, from: string | undefined): void {
     const parsed = this.ident(ident);
     if (!parsed || !item || !this.isFoe(parsed.side)) return;
-    if (from && /knocked off|stole|tricked/i.test(from)) return;
+    // Handle item changes from Trick, Switcheroo, Knock Off, or item consumption
+    const fromLower = (from || '').toLowerCase();
+    if (fromLower.includes('trick') || fromLower.includes('switcheroo') || fromLower.includes('knockoff') || fromLower.includes('knocked off')) {
+      // Item was swapped or knocked off - reset the stay moves to allow re-inferring Choice
+      const species = this.positions.get(parsed.position);
+      if (species) this.stayMoves.set(species, []);
+      return;
+    }
+    if (fromLower.includes('stole') || fromLower.includes('tricked')) return;
     const species = this.positions.get(parsed.position);
     if (species) this.seeItem(species, item);
   }

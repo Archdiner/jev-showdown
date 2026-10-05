@@ -1,7 +1,7 @@
 [
   {
     "id": "champion",
-    "configId": "064cad7ec4ed0241",
+    "configId": "14ac06cc08d1f609",
     "seed": 4,
     "choice": "move 2",
     "scores": [
@@ -45,7 +45,7 @@
   },
   {
     "id": "champion",
-    "configId": "064cad7ec4ed0241",
+    "configId": "14ac06cc08d1f609",
     "seed": 11,
     "choice": "move 1",
     "scores": [
@@ -89,7 +89,7 @@
   },
   {
     "id": "weighted",
-    "configId": "f16851694ac7c704",
+    "configId": "cd9b91769e82819e",
     "seed": 4,
     "choice": "move 2",
     "scores": [
@@ -133,7 +133,7 @@
   },
   {
     "id": "weighted",
-    "configId": "f16851694ac7c704",
+    "configId": "cd9b91769e82819e",
     "seed": 11,
     "choice": "move 2",
     "scores": [
@@ -177,7 +177,7 @@
   },
   {
     "id": "depth-2",
-    "configId": "c1e3efb394d9801d",
+    "configId": "462761ffdbc7280c",
     "seed": 4,
     "choice": "move 2",
     "scores": [
@@ -221,7 +221,7 @@
   },
   {
     "id": "depth-2",
-    "configId": "c1e3efb394d9801d",
+    "configId": "462761ffdbc7280c",
     "seed": 11,
     "choice": "move 1",
     "scores": [
