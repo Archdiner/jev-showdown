@@ -6,7 +6,53 @@ Four long-running commands share the graph and the logs: `npm run ops -- factory
 
 ## Config layer
 
-Bots are built only with `buildBot(config)`. The same file and configId are used in self-play, the gate, diagnostics, the local server, and the ladder. Env profiles change time limits, logging, and LLM permission, not the strategy. `npm run exp` runs, sweeps, ablates, and compares configs. Sweeps use win rate and the dev position set. Held-out positions and live results are checked by the gatekeeper and are not tuning targets. A loss becomes a general mechanism or eval term. The gate is still the only promotion path.
+Bots are built only with `buildBot(config)`. The same file and configId are used in self-play, the gate, and diagnostics. Env profiles change time limits, logging, and LLM permission, not the strategy. `npm run exp` runs, sweeps, ablates, and compares configs. Sweeps use win rate and the dev position set. Held-out positions and live results are checked by the gatekeeper and are not tuning targets. A loss becomes a general mechanism or eval term. Promotion stays `npm run gate`.
+
+## Exact 1-ply search promoted
+
+The old 3-ply search was not looking at the live battle. It built a fresh one. After a knockout the live request is a switch, and the copy still asked both players for a move. The switch was rejected. Every rejection was scored as a loss, so the search was grading crashes instead of HP. Cloning the live battle and scoring HP fraction plus faints fixes that.
+
+Two smaller bugs sat on the same path. `@smogon/calc` only applies an ability when it is given the display name, and the helper passed the sim id (`levitate`), so Levitate was ignored and Earthquake into a floating Pokémon was scored as a hit. The helper also ignored accuracy, so an 80% move was scored as if it always landed. And the full evaluator treated `0` HP as "HP unknown" and assumed a full bar, which made a knockout look worse than chip damage. Fainted HP is now `0`. In-progress full-eval scores are divided by the material weight so a finished game (±1000) outranks a lead.
+
+The promoted engine is a 1-ply clone of the live `@pkmn/sim` battle. The opponent reply is the accuracy-weighted max-damage move. Eight RNG draws are averaged. The score is HP fraction plus faint counts. Hand-written diagnostics are smoke alarms only (22/22 on a fixed seed). They do not promote.
+
+Gate verdict **promoted** at commit `fcd9c92`. Seed 1, 150 pairs, sides swapped, 300 games per opponent:
+
+| Opponent | Result | 95% CI |
+| --- | --- | --- |
+| random | 98.0% (294W-5L-1T) | 95.7%–99.1% |
+| max-damage | 78.0% (234W-66L-0T) | 73.0%–82.3% |
+
+Invalid choices 0, crashes 0, timeouts 0, fallback 0, p99 turn time 190ms. No turn was over 2 seconds.
+
+Generated positions, labeled by a depth-2 search rather than by hand. Dev may be inspected. Held-out was not opened while tuning.
+
+| Split | Positions | Replay snapshots | Search agrees with depth 2 | Max-damage agrees |
+| --- | --- | --- | --- | --- |
+| dev | 230 | 30 | 38.7% (89/230) | 23.9% (55/230) |
+| held-out | 217 | 17 | 37.8% (82/217) | 21.2% (46/217) |
+
+The forced-win slice is empty. These positions are the first turn where both sides can act, not endgames, so no move wins against every reply. Replay rows are the ones this sim still matched to the spectator log. Many high-Elo logs diverge on turn 1 because the team generator version differs, and those were dropped.
+
+Adding pieces back, same harness, seed 1. The champion row is the gate. The other rows are smaller samples. `exact:` rows use one RNG draw.
+
+| Engine | vs random | vs max-damage | p99 |
+| --- | --- | --- | --- |
+| 1-ply, max-damage reply, HP, 8 draws (champion) | 98.0% of 300 | 78.0% of 300 | 190ms |
+| 1-ply, max-damage reply, HP, 1 draw | 98.8% of 80 | 82.5% of 80 | 60ms |
+| 1-ply, uniform reply, HP, 1 draw | 97.5% of 80 | 67.5% of 80 | 198ms |
+| 2-ply, max-damage reply, HP, 1 draw | 96.7% of 30 | 80.0% of 30 | 333ms |
+| 3-ply, max-damage reply, HP, 1 draw | 100% of 8 | not run | 2400ms |
+| 1-ply full eval, before the 0 HP fix | 72.5% of 40 | 5.0% of 40 | 50ms |
+| 1-ply full eval, after the 0 HP fix | 100% of 40 | 77.5% of 40 | 98ms |
+
+Depth 3 is over the 2 second guardrail, so it is not the champion. Averaging every opponent move, including bad switches, is weaker against a max-damage opponent (67.5% of 80) than predicting that opponent's best move. The full evaluator was the step that collapsed, and the 0 HP check was why.
+
+`npm run ladder -- --engine search` still calls `Bot.selectAction`. This promotion does not switch the live client.
+
+## Ladder lock check
+
+`npm run ladder -- --check` logs in and prints whether the account is named or locked and the current gen9randombattle rating, then exits. A proxy, ban, or lock popup, or a `‽` / `!` name in `|updateuser|`, exits immediately and does not reconnect. A close that follows that popup is not retried. `send()` no longer throws from timers; the ladder queue waits until the socket is logged in. Setup on a Mac is `npm install`, export `SHOWDOWN_USERNAME` and `SHOWDOWN_PASSWORD`, then `--check`.
 
 ## LLM layer (branch `cursor/llm-layer`)
 
@@ -22,6 +68,14 @@ Search stays in charge. Two models sit beside it and can be turned off:
 - `npm run graph -- status` - Current champion, metrics, frontier tasks
 - `npm run graph -- next` - Exactly one task with measurable acceptance criteria
 - View `state/graph.html` for visual graph
+
+---
+
+# Cloud Agent Run (Oct 4, 2026)
+
+## Live ladder client
+
+`npm run ladder -- --games N --format gen9randombattle --engine search --concurrency K` plays the real ladder with `SHOWDOWN_USERNAME` and `SHOWDOWN_PASSWORD`. `--engine max-damage` is the default (it won a local head-to-head against `search`). `--engine search` still calls `Bot.selectAction`. `--concurrency` (default 1, max 5) runs that many battles on one login, each with its own state, worker, and JSONL file. `npm run ladder -- --local --games N --concurrency K` plays two clients on a local MIT Pokémon Showdown server. See AGENTS.md for the exact commands. Search and eval were not changed.
 
 ---
 

@@ -1,5 +1,15 @@
 import { GameState, EvaluationResult, PokemonBelief } from '../types/index.js';
 
+/**
+ * 0 HP is a faint, not a missing value. Only an unknown HP (no number at
+ * all) is treated as a full bar.
+ */
+function hpFraction(mon: PokemonBelief): number {
+  if (!mon.maxHp || mon.maxHp <= 0) return 0;
+  if (mon.currentHp == null) return 1;
+  return Math.max(0, mon.currentHp) / mon.maxHp;
+}
+
 export interface EvaluatorWeights {
   material: number;
   hp: number;
@@ -51,24 +61,17 @@ export class Evaluator {
   private evaluateMaterial(state: GameState): number {
     let myValue = 0;
     let oppValue = 0;
-    
-    // Count alive mons and weight by HP
+
     for (const mon of state.myTeam) {
       if (mon.species === 'Unknown') continue;
-      const hpPercent = mon.currentHp && mon.maxHp 
-        ? mon.currentHp / mon.maxHp 
-        : 1.0;
-      myValue += hpPercent;
+      myValue += hpFraction(mon);
     }
-    
+
     for (const mon of state.opponentTeam) {
       if (mon.species === 'Unknown') continue;
-      const hpPercent = mon.currentHp && mon.maxHp
-        ? mon.currentHp / mon.maxHp
-        : 1.0;
-      oppValue += hpPercent;
+      oppValue += hpFraction(mon);
     }
-    
+
     return (myValue - oppValue) * 2;
   }
 

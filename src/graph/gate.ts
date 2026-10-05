@@ -3,6 +3,7 @@ import { specForAlias } from '../config/aliases.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
 import { GameJob, GameResult as BenchGame } from '../bench/game.js';
 import { runGamesParallel } from '../bench/pool.js';
+import { heldOutPasses, scoreSplit, SplitScore } from '../engine/exact/position-sets.js';
 
 // Gate configuration (encode metrics here, not prose)
 export const GATE_CONFIG = {
@@ -59,12 +60,26 @@ export interface BotMetrics {
   eval_swings: number[]; // for blunder detection
 }
 
+export interface HeldOutCheck {
+  ok: boolean;
+  reason: string;
+  positions?: number;
+  replay_positions?: number;
+  forced_win_hit?: number;
+  forced_win_total?: number;
+  deep_hit?: number;
+  deep_total?: number;
+  max_damage_deep_hit?: number;
+  max_damage_deep_total?: number;
+}
+
 export interface TournamentResult {
   challenger_id: string;
   champion_id: string;
   games: GameResult[];
   panel_results: PanelResult[];
   guardrails: GuardrailsCheck;
+  held_out: HeldOutCheck;
   verdict: 'promoted' | 'rejected';
   reason: string;
 }
@@ -147,8 +162,12 @@ export class Gate {
     console.log(`State mismatches: ${guardrails.state_mismatches} (max ${GATE_CONFIG.guardrails.max_state_mismatches})`);
     console.log(`Passed: ${guardrails.passed ? 'YES' : 'NO'}`);
 
+    const heldOut = this.scoreHeldOut();
+    console.log(`\n=== Held-out ===`);
+    console.log(heldOut.reason);
+
     // Make verdict
-    const { verdict, reason } = this.makeVerdict(panelResults, guardrails);
+    const { verdict, reason } = this.makeVerdict(panelResults, guardrails, heldOut);
     
     console.log(`\n=== Verdict: ${verdict.toUpperCase()} ===`);
     console.log(`Reason: ${reason}\n`);
@@ -160,6 +179,7 @@ export class Gate {
       games,
       panel_results: panelResults,
       guardrails,
+      held_out: heldOut,
       verdict,
       reason,
     });
@@ -170,6 +190,7 @@ export class Gate {
       games,
       panel_results: panelResults,
       guardrails,
+      held_out: heldOut,
       verdict,
       reason,
     };
@@ -340,7 +361,38 @@ export class Gate {
     };
   }
 
-  private makeVerdict(panelResults: PanelResult[], guardrails: GuardrailsCheck): { verdict: 'promoted' | 'rejected'; reason: string } {
+  /**
+   * Held-out positions are scored in aggregate. A missing file, a missed
+   * forced win, or deep-search agreement below the max-damage line rejects
+   * the challenger. Hand-written diagnostics are not consulted.
+   */
+  private scoreHeldOut(): HeldOutCheck {
+    let score: SplitScore;
+    try {
+      score = scoreSplit('heldout');
+    } catch {
+      return { ok: false, reason: 'held-out set was not generated' };
+    }
+    const verdict = heldOutPasses(score);
+    return {
+      ok: verdict.ok,
+      reason: verdict.reason,
+      positions: score.positions,
+      replay_positions: score.replayPositions,
+      forced_win_hit: score.forcedWin.hit,
+      forced_win_total: score.forcedWin.total,
+      deep_hit: score.deepAgree.hit,
+      deep_total: score.deepAgree.total,
+      max_damage_deep_hit: score.maxDamageDeepAgree.hit,
+      max_damage_deep_total: score.maxDamageDeepAgree.total,
+    };
+  }
+
+  private makeVerdict(
+    panelResults: PanelResult[],
+    guardrails: GuardrailsCheck,
+    heldOut: HeldOutCheck,
+  ): { verdict: 'promoted' | 'rejected'; reason: string } {
     // Hard guardrails must pass
     if (!guardrails.passed) {
       return {
@@ -367,11 +419,18 @@ export class Gate {
       };
     }
 
+    if (!heldOut.ok) {
+      return {
+        verdict: 'rejected',
+        reason: heldOut.reason,
+      };
+    }
+
     // Promoted!
     const avgEloGain = panelResults.reduce((sum, r) => sum + r.elo_diff, 0) / panelResults.length;
     return {
       verdict: 'promoted',
-      reason: `+${avgEloGain.toFixed(1)} avg Elo vs panel (${improvements.length}/${panelResults.length} improved)`,
+      reason: `+${avgEloGain.toFixed(1)} avg Elo vs panel (${improvements.length}/${panelResults.length} improved). ${heldOut.reason}`,
     };
   }
 
@@ -413,6 +472,7 @@ export class Gate {
         games: result.games.length,
         panel_results: result.panel_results,
         guardrails: result.guardrails,
+        held_out: result.held_out,
       },
     };
 

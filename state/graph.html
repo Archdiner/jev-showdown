@@ -13,49 +13,9 @@
 </head>
 <body>
   <h1>Development Graph</h1>
-  <p>Exported: 2026-10-05T00:45:21.433Z</p>
+  <p>Exported: 2026-10-05T00:34:48.073Z</p>
   
-  <h2>Nodes (34)</h2>
-  
-    <div class="node Hypothesis done">
-      <strong>Hypothesis: A declarative config can be tuned without fitting examples</strong>
-      <div>Status: done</div>
-      <div>Strategy is a hashed config. Tuning uses game win rate and the dev position set. Held-out positions and live results are only a check.</div>
-      <div>Commit: <code>0b73451</code></div>
-      
-    </div>
-  
-    <div class="node Task done">
-      <strong>Task: Ship the config and experiment layer</strong>
-      <div>Status: done</div>
-      <div>buildBot is the only factory. Env profiles cannot change the move.</div>
-      <div>Commit: <code>0b73451</code></div>
-      
-    </div>
-  
-    <div class="node Experiment done">
-      <strong>Experiment: Smoke champion config against maxdamage</strong>
-      <div>Status: done</div>
-      <div>configs/experiments/smoke.yaml. 10 seeds, both sides. Not a promotion.</div>
-      <div>Commit: <code>0b73451</code></div>
-      
-    </div>
-  
-    <div class="node Result done">
-      <strong>Result: Smoke 19/20 vs maxdamage</strong>
-      <div>Status: done</div>
-      <div>configId 374a5edff9039983 vs 13e462ed6f0a0b5c. 19 wins, 0 invalid, 0 crashes. Held-out agreement 0 on 2 positions. Live results file absent. Obvious-move guardrail 21/21 on this run; two earlier process starts scored 19/21 and 20/21, so that suite is not a tuning score. Dev-set agreement of 1-ply against the depth-2 labels was 7/22.</div>
-      <div>Commit: <code>0b73451</code></div>
-      <div>Metrics: {"wins":19,"invalid":0,"crashes":0,"held_out_positions":2,"held_out_agreement":0,"dev_agreement_1ply":0.3181818181818182,"guardrail_passed":21,"guardrail_total":21}</div>
-    </div>
-  
-    <div class="node Decision done">
-      <strong>Decision: buildBot is the only factory</strong>
-      <div>Status: done</div>
-      <div>Promotion remains npm run gate. The experiment CLI does not promote.</div>
-      <div>Commit: <code>0b73451</code></div>
-      
-    </div>
+  <h2>Nodes (39)</h2>
   
     <div class="node Goal open">
       <strong>Goal: #1 on gen9randombattle ladder</strong>
@@ -63,14 +23,6 @@
       <div>Achieve top ranking through exact mechanics and strategic play</div>
       
       
-    </div>
-  
-    <div class="node Champion active">
-      <strong>Champion: Champion v0: Exact Sim</strong>
-      <div>Status: active</div>
-      <div>3-ply expectiminimax with 0% fallback, exact @pkmn/sim mechanics</div>
-      <div>Commit: <code>f209c86</code></div>
-      <div>Metrics: {"win_rate_vs_random":1,"invalid_choices":0,"crashes":0,"timeouts":0,"p99_turn_time_ms":1500,"fallback_rate":0,"state_mismatches":0}</div>
     </div>
   
     <div class="node Decision done">
@@ -241,6 +193,22 @@
       
     </div>
   
+    <div class="node Result done">
+      <strong>Result: Gate: promoted</strong>
+      <div>Status: done</div>
+      <div>+448.0 avg Elo vs panel (2/2 improved). held-out forced-win 0/0, deep agreement 37.8% vs max-damage 21.2% (17 replay positions)</div>
+      
+      <div>Metrics: {"verdict":"promoted","games":600,"panel_results":[{"opponent":"random-v1","challenger_elo":2176.0784320114053,"champion_elo":1500,"elo_diff":676.0784320114053,"win_rate":0.98,"ci_lower":0.9570598132699448,"ci_upper":0.9908024939322289,"games":300,"significant_improvement":true,"significant_regression":false},{"opponent":"maxdamage-v1","challenger_elo":1719.8687687473098,"champion_elo":1500,"elo_diff":219.8687687473098,"win_rate":0.78,"ci_lower":0.7297464012422271,"ci_upper":0.8231732779590409,"games":300,"significant_improvement":true,"significant_regression":false}],"guardrails":{"passed":true,"invalid_choices":0,"crashes":0,"timeouts":0,"p99_turn_time_ms":190,"fallback_rate":0,"state_mismatches":0},"held_out":{"ok":true,"reason":"held-out forced-win 0/0, deep agreement 37.8% vs max-damage 21.2% (17 replay positions)","positions":217,"replay_positions":17,"forced_win_hit":0,"forced_win_total":0,"deep_hit":82,"deep_total":217,"max_damage_deep_hit":46,"max_damage_deep_total":217}}</div>
+    </div>
+  
+    <div class="node Champion superseded">
+      <strong>Champion: Champion v0: Exact Sim</strong>
+      <div>Status: superseded</div>
+      <div>3-ply expectiminimax with 0% fallback, exact @pkmn/sim mechanics</div>
+      <div>Commit: <code>f209c86</code></div>
+      <div>Metrics: {"win_rate_vs_random":1,"invalid_choices":0,"crashes":0,"timeouts":0,"p99_turn_time_ms":1500,"fallback_rate":0,"state_mismatches":0}</div>
+    </div>
+  
     <div class="node DataSource active">
       <strong>DataSource: Vercel AI Gateway model catalog</strong>
       <div>Status: active</div>
@@ -282,24 +250,95 @@
     </div>
   
     <div class="node Task done">
-      <strong>Task: Operations facilities</strong>
+      <strong>Task: Live ladder client</strong>
       <div>Status: done</div>
-      <div>factory, gatekeeper, live, and analyst share the graph and the JSONL logs. Only the gatekeeper writes champion and live-approved.</div>
+      <div>Websocket ladder client with login, per-room state, legal choices, JSONL logs, replay save, --engine, and --concurrency.</div>
+      <div>Commit: <code>6e9948c</code></div>
       
+    </div>
+  
+    <div class="node Result done">
+      <strong>Result: Concurrency 4 local verification</strong>
+      <div>Status: done</div>
+      <div>15 gen9randombattle games on one login pair at concurrency 4, engine max-damage. invalid=0 crashes=0 fallbacks=0 mismatches=0. Peak of 4 simultaneous battles. Earlier head-to-head: max-damage 12, search 1.</div>
+      <div>Commit: <code>6e9948c</code></div>
+      <div>Metrics: {"invalid_choices":0,"crashes":0,"fallbacks":0,"mismatches":0,"concurrency":4,"games":15}</div>
+    </div>
+  
+    <div class="node Experiment done">
+      <strong>Experiment: Exact 1-ply HP search</strong>
+      <div>Status: done</div>
+      <div>Clone the live battle with toJSON/fromJSON. Opponent line is the @smogon/calc max-damage move. Eval is HP fraction plus faint counts. Terminal win is +1000.</div>
+      <div>Commit: <code>fcd9c92</code></div>
+      
+    </div>
+  
+    <div class="node Hypothesis done">
+      <strong>Hypothesis: Rebuilt battles scored as losses</strong>
+      <div>Status: done</div>
+      <div>The 3-ply search is weak because it rebuilds a battle and scores a rejected choice as a loss, not because HP eval is too small.</div>
+      <div>Commit: <code>64c946b</code></div>
+      
+    </div>
+  
+    <div class="node Champion active">
+      <strong>Champion: Champion: exact 1-ply HP search</strong>
+      <div>Status: active</div>
+      <div>1-ply exact @pkmn/sim battle clone. Opponent line is the accuracy-weighted max-damage move. Eight RNG draws are averaged. Eval is HP fraction plus faint counts.</div>
+      
+      <div>Metrics: {"win_rate_vs_random":0.98,"win_rate_vs_maxdamage":0.78,"invalid_choices":0,"crashes":0,"timeouts":0,"p99_turn_time_ms":190,"fallback_rate":0,"state_mismatches":0}</div>
+    </div>
+  
+    <div class="node Result done">
+      <strong>Result: Ablation of exact battle-clone search</strong>
+      <div>Status: done</div>
+      <div>Same seed start 1. Champion row is 150 pairs. Other rows are smaller samples of the same harness. Full eval before the 0 HP fix is the row that collapses.</div>
+      <div>Commit: <code>fcd9c92</code></div>
+      <div>Metrics: {"rows":[{"name":"1-ply max-damage HP, 8 samples","vs_random":"98.0% (294-5-1/300)","vs_max":"78.0% (234-66-0/300)","p99_ms":190},{"name":"1-ply max-damage HP, 1 sample","vs_random":"98.8% (79-0-1/80)","vs_max":"82.5% (66-14-0/80)","p99_ms":60},{"name":"1-ply uniform HP, 1 sample","vs_random":"97.5% (78-1-1/80)","vs_max":"67.5% (54-26-0/80)","p99_ms":198},{"name":"2-ply max-damage HP, 1 sample","vs_random":"96.7% (29-1-0/30)","vs_max":"80.0% (24-6-0/30)","p99_ms":333},{"name":"3-ply max-damage HP, 1 sample","vs_random":"100% (8-0-0/8)","vs_max":"not run","p99_ms":2400},{"name":"1-ply full eval before 0 HP fix","vs_random":"72.5% (29-11-0/40)","vs_max":"5.0% (2-38-0/40)","p99_ms":50},{"name":"1-ply full eval after 0 HP fix","vs_random":"100% (40-0-0/40)","vs_max":"77.5% (31-9-0/40)","p99_ms":98}]}</div>
+    </div>
+  
+    <div class="node Hypothesis done">
+      <strong>Hypothesis: 0 HP was scored as a full health bar</strong>
+      <div>Status: done</div>
+      <div>The full evaluator treated a falsy currentHp as unknown and assumed 100% HP.</div>
+      <div>Commit: <code>fcd9c92</code></div>
+      
+    </div>
+  
+    <div class="node Learning active">
+      <strong>Learning: 0 HP is a faint</strong>
+      <div>Status: active</div>
+      <div>Do not use a truthiness check on current HP.</div>
+      <div>Commit: <code>fcd9c92</code></div>
+      
+    </div>
+  
+    <div class="node Learning active">
+      <strong>Learning: Search the live battle clone</strong>
+      <div>Status: active</div>
+      <div>A rebuilt battle that rejects the live choice is not a loss.</div>
+      <div>Commit: <code>fcd9c92</code></div>
       
     </div>
   
   
-  <h2>Edges (28)</h2>
+    <div class="node Task done">
+      <strong>Operations facilities</strong>
+      <div>Status: done</div>
+      <div>factory, gatekeeper, live, and analyst share the graph and the JSONL logs. Only the gatekeeper writes champion and live-approved.</div>
+      <div>Commit: <code>2b4d7a8</code></div>
+    </div>
+  
+  <h2>Edges (35)</h2>
   <ul>
   
-    <li>exp-config-layer --[tests]--> hyp-config-layer</li>
+    <li>challenger-exact-1ply --[tests]--> hyp-rebuild-scored-as-loss</li>
   
-    <li>exp-config-layer --[produced]--> result-config-smoke</li>
+    <li>challenger-exact-1ply --[produced]--> result-challenger-exact-1ply-1791160362753</li>
   
-    <li>task-config-layer --[tests]--> hyp-config-layer</li>
+    <li>champion-exact-1ply --[supersedes]--> champion-v0</li>
   
-    <li>decision-config-factory --[supports]--> hyp-config-layer</li>
+    <li>challenger-exact-1ply --[supersedes]--> champion-v0</li>
   
     <li>decision-typescript-pkmn --[supports]--> goal-ladder-1</li>
   
@@ -348,6 +387,20 @@
     <li>task-llm-layer --[produced]--> experiment-llm-jev-prior</li>
   
     <li>task-llm-layer --[supports]--> decision-loss-reviewer-grok-4-7</li>
+  
+    <li>task-live-ladder --[produced]--> result-live-ladder-c4</li>
+  
+    <li>task-live-ladder --[supports]--> goal-ladder-1</li>
+  
+    <li>challenger-exact-1ply --[produced]--> result-ablation-exact-search</li>
+  
+    <li>hyp-fainted-hp-scored-full --[derived_from]--> learning-fainted-hp</li>
+  
+    <li>learning-fainted-hp --[supports]--> goal-ladder-1</li>
+  
+    <li>learning-rebuild-scored-as-loss --[supports]--> goal-ladder-1</li>
+  
+    <li>hyp-rebuild-scored-as-loss --[derived_from]--> learning-rebuild-scored-as-loss</li>
   
   </ul>
 </body>

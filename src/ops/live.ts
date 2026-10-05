@@ -72,12 +72,15 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   const circuits = readCircuits(paths);
   process.env.JEV_LOG_DIR = paths.root;
 
+  const server = opts.server || (local
+    ? 'ws://127.0.0.1:8000/showdown/websocket'
+    : 'wss://sim3.psim.us/showdown/websocket');
   const client = new ShowdownClient({
+    server,
     username,
     password,
     format: 'gen9randombattle',
     local,
-    server: opts.server || (local ? 'ws://127.0.0.1:8000/showdown/websocket' : undefined),
   });
 
   let rating: number | undefined;
@@ -86,6 +89,8 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   let active = 0;
   const pending: Allocatable[] = [];
   const sessions = new Map<string, { config: Allocatable; session: LadderSession }>();
+  const transcripts = new Map<string, string[]>();
+  const sides = new Map<string, 'p1' | 'p2'>();
 
   const timeoutMs = opts.timeoutMs ?? 120_000;
   const summary = await new Promise<LiveSummary>((resolve, reject) => {
@@ -106,16 +111,44 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
         }
         pending.push(config);
         active += 1;
-        client.searchBattle();
+        client.search();
       }
     };
 
-    client.on('rating', (update: { rating: number; gxe: number }) => {
-      rating = update.rating;
-      gxe = update.gxe;
+    const transcript = (room: string) => (transcripts.get(room) || []).join('\n');
+
+    client.on('rating', (update: { after?: number; rating?: number; gxe?: number }) => {
+      if (typeof update.after === 'number') rating = update.after;
+      if (typeof update.rating === 'number') rating = update.rating;
+      if (typeof update.gxe === 'number') gxe = update.gxe;
     });
 
-    client.on('request', (room: string, request: unknown) => {
+    client.on('line', (room: string, line: string) => {
+      if (room) {
+        const bucket = transcripts.get(room) || [];
+        bucket.push(line);
+        transcripts.set(room, bucket);
+      }
+      if (line.startsWith('|rating|')) {
+        const parts = line.split('|');
+        if (parts[2]) rating = Number(parts[2]);
+        if (parts[3]) gxe = Number(parts[3]);
+      }
+      if (line.startsWith('|player|') && room) {
+        const parts = line.split('|');
+        const slot = parts[2];
+        const name = (parts[3] || '').trim();
+        if ((slot === 'p1' || slot === 'p2') && classify(name, username) === 'win') sides.set(room, slot);
+      }
+      if (!line.startsWith('|request|') || !room) return;
+      let request: { side?: { id?: string } };
+      try {
+        request = JSON.parse(line.slice('|request|'.length));
+      } catch {
+        return;
+      }
+      const side = request.side?.id === 'p2' ? 'p2' : request.side?.id === 'p1' ? 'p1' : sides.get(room) ?? 'p1';
+      if (side === 'p1' || side === 'p2') sides.set(room, side);
       let current = sessions.get(room);
       if (!current) {
         const config = pending.shift();
@@ -124,15 +157,15 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
         current = { config, session: new LadderSession(bot, local ? localSimBridge : undefined) };
         sessions.set(room, current);
       }
-      const side = client.sideFor(room) ?? 'p1';
-      void current.session.onRequest(room, request, client.transcript(room), side).then(choice => {
+      void current.session.onRequest(room, request, transcript(room), side).then(choice => {
         client.choose(room, choice);
       }).catch(error => {
         beat(paths, 'live', 'error', error instanceof Error ? error.message : String(error));
       });
     });
 
-    client.on('battleEnd', (room: string, winner: string | null) => {
+    client.on('battleEndLine', (room: string, line: string) => {
+      const winner = line.startsWith('|win|') ? line.slice('|win|'.length).trim() : null;
       const current = sessions.get(room);
       sessions.delete(room);
       active = Math.max(0, active - 1);
@@ -148,8 +181,8 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
           winner: outcome,
           rating: rating ?? 1000,
           gxe: gxe ?? 50,
-          inputLog: inputLogFromTranscript(client.transcript(room)) || '',
-          log: client.transcript(room).slice(-6000),
+          inputLog: inputLogFromTranscript(transcript(room)) || '',
+          log: transcript(room).slice(-6000),
         };
         appendJsonl(paths.liveGames, record);
         circuits[current.config.configId] = nextCircuit(circuits[current.config.configId], outcome, record.rating, limits);

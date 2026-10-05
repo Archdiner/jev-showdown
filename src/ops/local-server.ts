@@ -33,7 +33,7 @@ export async function startLocalServer(port = 0): Promise<LocalServer> {
       const trn = text.match(/\/trn ([^,|]+)/);
       if (trn) {
         username = trn[1].trim();
-        socket.send(`|updateuser|${username}|1|1\n`);
+        socket.send(`|updateuser| ${username}|1|1\n`);
       }
       if (text.includes('/search')) {
         seq += 1;

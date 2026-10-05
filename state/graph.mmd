@@ -1,11 +1,5 @@
 graph TD
-  hyp-config-layer["Hypothesis: A declarative config can be tu"]
-  task-config-layer["Task: Ship the config and experiment"]
-  exp-config-layer["Experiment: Smoke champion config against "]
-  result-config-smoke["Result: Smoke 19/20 vs maxdamage"]
-  decision-config-factory["Decision: buildBot is the only factory"]
   goal-ladder-1{{"Goal: #1 on gen9randombattle ladder"}}
-  champion-v0(["Champion: Champion v0: Exact Sim"])
   decision-typescript-pkmn["Decision: TypeScript with @pkmn ecosyste"]
   decision-mit-only["Decision: MIT-only licensing"]
   decision-search-first["Decision: Search-first over LLM-first"]
@@ -27,16 +21,26 @@ graph TD
   hyp-tempo-switch-hazard-disadvantage["Hypothesis: Play faster when opponent has "]
   task-team-gen-constraints["Task: Implement team-generation cons"]
   task-strict-role-narrowing["Task: Implement strict role narrowin"]
+  result-challenger-exact-1ply-1791160362753["Result: Gate: promoted"]
+  champion-v0(["Champion: Champion v0: Exact Sim"])
   datasource-vercel-ai-gateway-models["DataSource: Vercel AI Gateway model catalo"]
   task-llm-layer["Task: LLM advisor and loss reviewer"]
   decision-loss-reviewer-grok-4-7["Decision: Loss reviewer defaults to Grok"]
   experiment-llm-jev-prior["Experiment: Challenger: Jev search prior"]
   hypothesis-jev-search-prior["Hypothesis: Jev prior on top-K search acti"]
-  task-ops-layer["Task: Operations facilities"]
-  exp-config-layer -->|tests| hyp-config-layer
-  exp-config-layer -->|produced| result-config-smoke
-  task-config-layer -->|tests| hyp-config-layer
-  decision-config-factory -->|supports| hyp-config-layer
+  task-live-ladder["Task: Live ladder client"]
+  result-live-ladder-c4["Result: Concurrency 4 local verificati"]
+  challenger-exact-1ply["Experiment: Exact 1-ply HP search"]
+  hyp-rebuild-scored-as-loss["Hypothesis: Rebuilt battles scored as loss"]
+  champion-exact-1ply(["Champion: Champion: exact 1-ply HP searc"])
+  result-ablation-exact-search["Result: Ablation of exact battle-clone"]
+  hyp-fainted-hp-scored-full["Hypothesis: 0 HP was scored as a full heal"]
+  learning-fainted-hp["Learning: 0 HP is a faint"]
+  learning-rebuild-scored-as-loss["Learning: Search the live battle clone"]
+  challenger-exact-1ply -->|tests| hyp-rebuild-scored-as-loss
+  challenger-exact-1ply -->|produced| result-challenger-exact-1ply-1791160362753
+  champion-exact-1ply -->|supersedes| champion-v0
+  challenger-exact-1ply -->|supersedes| champion-v0
   decision-typescript-pkmn -->|supports| goal-ladder-1
   decision-mit-only -->|supports| goal-ladder-1
   decision-search-first -->|supports| goal-ladder-1
@@ -61,3 +65,12 @@ graph TD
   experiment-llm-jev-prior -->|tests| hypothesis-jev-search-prior
   task-llm-layer -->|produced| experiment-llm-jev-prior
   task-llm-layer -->|supports| decision-loss-reviewer-grok-4-7
+  task-live-ladder -->|produced| result-live-ladder-c4
+  task-live-ladder -->|supports| goal-ladder-1
+  challenger-exact-1ply -->|produced| result-ablation-exact-search
+  hyp-fainted-hp-scored-full -->|derived_from| learning-fainted-hp
+  learning-fainted-hp -->|supports| goal-ladder-1
+  learning-rebuild-scored-as-loss -->|supports| goal-ladder-1
+  hyp-rebuild-scored-as-loss -->|derived_from| learning-rebuild-scored-as-loss
+
+  task-ops-layer["Task: Operations facilities"]

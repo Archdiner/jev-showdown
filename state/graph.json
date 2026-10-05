@@ -1,100 +1,7 @@
 {
   "version": "1.0",
-  "exported_at": 1791161121433,
+  "exported_at": 1791200000000,
   "nodes": [
-    {
-      "id": "hyp-config-layer",
-      "type": "Hypothesis",
-      "status": "done",
-      "title": "A declarative config can be tuned without fitting examples",
-      "description": "Strategy is a hashed config. Tuning uses game win rate and the dev position set. Held-out positions and live results are only a check.",
-      "owner": "config-layer",
-      "session": "cursor/config-layer",
-      "commit": "0b73451",
-      "created_at": 1791159959372,
-      "updated_at": 1791159959372,
-      "rationale": "A rule for one species, move, or fixture does not transfer. Generated and mined positions, split by a hash, keep sweeps off the held-out set.",
-      "expected_effect": "Any registered combination of agent, search, evaluator, opponent model, policies, context, advisor, models, and meta controller can be built with buildBot and compared on win rate plus dev-set agreement.",
-      "test_plan": "Unit tests for registry, merge, hash, env isolation, identical selfplay and local decisions, the holdout split, and generalization. Validate every config. Smoke 20 paired games. Promotion stays on the gate."
-    },
-    {
-      "id": "task-config-layer",
-      "type": "Task",
-      "status": "done",
-      "title": "Ship the config and experiment layer",
-      "description": "buildBot is the only factory. Env profiles cannot change the move.",
-      "owner": "config-layer",
-      "session": "cursor/config-layer",
-      "commit": "0b73451",
-      "created_at": 1791159959372,
-      "updated_at": 1791159959372,
-      "acceptance_criteria": [
-        "The same configId decides selfplay and local-server replays",
-        "Sweeps score win rate plus the dev set only",
-        "Held-out and live results are gatekeeper checks",
-        "20-game smoke records a win rate with zero invalid choices and zero crashes"
-      ],
-      "files": [
-        "src/config",
-        "src/exp",
-        "configs"
-      ]
-    },
-    {
-      "id": "exp-config-layer",
-      "type": "Experiment",
-      "status": "done",
-      "title": "Smoke champion config against maxdamage",
-      "description": "configs/experiments/smoke.yaml. 10 seeds, both sides. Not a promotion.",
-      "owner": "config-layer",
-      "session": "cursor/config-layer",
-      "commit": "0b73451",
-      "created_at": 1791159959372,
-      "updated_at": 1791159959372,
-      "config_path": "configs/experiments/smoke.yaml",
-      "hypothesis_id": "hyp-config-layer",
-      "predicted_effect": "The champion config plays the exact 1-ply search and beats maxdamage in this smoke.",
-      "kill_condition": "Invalid choices, crashes, or a configId that changes between selfplay and local."
-    },
-    {
-      "id": "result-config-smoke",
-      "type": "Result",
-      "status": "done",
-      "title": "Smoke 19/20 vs maxdamage",
-      "description": "configId 374a5edff9039983 vs 13e462ed6f0a0b5c. 19 wins, 0 invalid, 0 crashes. Held-out agreement 0 on 2 positions. Live results file absent. Obvious-move guardrail 21/21 on this run; two earlier process starts scored 19/21 and 20/21, so that suite is not a tuning score. Dev-set agreement of 1-ply against the depth-2 labels was 7/22.",
-      "owner": "config-layer",
-      "session": "cursor/config-layer",
-      "commit": "0b73451",
-      "created_at": 1791159959372,
-      "updated_at": 1791159959372,
-      "metrics": {
-        "wins": 19,
-        "invalid": 0,
-        "crashes": 0,
-        "held_out_positions": 2,
-        "held_out_agreement": 0,
-        "dev_agreement_1ply": 0.3181818181818182,
-        "guardrail_passed": 21,
-        "guardrail_total": 21
-      },
-      "win_rate": 0.95,
-      "game_count": 20
-    },
-    {
-      "id": "decision-config-factory",
-      "type": "Decision",
-      "status": "done",
-      "title": "buildBot is the only factory",
-      "description": "Promotion remains npm run gate. The experiment CLI does not promote.",
-      "owner": "config-layer",
-      "session": "cursor/config-layer",
-      "commit": "0b73451",
-      "created_at": 1791159959372,
-      "updated_at": 1791159959372,
-      "context": "Self-play, the gate, diagnostics, the local server, and the ladder each had their own chooser.",
-      "decision": "Every environment calls buildBot. Env profiles set time, network, logging, and LLM permission. configId hashes strategy only. Sweeps do not read the held-out split.",
-      "consequences": "A new search id or LiveBattleBridge plugs in without a second entry point."
-    },
     {
       "id": "goal-ladder-1",
       "type": "Goal",
@@ -107,28 +14,6 @@
         "target_metric": "ladder_elo",
         "target_value": 1900
       }
-    },
-    {
-      "id": "champion-v0",
-      "type": "Champion",
-      "status": "active",
-      "title": "Champion v0: Exact Sim",
-      "description": "3-ply expectiminimax with 0% fallback, exact @pkmn/sim mechanics",
-      "commit": "f209c86",
-      "created_at": 1791152884349,
-      "updated_at": 1791152884349,
-      "metrics": {
-        "win_rate_vs_random": 1,
-        "invalid_choices": 0,
-        "crashes": 0,
-        "timeouts": 0,
-        "p99_turn_time_ms": 1500,
-        "fallback_rate": 0,
-        "state_mismatches": 0
-      },
-      "version": "v0",
-      "config_path": "src/bot/bot.ts",
-      "promoted_at": 1791152884349
     },
     {
       "id": "decision-typescript-pkmn",
@@ -503,6 +388,88 @@
       ]
     },
     {
+      "id": "result-challenger-exact-1ply-1791160362753",
+      "type": "Result",
+      "status": "done",
+      "title": "Gate: promoted",
+      "description": "+448.0 avg Elo vs panel (2/2 improved). held-out forced-win 0/0, deep agreement 37.8% vs max-damage 21.2% (17 replay positions)",
+      "created_at": 1791160362753,
+      "updated_at": 1791160362753,
+      "metrics": {
+        "verdict": "promoted",
+        "games": 600,
+        "panel_results": [
+          {
+            "opponent": "random-v1",
+            "challenger_elo": 2176.0784320114053,
+            "champion_elo": 1500,
+            "elo_diff": 676.0784320114053,
+            "win_rate": 0.98,
+            "ci_lower": 0.9570598132699448,
+            "ci_upper": 0.9908024939322289,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          },
+          {
+            "opponent": "maxdamage-v1",
+            "challenger_elo": 1719.8687687473098,
+            "champion_elo": 1500,
+            "elo_diff": 219.8687687473098,
+            "win_rate": 0.78,
+            "ci_lower": 0.7297464012422271,
+            "ci_upper": 0.8231732779590409,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          }
+        ],
+        "guardrails": {
+          "passed": true,
+          "invalid_choices": 0,
+          "crashes": 0,
+          "timeouts": 0,
+          "p99_turn_time_ms": 190,
+          "fallback_rate": 0,
+          "state_mismatches": 0
+        },
+        "held_out": {
+          "ok": true,
+          "reason": "held-out forced-win 0/0, deep agreement 37.8% vs max-damage 21.2% (17 replay positions)",
+          "positions": 217,
+          "replay_positions": 17,
+          "forced_win_hit": 0,
+          "forced_win_total": 0,
+          "deep_hit": 82,
+          "deep_total": 217,
+          "max_damage_deep_hit": 46,
+          "max_damage_deep_total": 217
+        }
+      }
+    },
+    {
+      "id": "champion-v0",
+      "type": "Champion",
+      "status": "superseded",
+      "title": "Champion v0: Exact Sim",
+      "description": "3-ply expectiminimax with 0% fallback, exact @pkmn/sim mechanics",
+      "commit": "f209c86",
+      "created_at": 1791152884349,
+      "updated_at": 1791160362780,
+      "metrics": {
+        "win_rate_vs_random": 1,
+        "invalid_choices": 0,
+        "crashes": 0,
+        "timeouts": 0,
+        "p99_turn_time_ms": 1500,
+        "fallback_rate": 0,
+        "state_mismatches": 0
+      },
+      "version": "v0",
+      "config_path": "src/bot/bot.ts",
+      "promoted_at": 1791152884349
+    },
+    {
       "id": "datasource-vercel-ai-gateway-models",
       "type": "DataSource",
       "status": "active",
@@ -624,13 +591,202 @@
       "test_plan": "Submit experiment-llm-jev-prior against the champion through the gate. Challenger config is experiments/llm-jev-prior/config.json (blend mode prior, weight 0.15, topK 8). Champion stays useLLMPrior false. Paired games, SPRT elo0=0 elo1=+10 alpha=beta=0.05."
     },
     {
+      "id": "task-live-ladder",
+      "type": "Task",
+      "status": "done",
+      "title": "Live ladder client",
+      "description": "Websocket ladder client with login, per-room state, legal choices, JSONL logs, replay save, --engine, and --concurrency.",
+      "commit": "6e9948c",
+      "created_at": 1791158863402,
+      "updated_at": 1791158863402,
+      "acceptance_criteria": [
+        "Official action.php login",
+        "One engine instance and JSONL file per battle room",
+        "--concurrency 4 plays at least 12 local games with 0 invalid choices and 0 crashes",
+        "--engine max-damage or search"
+      ],
+      "files": [
+        "src/cli/ladder.ts",
+        "src/client/showdown-client.ts",
+        "src/client/battle-driver.ts",
+        "src/client/decision-client.ts",
+        "src/client/ladder-queue.ts"
+      ]
+    },
+    {
+      "id": "result-live-ladder-c4",
+      "type": "Result",
+      "status": "done",
+      "title": "Concurrency 4 local verification",
+      "description": "15 gen9randombattle games on one login pair at concurrency 4, engine max-damage. invalid=0 crashes=0 fallbacks=0 mismatches=0. Peak of 4 simultaneous battles. Earlier head-to-head: max-damage 12, search 1.",
+      "commit": "6e9948c",
+      "created_at": 1791158863402,
+      "updated_at": 1791158863402,
+      "metrics": {
+        "invalid_choices": 0,
+        "crashes": 0,
+        "fallbacks": 0,
+        "mismatches": 0,
+        "concurrency": 4,
+        "games": 15
+      },
+      "game_count": 15
+    },
+    {
+      "id": "challenger-exact-1ply",
+      "type": "Experiment",
+      "status": "done",
+      "title": "Exact 1-ply HP search",
+      "description": "Clone the live battle with toJSON/fromJSON. Opponent line is the @smogon/calc max-damage move. Eval is HP fraction plus faint counts. Terminal win is +1000.",
+      "commit": "fcd9c92",
+      "created_at": 1791157782966,
+      "updated_at": 1791160457504,
+      "config_path": "src/engine/exact/search.ts",
+      "hypothesis_id": "hyp-rebuild-scored-as-loss",
+      "predicted_effect": ">=90% vs random and >=70% vs max-damage over 300 paired games, 21/21 diagnostics, 0 invalid.",
+      "kill_condition": "Under 90% vs random or under 70% vs max-damage, or any invalid choice, crash, or turn over 2s."
+    },
+    {
+      "id": "hyp-rebuild-scored-as-loss",
+      "type": "Hypothesis",
+      "status": "done",
+      "title": "Rebuilt battles scored as losses",
+      "description": "The 3-ply search is weak because it rebuilds a battle and scores a rejected choice as a loss, not because HP eval is too small.",
+      "commit": "64c946b",
+      "created_at": 1791157782966,
+      "updated_at": 1791160457508,
+      "rationale": "After a KO the live request is a single switch. BattleStateBuilder starts a new battle, copies HP, and leaves a two-player move request. makeChoices throws Not all choices done. simulateTurn returns terminated with no winner. RobustSearch scores that -10000. A toJSON clone of the same battle accepts the switch.",
+      "expected_effect": "1-ply search on a real battle clone with HP-fraction eval beats random by a wide margin and beats max-damage. Adding depth, a uniform opponent, or the full evaluator does not create the old loss.",
+      "test_plan": "Diagnostics on 21 obvious positions. Paired games, swapped sides, seed 1. Baseline exact:1,max-damage,hp over 150 pairs vs random and vs max-damage. Then uniform, depth 2, depth 3, and full eval on the same seeds. Kill the clone engine if it is under 90% vs random or under 70% vs max-damage."
+    },
+    {
+      "id": "champion-exact-1ply",
+      "type": "Champion",
+      "status": "active",
+      "title": "Champion: exact 1-ply HP search",
+      "description": "1-ply exact @pkmn/sim battle clone. Opponent line is the accuracy-weighted max-damage move. Eight RNG draws are averaged. Eval is HP fraction plus faint counts.",
+      "created_at": 1791160362784,
+      "updated_at": 1791160457509,
+      "metrics": {
+        "win_rate_vs_random": 0.98,
+        "win_rate_vs_maxdamage": 0.78,
+        "invalid_choices": 0,
+        "crashes": 0,
+        "timeouts": 0,
+        "p99_turn_time_ms": 190,
+        "fallback_rate": 0,
+        "state_mismatches": 0
+      },
+      "version": "exact-1ply",
+      "config_path": "src/engine/exact/search.ts",
+      "promoted_at": 1791160362784
+    },
+    {
+      "id": "result-ablation-exact-search",
+      "type": "Result",
+      "status": "done",
+      "title": "Ablation of exact battle-clone search",
+      "description": "Same seed start 1. Champion row is 150 pairs. Other rows are smaller samples of the same harness. Full eval before the 0 HP fix is the row that collapses.",
+      "commit": "fcd9c92",
+      "created_at": 1791160457504,
+      "updated_at": 1791160457504,
+      "metrics": {
+        "rows": [
+          {
+            "name": "1-ply max-damage HP, 8 samples",
+            "vs_random": "98.0% (294-5-1/300)",
+            "vs_max": "78.0% (234-66-0/300)",
+            "p99_ms": 190
+          },
+          {
+            "name": "1-ply max-damage HP, 1 sample",
+            "vs_random": "98.8% (79-0-1/80)",
+            "vs_max": "82.5% (66-14-0/80)",
+            "p99_ms": 60
+          },
+          {
+            "name": "1-ply uniform HP, 1 sample",
+            "vs_random": "97.5% (78-1-1/80)",
+            "vs_max": "67.5% (54-26-0/80)",
+            "p99_ms": 198
+          },
+          {
+            "name": "2-ply max-damage HP, 1 sample",
+            "vs_random": "96.7% (29-1-0/30)",
+            "vs_max": "80.0% (24-6-0/30)",
+            "p99_ms": 333
+          },
+          {
+            "name": "3-ply max-damage HP, 1 sample",
+            "vs_random": "100% (8-0-0/8)",
+            "vs_max": "not run",
+            "p99_ms": 2400
+          },
+          {
+            "name": "1-ply full eval before 0 HP fix",
+            "vs_random": "72.5% (29-11-0/40)",
+            "vs_max": "5.0% (2-38-0/40)",
+            "p99_ms": 50
+          },
+          {
+            "name": "1-ply full eval after 0 HP fix",
+            "vs_random": "100% (40-0-0/40)",
+            "vs_max": "77.5% (31-9-0/40)",
+            "p99_ms": 98
+          }
+        ]
+      },
+      "win_rate": 0.98,
+      "game_count": 300
+    },
+    {
+      "id": "hyp-fainted-hp-scored-full",
+      "type": "Hypothesis",
+      "status": "done",
+      "title": "0 HP was scored as a full health bar",
+      "description": "The full evaluator treated a falsy currentHp as unknown and assumed 100% HP.",
+      "commit": "fcd9c92",
+      "created_at": 1791160457504,
+      "updated_at": 1791160457504,
+      "rationale": "Full-eval 1-ply lost to max-damage 2-38 over 40 games while HP-fraction eval won. Fainted Pokemon have currentHp 0.",
+      "expected_effect": "Counting 0 HP as fainted restores full-eval win rate to the same range as the HP eval.",
+      "test_plan": "Replay 20 paired seeds against random and against max-damage before and after the truthiness fix."
+    },
+    {
+      "id": "learning-fainted-hp",
+      "type": "Learning",
+      "status": "active",
+      "title": "0 HP is a faint",
+      "description": "Do not use a truthiness check on current HP.",
+      "commit": "fcd9c92",
+      "created_at": 1791160463725,
+      "updated_at": 1791160463725,
+      "insight": "A fainted Pokemon at 0 HP was scored as full health, so the full evaluator avoided knockouts.",
+      "evidence": "Before: 5.0% vs max-damage (2W-38L/40) and 72.5% vs random (29W-11L/40). After: 77.5% (31W-9L/40) and 100% (40W-0L/40). Seed 1. Commit fcd9c92.",
+      "confidence": "high"
+    },
+    {
+      "id": "learning-rebuild-scored-as-loss",
+      "type": "Learning",
+      "status": "active",
+      "title": "Search the live battle clone",
+      "description": "A rebuilt battle that rejects the live choice is not a loss.",
+      "commit": "fcd9c92",
+      "created_at": 1791160463725,
+      "updated_at": 1791160463725,
+      "insight": "The old search rebuilt a battle that still had a move request after a KO, rejected the legal switch, and scored that rejection as a loss.",
+      "evidence": "src/engine/exact/legacy-repro.ts. The clone search is 98.0% vs random and 78.0% vs max-damage over 300 paired games, gate promoted, commit fcd9c92.",
+      "confidence": "high"
+    },
+    {
       "id": "task-ops-layer",
       "type": "Task",
       "status": "done",
       "title": "Operations facilities",
       "description": "factory, gatekeeper, live, and analyst share the graph and the JSONL logs. Only the gatekeeper writes champion and live-approved.",
-      "created_at": 1791161121160,
-      "updated_at": 1791161121160,
+      "created_at": 1791200000000,
+      "updated_at": 1791200000000,
+      "commit_sha": "2b4d7a8b302ce24cdaf8f76b8e35ae01fd7a7651",
       "acceptance_criteria": [
         "npm run ops -- factory|gatekeeper|live|analyst|status|report|supervise",
         "gatekeeper is the only writer of champion and live-approved",
@@ -640,32 +796,32 @@
   ],
   "edges": [
     {
-      "id": "exp-config-layer-tests-hyp-config-layer",
-      "from_node": "exp-config-layer",
-      "to_node": "hyp-config-layer",
+      "id": "challenger-exact-1ply-tests-hyp-rebuild-scored-as-loss",
+      "from_node": "challenger-exact-1ply",
+      "to_node": "hyp-rebuild-scored-as-loss",
       "type": "tests",
-      "created_at": 1791159959372
+      "created_at": 1791157782966
     },
     {
-      "id": "exp-config-layer-produced-result-config-smoke",
-      "from_node": "exp-config-layer",
-      "to_node": "result-config-smoke",
+      "id": "challenger-exact-1ply-produced-result-challenger-exact-1ply-1791160362753",
+      "from_node": "challenger-exact-1ply",
+      "to_node": "result-challenger-exact-1ply-1791160362753",
       "type": "produced",
-      "created_at": 1791159959372
+      "created_at": 1791160362764
     },
     {
-      "id": "task-config-layer-tests-hyp-config-layer",
-      "from_node": "task-config-layer",
-      "to_node": "hyp-config-layer",
-      "type": "tests",
-      "created_at": 1791159959372
+      "id": "champion-exact-1ply-supersedes-champion-v0",
+      "from_node": "champion-exact-1ply",
+      "to_node": "champion-v0",
+      "type": "supersedes",
+      "created_at": 1791160362792
     },
     {
-      "id": "decision-config-factory-supports-hyp-config-layer",
-      "from_node": "decision-config-factory",
-      "to_node": "hyp-config-layer",
-      "type": "supports",
-      "created_at": 1791159959372
+      "id": "challenger-exact-1ply-supersedes-champion-v0",
+      "from_node": "challenger-exact-1ply",
+      "to_node": "champion-v0",
+      "type": "supersedes",
+      "created_at": 1791160362794
     },
     {
       "id": "decision-typescript-pkmn-supports-goal-ladder-1",
@@ -834,6 +990,55 @@
       "to_node": "decision-loss-reviewer-grok-4-7",
       "type": "supports",
       "created_at": 1791156182746
+    },
+    {
+      "id": "task-live-ladder-produced-result-live-ladder-c4",
+      "from_node": "task-live-ladder",
+      "to_node": "result-live-ladder-c4",
+      "type": "produced",
+      "created_at": 1791158863402
+    },
+    {
+      "id": "task-live-ladder-supports-goal-ladder-1",
+      "from_node": "task-live-ladder",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791158863402
+    },
+    {
+      "id": "challenger-exact-1ply-produced-result-ablation-exact-search",
+      "from_node": "challenger-exact-1ply",
+      "to_node": "result-ablation-exact-search",
+      "type": "produced",
+      "created_at": 1791160457504
+    },
+    {
+      "id": "hyp-fainted-hp-scored-full-derived-from-learning-fainted-hp",
+      "from_node": "hyp-fainted-hp-scored-full",
+      "to_node": "learning-fainted-hp",
+      "type": "derived_from",
+      "created_at": 1791160463725
+    },
+    {
+      "id": "learning-fainted-hp-supports-goal-ladder-1",
+      "from_node": "learning-fainted-hp",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791160463725
+    },
+    {
+      "id": "learning-rebuild-scored-as-loss-supports-goal-ladder-1",
+      "from_node": "learning-rebuild-scored-as-loss",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791160463725
+    },
+    {
+      "id": "hyp-rebuild-scored-as-loss-derived-from-learning-rebuild",
+      "from_node": "hyp-rebuild-scored-as-loss",
+      "to_node": "learning-rebuild-scored-as-loss",
+      "type": "derived_from",
+      "created_at": 1791160463725
     }
   ]
 }

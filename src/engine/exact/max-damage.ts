@@ -1,4 +1,4 @@
-import { Battle } from '@pkmn/sim';
+import { Battle, Dex } from '@pkmn/sim';
 import { calculate, Pokemon as CalcPokemon, Move, Field } from '@smogon/calc';
 import { SideId, legalChoices } from './battle-utils.js';
 
@@ -17,14 +17,23 @@ function averageDamage(damage: number | number[] | number[][]): number {
   return flat.reduce((sum, n) => sum + n, 0) / flat.length;
 }
 
+function dexName(kind: 'abilities' | 'items' | 'natures', raw: unknown): string | undefined {
+  if (typeof raw !== 'string' || raw.length === 0) return undefined;
+  const entry = Dex[kind].get(raw);
+  return entry?.exists ? entry.name : raw;
+}
+
 function calcMon(pokemon: any): CalcPokemon {
   const set = pokemon.set || {};
   const status = pokemon.status && pokemon.status !== '???' ? pokemon.status : undefined;
+  // The sim stores ids ("levitate"). @smogon/calc only applies the display
+  // name ("Levitate"). Passing the id overrides the species ability and
+  // Ground moves hit Levitate targets.
   return new CalcPokemon(9, pokemon.species.name, {
     level: pokemon.level,
-    ability: pokemon.ability || undefined,
-    item: set.item || undefined,
-    nature: set.nature,
+    ability: dexName('abilities', pokemon.ability || set.ability),
+    item: dexName('items', pokemon.item || set.item),
+    nature: dexName('natures', set.nature),
     evs: set.evs,
     ivs: set.ivs,
     boosts: {
@@ -51,7 +60,9 @@ export function expectedDamage(attacker: any, defender: any, moveName: string, w
     const field = new Field(weather ? { weather } : {});
     const result = calculate(9, calcMon(attacker), calcMon(defender), move, field);
     if (!result.damage) return 0;
-    return averageDamage(result.damage as number | number[] | number[][]);
+    const accuracy = Dex.moves.get(moveName).accuracy;
+    const hitChance = accuracy === true || accuracy == null ? 1 : Number(accuracy) / 100;
+    return averageDamage(result.damage as number | number[] | number[][]) * hitChance;
   } catch {
     return 0;
   }
