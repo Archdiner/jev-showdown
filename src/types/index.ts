@@ -84,6 +84,8 @@ export interface GameState {
     opponent: { stealthRock: boolean; spikes: number; toxicSpikes: number };
   };
   playerId?: 'p1' | 'p2';
+  /** Public protocol lines, when the caller has them. */
+  recentLines?: string[];
 }
 
 export type Action = 
