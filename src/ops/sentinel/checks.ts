@@ -123,6 +123,13 @@ export const CHECKS: InvariantCheck[] = [
     detect: circuitsAllPulled,
   },
   {
+    id: 'live-fallback-flood',
+    severity: 'P1',
+    title: 'ops live fallback heartbeats exceed the per-game threshold or disagree with the game row',
+    suggestedFix: 'Play the allocated config choice when the request allows it, including Terastallize. Write that count on the live game row. A row with fallbacks 0 while choice-fallback heartbeats name the battle is not a clean evaluation of the config.',
+    detect: liveFallbackFlood,
+  },
+  {
     id: 'mixed-ratings',
     severity: 'P1',
     title: 'One row is both a local result and a ladder result',
@@ -560,6 +567,64 @@ function phantomGames(ctx: SentinelContext): CheckHit[] {
       game.battleId || `${game.file}:${game.line}`,
       `is a 0-turn ${game.endReason ?? game.outcome} and is excluded from the scorecard record`,
     ));
+}
+
+/** More choice-fallback heartbeats than this in one battle is a flood. */
+export const LIVE_FALLBACK_HEARTBEAT_MAX = 2;
+
+const CHOICE_FALLBACK_DETAIL = /^choice-fallback\s+(\S+)/;
+
+function liveFallbackFlood(ctx: SentinelContext): CheckHit[] {
+  const beats = new Map<string, { count: number; evidence: Evidence[] }>();
+  for (const beat of ctx.heartbeats) {
+    if (beat.facility !== 'live' || beat.status !== 'error') continue;
+    if (!inLookback(ctx, numberOf(beat.ts))) continue;
+    const detail = text(beat.detail) ?? '';
+    const match = CHOICE_FALLBACK_DETAIL.exec(detail);
+    if (!match) continue;
+    const battleId = match[1];
+    const row = beats.get(battleId) ?? { count: 0, evidence: [] };
+    row.count += 1;
+    if (row.evidence.length < 4) row.evidence.push({ file: beat.file, line: beat.line, detail });
+    beats.set(battleId, row);
+  }
+
+  const hits: CheckHit[] = [];
+  const gamesByBattle = new Map<string, ObservedGame>();
+  for (const game of ctx.games) {
+    if (game.battleId && isOpsLiveGame(game)) gamesByBattle.set(game.battleId, game);
+  }
+
+  for (const [battleId, row] of beats) {
+    if (row.count <= LIVE_FALLBACK_HEARTBEAT_MAX) continue;
+    const game = gamesByBattle.get(battleId);
+    hits.push({
+      key: `flood:${battleId}`,
+      detail: `${battleId} has ${row.count} choice-fallback heartbeats (threshold ${LIVE_FALLBACK_HEARTBEAT_MAX})`,
+      evidence: row.evidence,
+      at: game?.ts ?? null,
+      gitSha: game?.gitSha ?? null,
+      runId: game?.runId ?? null,
+      battleId,
+    });
+  }
+
+  for (const game of ctx.games) {
+    if (!isOpsLiveGame(game) || !inLookback(ctx, game.ts) || !game.battleId) continue;
+    const counted = beats.get(game.battleId)?.count ?? 0;
+    if (counted === game.fallbacks) continue;
+    hits.push(fieldHit(game, `disagree:${game.battleId}`, `row fallbacks=${game.fallbacks} but choice-fallback heartbeats=${counted}`));
+    const beatEvidence = beats.get(game.battleId)?.evidence ?? [];
+    for (const ev of beatEvidence) {
+      if (hits[hits.length - 1].evidence.length < 8) hits[hits.length - 1].evidence.push(ev);
+    }
+  }
+  return hits;
+}
+
+function isOpsLiveGame(game: ObservedGame): boolean {
+  if (game.source === 'ops') return true;
+  return path.basename(game.file) === 'live-games.jsonl';
 }
 
 function crashOrFallback(ctx: SentinelContext): CheckHit[] {

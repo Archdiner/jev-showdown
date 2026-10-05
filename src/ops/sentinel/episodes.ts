@@ -10,6 +10,7 @@ export const EPISODE_CHECK_IDS = new Set([
   'timer-margin-null',
   'elo-null-on-forfeit',
   'required-fields-null',
+  'live-fallback-flood',
 ]);
 
 export function isEpisodeCheck(checkId: string): boolean {

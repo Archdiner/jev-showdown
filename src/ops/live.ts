@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { isWaitRequest } from '../client/choice.js';
 import { fallbackChoice, LadderSession } from '../config/adapters.js';
 import { buildBot } from '../config/bot.js';
 import { resolveConcurrencyLimit } from '../client/concurrency-config.js';
@@ -227,6 +228,13 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   const held: { rating?: number; gxe?: number } = {};
   let finished = 0;
   const sessions = new Map<string, { config: Allocatable; variantId: string | null; session: LadderSession }>();
+  const choiceStats = new Map<string, { fallbacks: number; mismatches: number }>();
+  const noteFallback = (room: string) => {
+    const stats = choiceStats.get(room) ?? { fallbacks: 0, mismatches: 0 };
+    stats.fallbacks += 1;
+    choiceStats.set(room, stats);
+    beat(paths, 'live', 'error', `choice-fallback ${room}`);
+  };
   const transcripts = new Map<string, string[]>();
   const watches = new Map<string, RoomWatch>();
   const sides = new Map<string, 'p1' | 'p2'>();
@@ -332,9 +340,11 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
       if (!current) {
         const config = allocate(pool(), Math.random, exploreRate);
         if (!config) {
-          const choice = fallbackChoice(request);
-          if (choice) client.choose(room, choice);
-          beat(paths, 'live', 'error', `choice-fallback ${room}`);
+          if (!isWaitRequest(request)) {
+            const choice = fallbackChoice(request);
+            if (choice) client.choose(room, choice);
+            noteFallback(room);
+          }
           return;
         }
         const variantId = thompsonDraw(variantPool, variantCounts, Math.random);
@@ -350,10 +360,11 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
       void current.session.onRequest(room, request, transcript(room), side).then(delivered => {
         const row = watches.get(room);
         if (row) row.latencies.push(Date.now() - choiceStarted);
-        if (delivered.fallback) beat(paths, 'live', 'error', `choice-fallback ${room}`);
+        if (delivered.fallback) noteFallback(room);
         if (delivered.choice) client.choose(room, delivered.choice);
       }).catch(error => {
         beat(paths, 'live', 'error', error instanceof Error ? error.message : String(error));
+        noteFallback(room);
         const choice = fallbackChoice(request);
         if (choice) client.choose(room, choice);
       });
@@ -382,8 +393,10 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
           turns: facts.turns,
           invalidChoices: facts.invalidChoices,
           crashes: facts.crashes,
-          fallbacks: 0,
-          mismatches: 0,
+          // Mismatches stay 0: this session replays the input log and does not
+          // reconcile a spectator state the way the ladder driver does.
+          fallbacks: choiceStats.get(room)?.fallbacks ?? 0,
+          mismatches: choiceStats.get(room)?.mismatches ?? 0,
           eloBefore: facts.eloBefore,
           eloAfter: facts.eloAfter,
           preRating: facts.preRating,
@@ -441,6 +454,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
       }
       transcripts.delete(room);
       watches.delete(room);
+      choiceStats.delete(room);
       maybeFill();
     });
 

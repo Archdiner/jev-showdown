@@ -1,5 +1,9 @@
 # Changelog
 
+## Local ops live was grading fallback moves as the config
+
+`exact-1ply-qw` chooses `move N terastallize` when the request allows it. The ops live session treated that string as illegal, sent the first plain move, and logged `choice-fallback`. Because Terastallize never landed, the next turn asked for it again, so one local battle produced a run of fallback heartbeats. The finished row still stored `fallbacks: 0`, so the gatekeeper read those games as clean. The session now sends a Terastallize choice the request allows and writes the fallback count it actually observed. The sentinel raises P1 when those heartbeats pass 2 in one battle, or when the row's count does not match them. The check reads the JSONL files only.
+
 ## Closed loop reads ladder losses and finishes SPRT
 
 A live loss was reviewed from the per-battle JSONL as if it were a self-play `>start` log. Those files are turn and result events. The result row does not embed the protocol, and a short `log` that already contains `|` hid the replay. With nothing to classify, every loss became critical turn 0, class `other`, which is the one variant `eval-term: preservation`. Mining then skipped with "no >start input and no |request|". The analyst now reads the turn choice and the request object stored on that row, and appends a `|request|` line when the replay does not already have one. New ladder turns store that request object. The champion policy is unchanged.
@@ -78,10 +82,6 @@ Info-honest bench, 60 pairs, sides swapped, 120 games, each policy sees only its
 `@smogon/calc` has no entry for a cosmetic forme such as Gastrodon-East, so damage for that Pokémon came back as zero. `speciesForCalc` maps a cosmetic forme to the base species and leaves a forme the calc already lists, such as Ogerpon-Wellspring, unchanged. `calcMon` uses that name.
 
 A Revival Blessing follow-up is a forced switch onto a fainted teammate. `legalChoices` used to offer a healthy Pokémon, which the sim rejects (`INC-007`). It now offers the fainted teammates when the active slot has `revivalblessing`. The hidden-info battle copies the request's `reviving` flag onto that slot, so the search and the real battle list the same switches.
-
-## Sentinel accuracy on the real deployment
-
-The sentinel now matches the Mac layout. Runner liveness uses `ps -axo pid,ppid,pgid,lstart,command` or `kill -0`, and never `/proc`. `LIVE_REPO_DIR`, or the git root of `LADDER_LOG_DIR` when that root is not the ops cwd, is the runner checkout; drain, lock, and git checks name that tree and the ops tree separately. The scorecard's live-runner uptime and per-batch W-L come from `games.jsonl`, grouped by `batchLabel` and `runId`. The incident log records a line only when status, severity, or evidence changes, keeps the count on `incidents.json`, and rotates by size. Per-game failures are one episode per check per run, carrying `gitSha` and `runId`. Games older than the run start (or `--since` / `SENTINEL_SINCE`) do not open or reopen. An episode stays open on the scan that first sees it, and it resolves on a later scan after 10 passing live games or 30 minutes of live play. The daemon and `--once` share that model. `sentinel --once --json` exits 1 only for an open, unacknowledged P0 inside the baseline. Local games and `battle-local-*` rows are not timer-margin failures. A forfeit that stays at the 1000 floor is not a missing Elo. A local row and a ladder row are not a mixed rating; one row that is both still is. Two pids on the same battle's game or result lines are a duplicate runner. The scorecard reports live-runner uptime separately from ops-worker uptime, counts unique `games.jsonl` battles (and skips a 0-game aborted run), and counts opened incidents rather than event lines. `ops incidents link` stores a ledger ref such as INC-007 on the incident and the scorecard. `ops incidents ack|resolve --before` and `--sha` close history with a reason.
 
 ## Ladder game rows stay one per battle, with a replay link and a timer
 
