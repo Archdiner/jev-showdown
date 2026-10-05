@@ -2,8 +2,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { WebSocketServer } from 'ws';
+import { writeLadderRun } from '../client/ladder-run.js';
 import { judge } from './gatekeeper.js';
-import { runLive } from './live.js';
+import { PUBLIC_WEBSOCKET, resolveLiveIdentity, runLive } from './live.js';
 import { openDb } from './db.js';
 import { opsPaths } from './paths.js';
 
@@ -79,4 +80,140 @@ describe('live search slots', () => {
       await server.close();
     }
   }, 20_000);
+});
+
+describe('local live target', () => {
+  const env = {
+    SHOWDOWN_USERNAME: 'RealAccount',
+    SHOWDOWN_PASSWORD: 'secret',
+    SHOWDOWN_LOGIN_URL: 'https://play.pokemonshowdown.com/action.php',
+  };
+
+  test('a local session ignores the public username, password, and login server', () => {
+    expect(resolveLiveIdentity({ local: true }, env)).toMatchObject({
+      local: true,
+      username: 'localbot',
+      password: '',
+      server: null,
+      port: 0,
+    });
+    expect(resolveLiveIdentity({ local: true }, env).loginServer).not.toContain('pokemonshowdown.com');
+    expect(resolveLiveIdentity({
+      local: true,
+      username: 'Alpha',
+      port: 8010,
+    }, env)).toMatchObject({ username: 'Alpha', password: '', server: null, port: 8010 });
+    expect(resolveLiveIdentity({
+      server: 'ws://127.0.0.1:8010/showdown/websocket',
+    }, env)).toMatchObject({
+      local: true,
+      username: 'localbot',
+      password: '',
+      server: 'ws://127.0.0.1:8010/showdown/websocket',
+    });
+    expect(resolveLiveIdentity({}, env)).toMatchObject({
+      local: false,
+      username: 'RealAccount',
+      password: 'secret',
+      server: PUBLIC_WEBSOCKET,
+      loginServer: env.SHOWDOWN_LOGIN_URL,
+    });
+    expect(() => resolveLiveIdentity({
+      local: true,
+      server: PUBLIC_WEBSOCKET,
+    }, env)).toThrow(/loopback/);
+  });
+
+  test('--local starts a free-port server and never calls the public login server', async () => {
+    const previous = {
+      user: process.env.SHOWDOWN_USERNAME,
+      pass: process.env.SHOWDOWN_PASSWORD,
+      login: process.env.SHOWDOWN_LOGIN_URL,
+    };
+    process.env.SHOWDOWN_USERNAME = 'RealAccount';
+    process.env.SHOWDOWN_PASSWORD = 'secret';
+    process.env.SHOWDOWN_LOGIN_URL = 'https://play.pokemonshowdown.com/action.php';
+    const fetches: string[] = [];
+    const original = global.fetch;
+    global.fetch = (async (input: string | URL) => {
+      fetches.push(String(input));
+      throw new Error(`unexpected fetch ${String(input)}`);
+    }) as typeof fetch;
+    const paths = tempPaths();
+    judge(paths, {
+      configPath: 'configs/champion.yaml',
+      action: 'champion',
+      wins: 250,
+      losses: 100,
+      invalid: 0,
+      crashes: 0,
+      diagnostics: { passed: 1, failed: 0, total: 1 },
+    });
+    try {
+      const summary = await runLive({
+        paths,
+        local: true,
+        games: 0,
+        once: true,
+        timeoutMs: 8_000,
+      });
+      expect(summary.games).toBe(0);
+      expect(fetches.filter(url => url.includes('pokemonshowdown.com'))).toEqual([]);
+      const beats = fs.readFileSync(paths.heartbeats, 'utf8');
+      expect(beats).toContain('logged in localbot');
+      expect(beats).not.toContain('RealAccount');
+      expect(beats).not.toContain(':8000');
+      expect(beats).toMatch(/local ws:\/\/127\.0\.0\.1:\d+\/showdown\/websocket user localbot/);
+    } finally {
+      global.fetch = original;
+      if (previous.user === undefined) delete process.env.SHOWDOWN_USERNAME;
+      else process.env.SHOWDOWN_USERNAME = previous.user;
+      if (previous.pass === undefined) delete process.env.SHOWDOWN_PASSWORD;
+      else process.env.SHOWDOWN_PASSWORD = previous.pass;
+      if (previous.login === undefined) delete process.env.SHOWDOWN_LOGIN_URL;
+      else process.env.SHOWDOWN_LOGIN_URL = previous.login;
+    }
+  }, 20_000);
+
+  test('public live refuses the account an active ladder.ts batch already holds', async () => {
+    const paths = tempPaths();
+    judge(paths, {
+      configPath: 'configs/champion.yaml',
+      action: 'champion',
+      wins: 250,
+      losses: 100,
+      invalid: 0,
+      crashes: 0,
+      diagnostics: { passed: 1, failed: 0, total: 1 },
+    });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-live-lock-'));
+    writeLadderRun(dir, {
+      runId: 'active',
+      pid: process.pid,
+      username: 'RealAccount',
+      local: false,
+      engine: 'search',
+    });
+    const fetches: string[] = [];
+    const original = global.fetch;
+    global.fetch = (async (input: string | URL) => {
+      fetches.push(String(input));
+      throw new Error(`unexpected fetch ${String(input)}`);
+    }) as typeof fetch;
+    try {
+      await expect(runLive({
+        paths,
+        username: 'RealAccount',
+        password: 'secret',
+        games: 1,
+        once: true,
+        ladderRunDirs: [dir],
+        server: PUBLIC_WEBSOCKET,
+        timeoutMs: 2_000,
+      })).rejects.toThrow(/will not log in as RealAccount/);
+      expect(fetches).toEqual([]);
+    } finally {
+      global.fetch = original;
+    }
+  });
 });
