@@ -568,6 +568,14 @@ Example:
 {"schema":"jev.ladder-game.v1","kind":"ladder-game","source":"ladder","battleId":"battle-gen9randombattle-1","opponent":"Rival","opponentRating":1400,"outcome":"win","endReason":"ko","turns":21,"invalidChoices":0,"crashes":0,"fallbacks":0,"eloBefore":1073,"eloAfter":1089,"gxe":null,"durationMs":84000,"decisions":20,"latencyP50Ms":40,"latencyP95Ms":180,"latencyP99Ms":400,"latencyMaxMs":400,"minTimerMarginSec":12,"engine":"max-damage","configId":null,"configHash":"ab12","gitSha":"87b268f","concurrency":1,"replayUrl":null,"replayStatus":"unconfirmed"}
 ```
 
+## Rating and GXE
+
+Ladder Elo and GXE come from the server line, or they stay null.
+
+- The HTML popup `rating: N → M` plus `(GXE: …)` is the public-ladder form. GXE is omitted on some lines; the record then has `gxe: null` and `gxeSource: "missing"`.
+- A local `|rating|elo` or `|rating|elo|gxe` line is the other form. A missing number stays null.
+- Nothing in this client writes Elo `1000` or GXE `50` as a stand-in. The per-battle JSONL (`logs/ladder/{user}-{room}.jsonl`) gets a `rating` event when a line parses, and the `result` event copies `eloBefore`, `eloAfter`, `gxe`, and `gxeSource`. `fabricated` is always `false`. `ops live` stores the same nulls on its live-game row. A missing Elo is left out of the circuit-breaker window.
+
 ## License
 
 MIT

@@ -390,9 +390,14 @@ export class ShowdownClient extends EventEmitter {
 }
 
 export interface RatingUpdate {
-  username: string;
-  before: number;
-  after: number;
+  /** Null on a `|rating|elo|gxe` line, which does not name the player. */
+  username: string | null;
+  /** Null when the line has a current rating but no previous one. */
+  before: number | null;
+  after: number | null;
+  /** Null when the line does not include GXE. Never filled with a default. */
+  gxe: number | null;
+  gxeSource: 'html' | 'rating-line' | 'missing';
 }
 
 export interface ReplayNotice {
@@ -400,15 +405,38 @@ export interface ReplayNotice {
   url: string;
 }
 
+const HTML_RATING = /([^<>|]{1,40}?)'s rating:\s*(\d+)\s*(?:&rarr;|→|->)\s*(?:<strong>)?(\d+)/i;
+const GXE_VALUE = /GXE:\s*(\d+(?:\.\d+)?)\s*%?/i;
+/** Local stubs emit `|rating|elo`, `|rating|elo|gxe`, or `|rating|elo|gxe|games`. Missing fields stay null. */
+const PIPE_RATING = /^\|rating\|(\d+(?:\.\d+)?)?(?:\|(\d+(?:\.\d+)?))?(?:\|[^\n|]*)?\s*$/;
+
+/**
+ * Read Elo and GXE from a ladder line.
+ * Returns null when the line is not a rating update. Does not invent 1000 or 50.
+ */
 export function parseRatingLine(text: string): RatingUpdate | null {
-  const match = text.match(
-    /([^<>|]{1,40}?)'s rating:\s*(\d+)\s*(?:&rarr;|→|->)\s*(?:<strong>)?(\d+)/i,
-  );
+  const pipe = text.trim().match(PIPE_RATING);
+  if (pipe && (pipe[1] !== undefined || pipe[2] !== undefined)) {
+    const gxe = pipe[2] === undefined ? null : Number(pipe[2]);
+    return {
+      username: null,
+      before: null,
+      after: pipe[1] === undefined ? null : Number(pipe[1]),
+      gxe,
+      gxeSource: gxe === null ? 'missing' : 'rating-line',
+    };
+  }
+
+  const match = text.match(HTML_RATING);
   if (!match) return null;
+  const gxeMatch = text.match(GXE_VALUE);
+  const gxe = gxeMatch ? Number(gxeMatch[1]) : null;
   return {
     username: match[1].replace(/<[^>]+>/g, '').trim(),
     before: Number(match[2]),
     after: Number(match[3]),
+    gxe,
+    gxeSource: gxe === null ? 'missing' : 'html',
   };
 }
 

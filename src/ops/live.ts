@@ -4,7 +4,7 @@ import { buildBot } from '../config/bot.js';
 import { resolveConcurrencyLimit } from '../client/concurrency-config.js';
 import { buildLadderGameRecord, currentGitSha, factsFromTranscript } from '../client/game-record.js';
 import { LadderQueue } from '../client/ladder-queue.js';
-import { ShowdownClient } from '../client/showdown-client.js';
+import { parseRatingLine, ShowdownClient } from '../client/showdown-client.js';
 import { allocate, nextCircuit, type Allocatable, type CircuitState, clampExplore } from './allocate.js';
 import { openDb } from './db.js';
 import { beat } from './heartbeat.js';
@@ -84,6 +84,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
 
   let rating: number | undefined;
   let gxe: number | undefined;
+  const held: { rating?: number; gxe?: number } = {};
   let finished = 0;
   const sessions = new Map<string, { config: Allocatable; variantId: string | null; session: LadderSession }>();
   const transcripts = new Map<string, string[]>();
@@ -130,10 +131,10 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
     client.on('popup', (message: string) => queue.notePopup(message));
     client.on('lobby', (line: string) => queue.noteLobby(line));
 
-    client.on('rating', (update: { after?: number; rating?: number; gxe?: number }) => {
-      if (typeof update.after === 'number') rating = update.after;
-      if (typeof update.rating === 'number') rating = update.rating;
-      if (typeof update.gxe === 'number') gxe = update.gxe;
+    client.on('rating', (update: { after?: number | null; rating?: number | null; gxe?: number | null }) => {
+      rememberRating(held, update);
+      rating = held.rating;
+      gxe = held.gxe;
     });
 
     client.on('line', (room: string, line: string) => {
@@ -147,10 +148,11 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
         transcripts.set(room, bucket);
         if (!watches.has(room)) watches.set(room, { startedAt: Date.now(), latencies: [] });
       }
-      if (line.startsWith('|rating|')) {
-        const parts = line.split('|');
-        if (parts[2]) rating = Number(parts[2]);
-        if (parts[3]) gxe = Number(parts[3]);
+      const parsedRating = parseRatingLine(line);
+      if (parsedRating) {
+        rememberRating(held, parsedRating);
+        rating = held.rating;
+        gxe = held.gxe;
       }
       if (line.startsWith('|player|') && room) {
         const parts = line.split('|');
@@ -305,6 +307,29 @@ function approvedConfigs(paths: OpsPaths): Allocatable[] {
 
 function withPulls(configs: Allocatable[], circuits: Record<string, CircuitState>): Allocatable[] {
   return configs.map(config => ({ ...config, pulled: circuits[config.configId]?.pulled }));
+}
+
+/** Keep the last real Elo. A rating update that omits GXE clears GXE instead of keeping a stale number. */
+export function rememberRating(
+  current: { rating?: number; gxe?: number },
+  update: { after?: number | null; rating?: number | null; gxe?: number | null },
+): void {
+  if (typeof update.after === 'number' && Number.isFinite(update.after)) current.rating = update.after;
+  else if (typeof update.rating === 'number' && Number.isFinite(update.rating)) current.rating = update.rating;
+  if ('gxe' in update) {
+    current.gxe = typeof update.gxe === 'number' && Number.isFinite(update.gxe) ? update.gxe : undefined;
+  }
+}
+
+/** Null when the server omitted the number. Never 1000 or 50. */
+export function recordedRating(
+  rating: number | undefined,
+  gxe: number | undefined,
+): { rating: number | null; gxe: number | null } {
+  return {
+    rating: typeof rating === 'number' && Number.isFinite(rating) ? rating : null,
+    gxe: typeof gxe === 'number' && Number.isFinite(gxe) ? gxe : null,
+  };
 }
 
 function classify(winner: string | null, username: string): 'win' | 'loss' | 'tie' {

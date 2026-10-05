@@ -103,10 +103,61 @@ describe('login and result parsing', () => {
     const rating = parseRatingLine(
       `|raw|BotAlpha's rating: 1000 &rarr; <strong>1016</strong><br />(+16 for winning)`,
     );
-    expect(rating).toEqual({ username: 'BotAlpha', before: 1000, after: 1016 });
+    expect(rating).toEqual({
+      username: 'BotAlpha',
+      before: 1000,
+      after: 1016,
+      gxe: null,
+      gxeSource: 'missing',
+    });
     expect(parseReplayUrl('https://replay.pokemonshowdown.com/gen9randombattle-123')).toEqual({
       id: 'gen9randombattle-123',
       url: 'https://replay.pokemonshowdown.com/gen9randombattle-123',
+    });
+  });
+
+  it('reads GXE from the HTML rating popup and leaves it null when absent', () => {
+    const withGxe = parseRatingLine(
+      `|raw|BotAlpha's rating: 1073 &rarr; <strong>1089</strong><br />(+16 for winning)<br />(GXE: 62.4%)`,
+    );
+    expect(withGxe).toEqual({
+      username: 'BotAlpha',
+      before: 1073,
+      after: 1089,
+      gxe: 62.4,
+      gxeSource: 'html',
+    });
+
+    const bare = parseRatingLine(`|raw|BotAlpha's rating: 1234 &rarr; <strong>1240</strong><br />(+6 for winning)`);
+    expect(bare?.gxe).toBeNull();
+    expect(bare?.gxeSource).toBe('missing');
+    expect(bare?.before).toBe(1234);
+    expect(bare?.after).toBe(1240);
+  });
+
+  it('parses a |rating| stub without inventing elo or GXE', () => {
+    expect(parseRatingLine('|rating|')).toBeNull();
+    expect(parseRatingLine('no rating here')).toBeNull();
+    expect(parseRatingLine('|rating|1073')).toEqual({
+      username: null,
+      before: null,
+      after: 1073,
+      gxe: null,
+      gxeSource: 'missing',
+    });
+    expect(parseRatingLine('|rating|1008|51.0|1')).toEqual({
+      username: null,
+      before: null,
+      after: 1008,
+      gxe: 51,
+      gxeSource: 'rating-line',
+    });
+    expect(parseRatingLine('|rating|1073|62.4')).toEqual({
+      username: null,
+      before: null,
+      after: 1073,
+      gxe: 62.4,
+      gxeSource: 'rating-line',
     });
   });
 });
