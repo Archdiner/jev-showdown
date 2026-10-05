@@ -205,7 +205,7 @@ Percentiles are nearest-rank: sort the samples and take index `ceil(p/100 * n) -
 | --- | --- |
 | `battleId`, `turn` | Room id and turn |
 | `latencyMs` | Wall-clock time spent choosing |
-| `secondsLeft` | Showdown turn timer, seconds, or `null` if the server has not said |
+| `secondsLeft` | Showdown turn timer, seconds, or `null` if the server has not said. The client sends `/timer on` when a battle opens (never `/forfeit`). The value is the private `Time left: N sec this turn` line, or a public line that names us |
 | `fallback` | True when the engine choice was replaced |
 | `concurrency` | Configured simultaneous-game limit for the run |
 

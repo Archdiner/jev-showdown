@@ -22,6 +22,7 @@ import {
 } from './choice.js';
 import { alignToRequest, cloneGameState, mismatchData, overlayProtocol } from './tracked-state.js';
 import { FoeMon, LivePosition } from './decision-battle.js';
+import { ourClockUpdate } from './inactive-clock.js';
 import { safeError, toID } from './ids.js';
 import { appendGameRecord, buildLadderGameRecord, LadderGameRecord } from './game-record.js';
 
@@ -137,6 +138,9 @@ export class BattleDriver extends EventEmitter {
     let room = this.rooms.get(roomId);
     if (!room) room = this.openRoom(roomId);
     if (room.finalized) return;
+
+    const clock = ourClockUpdate(line, this.options.username);
+    if (clock !== undefined) room.secondsLeft = clock;
 
     room.lines.push(line);
     this.observePlayers(room, line);
@@ -279,6 +283,8 @@ export class BattleDriver extends EventEmitter {
       engine: this.options.engineName,
     });
     this.emit('battleStart', roomId);
+    // Partial test clients implement only the methods that battle uses.
+    this.options.client.enableBattleTimer?.(roomId);
     return room;
   }
 
