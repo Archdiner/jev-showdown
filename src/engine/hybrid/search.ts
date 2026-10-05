@@ -90,14 +90,20 @@ async function hybridSearch(
     }
     const battle = battleFromWorld(viewed, world, evidence.position);
     if (!battle) continue;
-    const matrix = scoreWorld(
-      battle,
-      side,
-      params,
-      searchDeadline,
-      ledger.plan ? (next, who) => planBonus(next, who, ledger.plan) : null,
-      ledger,
-    );
+    let matrix: ActionRow[] | null = null;
+    try {
+      matrix = scoreWorld(
+        battle,
+        side,
+        params,
+        searchDeadline,
+        ledger.plan ? (next, who) => planBonus(next, who, ledger.plan) : null,
+        ledger,
+      );
+    } catch {
+      // A sampled species the damage calc cannot build is skipped. The other worlds still vote.
+      continue;
+    }
     if (!matrix) continue;
     worldsDone += 1;
     for (const row of matrix) {
@@ -118,8 +124,8 @@ async function hybridSearch(
       koRate: slot.weight > 0 ? slot.ko / slot.weight : 0,
     }));
   if (scores.length === 0) {
-    const fallback = rootLegal[0] ? maxDamageChoice(viewed, side, rootLegal.filter(choice => !isTeraChoice(choice))) : 'default';
-    return { choice: fallback || 'default', scores: fallback ? [{ choice: fallback, score: 0 }] : [] };
+    const fallback = damageFallback(viewed, side, rootLegal);
+    return { choice: fallback, scores: [{ choice: fallback, score: 0 }] };
   }
   scores = applyTeraPrior(scores, ledger.plan);
   scores.sort((a, b) => b.score - a.score || a.choice.localeCompare(b.choice));
@@ -204,7 +210,12 @@ function capActions(battle: Battle, side: SideId, cap: number): string[] {
   if (withTera.length <= cap) return withTera;
   const moves = withTera.filter(choice => choice.startsWith('move ') && !isTeraChoice(choice));
   const tera = withTera.filter(choice => isTeraChoice(choice));
-  const switches = rankedSwitches(battle, side).map(row => row.choice);
+  let switches: string[] = [];
+  try {
+    switches = rankedSwitches(battle, side).map(row => row.choice);
+  } catch {
+    switches = withTera.filter(choice => choice.startsWith('switch '));
+  }
   const kept = [...moves];
   for (const choice of tera) {
     if (kept.length >= cap) break;
@@ -233,7 +244,7 @@ function capReplies(battle: Battle, side: SideId, cap: number, style: OpponentSt
     else attacks.push(choice);
   }
   let bestAttack = attacks[0];
-  if (attacks.length > 1) bestAttack = maxDamageChoice(battle, side, attacks);
+  if (attacks.length > 1) bestAttack = damageFallback(battle, side, attacks);
   const ordered = style === 'stall'
     ? [...switches.slice(0, 1), ...status, ...(bestAttack ? [bestAttack] : []), ...attacks.filter(choice => choice !== bestAttack)]
     : [...(bestAttack ? [bestAttack] : []), ...attacks.filter(choice => choice !== bestAttack), ...status, ...switches.slice(0, 1)];
@@ -313,6 +324,16 @@ async function loadRandbats(): Promise<RandbatsStats> {
     await dataLoader.load();
     return dataLoader.getStats();
   }
+}
+
+function damageFallback(battle: Battle, side: SideId, choices: string[]): string {
+  const plain = choices.filter(choice => choice && !isTeraChoice(choice));
+  try {
+    if (plain.length) return maxDamageChoice(battle, side, plain);
+  } catch {
+    // @smogon/calc has no entry for some species the sim still plays.
+  }
+  return plain[0] || choices[0] || 'default';
 }
 
 function faintCount(battle: Battle, side: SideId): number {
