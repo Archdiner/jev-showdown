@@ -1,5 +1,11 @@
 # Changelog
 
+## Cosmetic formes and Revival Blessing switches
+
+`@smogon/calc` has no entry for a cosmetic forme such as Gastrodon-East, so damage for that Pokémon came back as zero. `speciesForCalc` maps a cosmetic forme to the base species and leaves a forme the calc already lists, such as Ogerpon-Wellspring, unchanged. `calcMon` uses that name.
+
+A Revival Blessing follow-up is a forced switch onto a fainted teammate. `legalChoices` used to offer a healthy Pokémon, which the sim rejects (`INC-007`). It now offers the fainted teammates when the active slot has `revivalblessing`. The hidden-info battle copies the request's `reviving` flag onto that slot, so the search and the real battle list the same switches.
+
 ## Live losses reach the factory
 
 A ladder loss used to write a hypothesis and then stop. Per-battle logs have no `>start` input log, so position mining returned nothing and no factory job was enqueued. The same generic fallback text for every loss never became a self-play variant. Each reviewed loss now queues a challenger for that mechanism or eval term, or a mined position when the log can be reconstructed, or a line in `state/ops/dispositions.jsonl` saying why it was skipped. The factory claims open hypotheses, including `state/meta/hypotheses.json` rows, and plays them against max-damage. `npm run ops -- status` prints the cycle counts. The sentinel check `improvement-stall` is a P1 when losses were reviewed and nothing was queued for 15 minutes.
