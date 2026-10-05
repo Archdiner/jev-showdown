@@ -1,5 +1,9 @@
 # Changelog
 
+## Ladder lock check
+
+`npm run ladder -- --check` logs in and prints whether the account is named or locked and the current gen9randombattle rating, then exits. A proxy, ban, or lock popup, or a `‽` / `!` name in `|updateuser|`, exits immediately and does not reconnect. A close that follows that popup is not retried. `send()` no longer throws from timers; the ladder queue waits until the socket is logged in. Setup on a Mac is `npm install`, export `SHOWDOWN_USERNAME` and `SHOWDOWN_PASSWORD`, then `--check`.
+
 ## LLM layer (branch `cursor/llm-layer`)
 
 Search stays in charge. Two models sit beside it and can be turned off:

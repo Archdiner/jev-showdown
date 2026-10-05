@@ -108,15 +108,23 @@ Hand-written positions are smoke alarms, not the target. That includes the diagn
 
 ## Live ladder
 
+Run the client from a Mac on a residential or university network. Showdown locks datacenter, VPN, and proxy IPs (the name shows up as `‽username` or `!username` and the socket closes). Node.js 22 is the runtime. `npm install` builds the native `better-sqlite3` module.
+
+```bash
+npm install
+export SHOWDOWN_USERNAME='your-name' SHOWDOWN_PASSWORD='your-password'
+npm run ladder -- --check
+```
+
+`--check` logs in, prints `named` / `locked` and the current `gen9randombattle` rating, and exits. A lock, ban, or proxy popup exits with an error and does not reconnect. When it prints `named=yes locked=no`, use the play command below.
+
 The ladder client speaks the Showdown websocket protocol. `--engine max-damage` (the default) is the max-damage heuristic. `--engine search` calls `Bot.selectAction`. In a local head-to-head, max-damage won 12 games to search's 1. Search and eval code are unchanged. Credentials come only from the environment and are never printed.
 
 One login can play several battles at once. `--concurrency K` (default 1, maximum 5) keeps a ladder search queued whenever fewer than K battles are active. Each battle has its own protocol state, JSONL log, and worker-thread engine. Search time is per battle and is split across decisions that are in flight. If the server rejects a search (already searching, the 5-game cap, or high load), the client logs the popup, backs off, and retries. It never sends `/forfeit`.
 
-Real ladder (run this on your machine, not from a cloud agent):
+Real ladder (run this on your Mac, not from a cloud agent, and only after `--check` reports `locked=no`):
 
 ```bash
-export SHOWDOWN_USERNAME='your-bot-name'
-export SHOWDOWN_PASSWORD='your-password'
 npm run ladder -- --games 10 --format gen9randombattle --engine max-damage --concurrency 1
 ```
 

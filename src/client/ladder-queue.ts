@@ -3,6 +3,7 @@ import { safeError, toID } from './ids.js';
 
 const SEARCH_BACKOFF_MAX_MS = 30_000;
 const SEARCH_GAP_MS = 500;
+const READY_WAIT_MS = 250;
 
 /**
  * Showdown allows one search per format. A login keeps up to K battles by
@@ -93,7 +94,15 @@ export class LadderQueue {
 
   fill(): void {
     if (!this.autoSearch || this.stopped || this.searching || this.timer) return;
+    if (this.client.isBlocked()) {
+      this.stopped = true;
+      return;
+    }
     if (this.active.size >= this.concurrency) return;
+    if (!this.client.isReady()) {
+      this.schedule(READY_WAIT_MS);
+      return;
+    }
     const wait = SEARCH_GAP_MS - (Date.now() - this.lastSearchAt);
     if (wait > 0) {
       this.schedule(wait);
@@ -102,12 +111,14 @@ export class LadderQueue {
     this.searching = true;
     this.lastSearchAt = Date.now();
     try {
-      this.client.search(this.format);
+      if (!this.client.search(this.format)) {
+        this.searching = false;
+        this.schedule(READY_WAIT_MS);
+      }
     } catch (err) {
       this.searching = false;
-      this.log(`search send failed, retrying in ${this.backoffMs}ms: ${safeError(err)}`);
-      this.schedule(this.backoffMs);
-      this.backoffMs = Math.min(SEARCH_BACKOFF_MAX_MS, this.backoffMs * 2);
+      this.log(`search paused until the connection is ready: ${safeError(err)}`);
+      this.schedule(READY_WAIT_MS);
     }
   }
 
@@ -115,15 +126,19 @@ export class LadderQueue {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (!this.client.isReady()) return;
     try {
       this.client.cancelSearch();
     } catch {
-      // The socket may already be closed.
+      // The socket may already be closed. Timers must not surface that.
     }
   }
 
   private schedule(delayMs: number): void {
-    if (this.stopped || this.timer) return;
+    if (this.stopped || this.timer || this.client.isBlocked()) {
+      if (this.client.isBlocked()) this.stopped = true;
+      return;
+    }
     this.timer = setTimeout(() => {
       this.timer = null;
       this.fill();

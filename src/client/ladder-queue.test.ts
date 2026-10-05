@@ -1,5 +1,6 @@
 import { budgetSearchMs, clampConcurrency, MAX_LADDER_CONCURRENCY, parseEngine } from './engines.js';
-import { isAlreadySearching, isSearchRejection, parseUpdateSearch } from './ladder-queue.js';
+import { isAlreadySearching, isSearchRejection, LadderQueue, parseUpdateSearch } from './ladder-queue.js';
+import type { ShowdownClient } from './showdown-client.js';
 
 describe('ladder concurrency', () => {
   it('caps concurrency at the server limit', () => {
@@ -31,5 +32,40 @@ describe('ladder concurrency', () => {
       searching: ['gen9randombattle'],
       games: ['battle-gen9randombattle-1'],
     });
+  });
+
+  it('pauses the queue until the socket is ready and stops when the account is blocked', () => {
+    jest.useFakeTimers({ now: 10_000 });
+    try {
+      let ready = false;
+      let blocked = false;
+      const searches: string[] = [];
+      const client = {
+        isReady: () => ready,
+        isBlocked: () => blocked,
+        search: (format: string) => {
+          searches.push(format);
+          return true;
+        },
+        cancelSearch: () => true,
+      } as unknown as ShowdownClient;
+
+      const waiting = new LadderQueue(client, 'gen9randombattle', 1, () => {}, true);
+      expect(() => waiting.fill()).not.toThrow();
+      jest.advanceTimersByTime(200);
+      expect(searches).toEqual([]);
+      ready = true;
+      jest.advanceTimersByTime(250);
+      expect(searches).toEqual(['gen9randombattle']);
+
+      ready = false;
+      blocked = true;
+      const stopped = new LadderQueue(client, 'gen9randombattle', 1, () => {}, true);
+      expect(() => stopped.fill()).not.toThrow();
+      jest.advanceTimersByTime(2000);
+      expect(searches).toEqual(['gen9randombattle']);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

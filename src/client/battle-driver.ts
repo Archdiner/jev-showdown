@@ -384,16 +384,19 @@ export class BattleDriver extends EventEmitter {
 
   private sendChoice(room: RoomState, choice: string, rqid: number | null, action: Action | null, preview: boolean): void {
     if (this.stopped) return;
-    if (rqid !== null) room.answered.add(rqid);
-    room.lastChoice = action;
+    if (!this.options.client.isReady()) return;
+    let sent = false;
     try {
-      this.options.client.choose(room.roomId, choice);
+      sent = this.options.client.choose(room.roomId, choice);
     } catch (err) {
       if (this.stopped) return;
       room.crashes += 1;
       room.log.write({ type: 'crash', battleId: room.roomId, message: `send failed: ${safeError(err)}` });
       return;
     }
+    if (!sent) return;
+    if (rqid !== null) room.answered.add(rqid);
+    room.lastChoice = action;
     if (preview) {
       room.log.write({ type: 'turn', battleId: room.roomId, turn: 0, rqid, choice, decision: 'team', score: null });
     }
