@@ -1,7 +1,100 @@
 {
   "version": "1.0",
-  "exported_at": 1791156205669,
+  "exported_at": 1791159980809,
   "nodes": [
+    {
+      "id": "hyp-config-layer",
+      "type": "Hypothesis",
+      "status": "done",
+      "title": "A declarative config can be tuned without fitting examples",
+      "description": "Strategy is a hashed config. Tuning uses game win rate and the dev position set. Held-out positions and live results are only a check.",
+      "owner": "config-layer",
+      "session": "cursor/config-layer",
+      "commit": "0b73451",
+      "created_at": 1791159959372,
+      "updated_at": 1791159959372,
+      "rationale": "A rule for one species, move, or fixture does not transfer. Generated and mined positions, split by a hash, keep sweeps off the held-out set.",
+      "expected_effect": "Any registered combination of agent, search, evaluator, opponent model, policies, context, advisor, models, and meta controller can be built with buildBot and compared on win rate plus dev-set agreement.",
+      "test_plan": "Unit tests for registry, merge, hash, env isolation, identical selfplay and local decisions, the holdout split, and generalization. Validate every config. Smoke 20 paired games. Promotion stays on the gate."
+    },
+    {
+      "id": "task-config-layer",
+      "type": "Task",
+      "status": "done",
+      "title": "Ship the config and experiment layer",
+      "description": "buildBot is the only factory. Env profiles cannot change the move.",
+      "owner": "config-layer",
+      "session": "cursor/config-layer",
+      "commit": "0b73451",
+      "created_at": 1791159959372,
+      "updated_at": 1791159959372,
+      "acceptance_criteria": [
+        "The same configId decides selfplay and local-server replays",
+        "Sweeps score win rate plus the dev set only",
+        "Held-out and live results are gatekeeper checks",
+        "20-game smoke records a win rate with zero invalid choices and zero crashes"
+      ],
+      "files": [
+        "src/config",
+        "src/exp",
+        "configs"
+      ]
+    },
+    {
+      "id": "exp-config-layer",
+      "type": "Experiment",
+      "status": "done",
+      "title": "Smoke champion config against maxdamage",
+      "description": "configs/experiments/smoke.yaml. 10 seeds, both sides. Not a promotion.",
+      "owner": "config-layer",
+      "session": "cursor/config-layer",
+      "commit": "0b73451",
+      "created_at": 1791159959372,
+      "updated_at": 1791159959372,
+      "config_path": "configs/experiments/smoke.yaml",
+      "hypothesis_id": "hyp-config-layer",
+      "predicted_effect": "The champion config plays the exact 1-ply search and beats maxdamage in this smoke.",
+      "kill_condition": "Invalid choices, crashes, or a configId that changes between selfplay and local."
+    },
+    {
+      "id": "result-config-smoke",
+      "type": "Result",
+      "status": "done",
+      "title": "Smoke 19/20 vs maxdamage",
+      "description": "configId 374a5edff9039983 vs 13e462ed6f0a0b5c. 19 wins, 0 invalid, 0 crashes. Held-out agreement 0 on 2 positions. Live results file absent. Obvious-move guardrail 21/21 on this run; two earlier process starts scored 19/21 and 20/21, so that suite is not a tuning score. Dev-set agreement of 1-ply against the depth-2 labels was 7/22.",
+      "owner": "config-layer",
+      "session": "cursor/config-layer",
+      "commit": "0b73451",
+      "created_at": 1791159959372,
+      "updated_at": 1791159959372,
+      "metrics": {
+        "wins": 19,
+        "invalid": 0,
+        "crashes": 0,
+        "held_out_positions": 2,
+        "held_out_agreement": 0,
+        "dev_agreement_1ply": 0.3181818181818182,
+        "guardrail_passed": 21,
+        "guardrail_total": 21
+      },
+      "win_rate": 0.95,
+      "game_count": 20
+    },
+    {
+      "id": "decision-config-factory",
+      "type": "Decision",
+      "status": "done",
+      "title": "buildBot is the only factory",
+      "description": "Promotion remains npm run gate. The experiment CLI does not promote.",
+      "owner": "config-layer",
+      "session": "cursor/config-layer",
+      "commit": "0b73451",
+      "created_at": 1791159959372,
+      "updated_at": 1791159959372,
+      "context": "Self-play, the gate, diagnostics, the local server, and the ladder each had their own chooser.",
+      "decision": "Every environment calls buildBot. Env profiles set time, network, logging, and LLM permission. configId hashes strategy only. Sweeps do not read the held-out split.",
+      "consequences": "A new search id or LiveBattleBridge plugs in without a second entry point."
+    },
     {
       "id": "goal-ladder-1",
       "type": "Goal",
@@ -532,6 +625,34 @@
     }
   ],
   "edges": [
+    {
+      "id": "exp-config-layer-tests-hyp-config-layer",
+      "from_node": "exp-config-layer",
+      "to_node": "hyp-config-layer",
+      "type": "tests",
+      "created_at": 1791159959372
+    },
+    {
+      "id": "exp-config-layer-produced-result-config-smoke",
+      "from_node": "exp-config-layer",
+      "to_node": "result-config-smoke",
+      "type": "produced",
+      "created_at": 1791159959372
+    },
+    {
+      "id": "task-config-layer-tests-hyp-config-layer",
+      "from_node": "task-config-layer",
+      "to_node": "hyp-config-layer",
+      "type": "tests",
+      "created_at": 1791159959372
+    },
+    {
+      "id": "decision-config-factory-supports-hyp-config-layer",
+      "from_node": "decision-config-factory",
+      "to_node": "hyp-config-layer",
+      "type": "supports",
+      "created_at": 1791159959372
+    },
     {
       "id": "decision-typescript-pkmn-supports-goal-ladder-1",
       "from_node": "decision-typescript-pkmn",

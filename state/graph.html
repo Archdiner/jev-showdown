@@ -13,9 +13,49 @@
 </head>
 <body>
   <h1>Development Graph</h1>
-  <p>Exported: 2026-10-04T23:23:25.669Z</p>
+  <p>Exported: 2026-10-05T00:26:20.809Z</p>
   
-  <h2>Nodes (28)</h2>
+  <h2>Nodes (33)</h2>
+  
+    <div class="node Hypothesis done">
+      <strong>Hypothesis: A declarative config can be tuned without fitting examples</strong>
+      <div>Status: done</div>
+      <div>Strategy is a hashed config. Tuning uses game win rate and the dev position set. Held-out positions and live results are only a check.</div>
+      <div>Commit: <code>0b73451</code></div>
+      
+    </div>
+  
+    <div class="node Task done">
+      <strong>Task: Ship the config and experiment layer</strong>
+      <div>Status: done</div>
+      <div>buildBot is the only factory. Env profiles cannot change the move.</div>
+      <div>Commit: <code>0b73451</code></div>
+      
+    </div>
+  
+    <div class="node Experiment done">
+      <strong>Experiment: Smoke champion config against maxdamage</strong>
+      <div>Status: done</div>
+      <div>configs/experiments/smoke.yaml. 10 seeds, both sides. Not a promotion.</div>
+      <div>Commit: <code>0b73451</code></div>
+      
+    </div>
+  
+    <div class="node Result done">
+      <strong>Result: Smoke 19/20 vs maxdamage</strong>
+      <div>Status: done</div>
+      <div>configId 374a5edff9039983 vs 13e462ed6f0a0b5c. 19 wins, 0 invalid, 0 crashes. Held-out agreement 0 on 2 positions. Live results file absent. Obvious-move guardrail 21/21 on this run; two earlier process starts scored 19/21 and 20/21, so that suite is not a tuning score. Dev-set agreement of 1-ply against the depth-2 labels was 7/22.</div>
+      <div>Commit: <code>0b73451</code></div>
+      <div>Metrics: {"wins":19,"invalid":0,"crashes":0,"held_out_positions":2,"held_out_agreement":0,"dev_agreement_1ply":0.3181818181818182,"guardrail_passed":21,"guardrail_total":21}</div>
+    </div>
+  
+    <div class="node Decision done">
+      <strong>Decision: buildBot is the only factory</strong>
+      <div>Status: done</div>
+      <div>Promotion remains npm run gate. The experiment CLI does not promote.</div>
+      <div>Commit: <code>0b73451</code></div>
+      
+    </div>
   
     <div class="node Goal open">
       <strong>Goal: #1 on gen9randombattle ladder</strong>
@@ -242,8 +282,16 @@
     </div>
   
   
-  <h2>Edges (24)</h2>
+  <h2>Edges (28)</h2>
   <ul>
+  
+    <li>exp-config-layer --[tests]--> hyp-config-layer</li>
+  
+    <li>exp-config-layer --[produced]--> result-config-smoke</li>
+  
+    <li>task-config-layer --[tests]--> hyp-config-layer</li>
+  
+    <li>decision-config-factory --[supports]--> hyp-config-layer</li>
   
     <li>decision-typescript-pkmn --[supports]--> goal-ladder-1</li>
   

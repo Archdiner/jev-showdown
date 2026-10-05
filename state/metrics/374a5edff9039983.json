@@ -1,0 +1,76 @@
+{
+  "win_rate_by_opponent": {
+    "13e462ed6f0a0b5c": 0.95
+  },
+  "situations": {
+    "leading": {
+      "games": 20,
+      "wins": 19,
+      "win_rate": 0.95
+    },
+    "trailing": {
+      "games": 0,
+      "wins": 0,
+      "win_rate": 0
+    },
+    "endgame_1v1": {
+      "games": 1,
+      "wins": 0,
+      "win_rate": 0
+    },
+    "endgame_2v2": {
+      "games": 1,
+      "wins": 0,
+      "win_rate": 0
+    },
+    "hazard_advantage": {
+      "games": 0,
+      "wins": 0,
+      "win_rate": 0
+    },
+    "hazard_disadvantage": {
+      "games": 0,
+      "wins": 0,
+      "win_rate": 0
+    },
+    "weather_active": {
+      "games": 4,
+      "wins": 4,
+      "win_rate": 1
+    },
+    "tera_first": {
+      "games": 0,
+      "wins": 0,
+      "win_rate": 0
+    },
+    "tera_second": {
+      "games": 0,
+      "wins": 0,
+      "win_rate": 0
+    }
+  },
+  "decisions": {
+    "switch_frequency": 0,
+    "switch_quality": 0,
+    "setup_sweeps_allowed": 0,
+    "setup_sweeps_achieved": 0,
+    "speed_option_survival": 0,
+    "blunder_rate": 0
+  },
+  "diagnostic_suite": {
+    "total": 0,
+    "passed": 0,
+    "pass_rate": 0
+  },
+  "guardrails": {
+    "invalid_choices": 0,
+    "crashes": 0,
+    "timeouts": 0,
+    "p99_latency_ms": 75,
+    "fallback_rate": 0,
+    "state_mismatches": 0
+  },
+  "games_played": 20,
+  "timestamp": 1791159920450,
+  "commit_sha": "0b73451"
+}

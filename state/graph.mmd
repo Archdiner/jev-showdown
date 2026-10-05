@@ -1,4 +1,9 @@
 graph TD
+  hyp-config-layer["Hypothesis: A declarative config can be tu"]
+  task-config-layer["Task: Ship the config and experiment"]
+  exp-config-layer["Experiment: Smoke champion config against "]
+  result-config-smoke["Result: Smoke 19/20 vs maxdamage"]
+  decision-config-factory["Decision: buildBot is the only factory"]
   goal-ladder-1{{"Goal: #1 on gen9randombattle ladder"}}
   champion-v0(["Champion: Champion v0: Exact Sim"])
   decision-typescript-pkmn["Decision: TypeScript with @pkmn ecosyste"]
@@ -27,6 +32,10 @@ graph TD
   decision-loss-reviewer-grok-4-7["Decision: Loss reviewer defaults to Grok"]
   experiment-llm-jev-prior["Experiment: Challenger: Jev search prior"]
   hypothesis-jev-search-prior["Hypothesis: Jev prior on top-K search acti"]
+  exp-config-layer -->|tests| hyp-config-layer
+  exp-config-layer -->|produced| result-config-smoke
+  task-config-layer -->|tests| hyp-config-layer
+  decision-config-factory -->|supports| hyp-config-layer
   decision-typescript-pkmn -->|supports| goal-ladder-1
   decision-mit-only -->|supports| goal-ladder-1
   decision-search-first -->|supports| goal-ladder-1
