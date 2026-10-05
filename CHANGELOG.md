@@ -1,5 +1,9 @@
 # Changelog
 
+## One ladder runner per account
+
+A ladder process takes `state/ladder-<userid>.lock` before it logs in. The file stores the pid and the start time. A second process for that account prints the holder's pid and start time and exits, so two restarts cannot both send choices into the same battles. A lock whose pid is not running is stale and is replaced. `--check` does not take the lock. A local two-bot series locks BotAlpha and BotBravo.
+
 ## Stale battle rooms do not block the drain
 
 A room left over from an earlier session is rejoined when the runner logs in. If its newest `|t:|` is more than 70 minutes old, the client forfeits it and does not deliver its lines, so it is not an in-progress game and does not use a concurrency slot. A room with no `|t:|` (a local battle) stays live. A battle id that already has a result is not counted again, so a second `game_start` cannot hold the drain. The first SIGTERM or SIGUSR1 still drains real games; once every real game has a result the process exits.

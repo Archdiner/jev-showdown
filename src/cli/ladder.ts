@@ -10,6 +10,12 @@ import { BattleDriver, GameSummary } from '../client/battle-driver.js';
 import { DecisionClient } from '../client/decision-client.js';
 import { startLocalServer } from '../client/local-server.js';
 import { writeLadderRun } from '../client/ladder-run.js';
+import {
+  AccountLock,
+  AccountLockHeldError,
+  accountLockRefusal,
+  acquireAccountLock,
+} from '../client/account-lock.js';
 import { safeError, toID } from '../client/ids.js';
 import { EngineName, MAX_LADDER_CONCURRENCY, parseEngine } from '../client/engines.js';
 import {
@@ -196,6 +202,7 @@ Each finished game records configId, configHash, and the commit. The startup lin
 --ramp steps from 3 (search) or 4 (max-damage) up to K while p95 latency and the turn timer stay healthy, and steps back when they do not.
 Backpressure always pauses new searches when p95 latency degrades, the turn timer drops under the safety margin, or Showdown throttles a search. Games already running are left in place.
 A proxy lock, ban, or ‽/! name exits immediately and does not reconnect.
+One account, one runner. Before login the process writes state/ladder-<userid>.lock with its pid and start time. If that file names a pid that is still running, this process prints that pid and start time and exits. A lock whose pid is dead is stale and is taken over. --check does not take the lock. A local two-bot series locks BotAlpha and BotBravo.
 
 Graceful drain (finish in-progress games, then exit):
   kill -USR1 <pid>    or    kill -TERM <pid>
@@ -700,6 +707,7 @@ async function main(): Promise<void> {
       return;
     }
 
+    const releaseLocks = holdAccountLocks(accountsFor(opts));
     applyLiveConcurrency(opts);
     const gitSha = currentGitSha();
     const identity = resolveLadderIdentity({
@@ -737,6 +745,7 @@ async function main(): Promise<void> {
       admission.stop();
       session.close();
       await metrics.close();
+      releaseLocks();
     }
   } finally {
     await posthog?.shutdown();
@@ -745,6 +754,39 @@ async function main(): Promise<void> {
     const code = typeof process.exitCode === 'number' ? process.exitCode : 0;
     process.exit(code);
   }
+}
+
+function accountsFor(opts: LadderOptions): string[] {
+  if (opts.local && !opts.server && !opts.accept && !opts.challenge) return ['BotAlpha', 'BotBravo'];
+  const { username } = ladderIdentity(opts);
+  if (!username) {
+    throw new Error('Set SHOWDOWN_USERNAME and SHOWDOWN_PASSWORD. They are not read from source files.');
+  }
+  return [username];
+}
+
+function holdAccountLocks(usernames: string[]): () => void {
+  const held: AccountLock[] = [];
+  try {
+    for (const username of usernames) {
+      const lock = acquireAccountLock(username);
+      held.push(lock);
+      if (lock.replacedStale) {
+        console.error(
+          `[ladder] stale account lock for ${username} (pid ${lock.replacedStale.pid}, started ${lock.replacedStale.startedAt}) belonged to a dead process. Taking it.`,
+        );
+      }
+      console.log(`[ladder] account lock user=${username} pid=${lock.pid} started=${lock.startedAt} file=${lock.path}`);
+    }
+  } catch (err) {
+    for (const lock of held) lock.release();
+    throw err;
+  }
+  const release = () => {
+    for (const lock of held) lock.release();
+  };
+  process.once('exit', release);
+  return release;
 }
 
 function openDrain(
@@ -814,6 +856,7 @@ function openAdmission(opts: LadderOptions): SearchAdmission {
 }
 
 main().catch(err => {
-  console.error(`[ladder] ${safeError(err)}`);
+  if (err instanceof AccountLockHeldError) console.error(accountLockRefusal(err));
+  else console.error(`[ladder] ${safeError(err)}`);
   process.exit(1);
 });
