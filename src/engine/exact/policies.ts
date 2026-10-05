@@ -18,31 +18,38 @@ export interface Decision {
   answersPredictedSwitch?: boolean;
 }
 
+function elapsedMs(start: NodeJS.CpuUsage): number {
+  // The host forks this VM and the wall clock jumps by minutes. That is
+  // not a slow search. CPU time still counts a garbage-collection pause.
+  const used = process.cpuUsage(start);
+  return (used.user + used.system) / 1000;
+}
+
 export async function decide(spec: PolicySpec, battle: Battle, side: SideId, rng: PRNG): Promise<Decision> {
-  const started = Date.now();
+  const started = process.cpuUsage();
   const legal = legalChoices(battle, side);
   if (legal.length === 0) {
-    return { choice: 'default', ms: Date.now() - started };
+    return { choice: 'default', ms: elapsedMs(started) };
   }
 
   if (spec.kind === 'random') {
     const choice = legal[rng.random(legal.length)];
-    return { choice, ms: Date.now() - started };
+    return { choice, ms: elapsedMs(started) };
   }
 
   if (spec.kind === 'maxdamage') {
-    return { choice: maxDamageChoice(battle, side, legal), ms: Date.now() - started };
+    return { choice: maxDamageChoice(battle, side, legal), ms: elapsedMs(started) };
   }
 
   if (spec.kind === 'legacy') {
     const choice = await legacyChoice(battle, side, legal);
-    return { choice, ms: Date.now() - started };
+    return { choice, ms: elapsedMs(started) };
   }
 
   const trace = exactSearch(battle, side, spec.config);
   return {
     choice: trace.choice,
-    ms: Date.now() - started,
+    ms: elapsedMs(started),
     scores: trace.scores,
     predictedSwitch: trace.predictedSwitch,
     answersPredictedSwitch: trace.answersPredictedSwitch,
