@@ -9,7 +9,8 @@ import { Action, GameState } from '../types/index.js';
 import { StateMismatch } from '../types/format.js';
 import { ShowdownClient, RatingUpdate, ReplayNotice, parseRatingLine, parseReplayUrl, replayMatchesRoom } from './showdown-client.js';
 import { DecisionClient } from './decision-client.js';
-import { OpponentTracker } from './opponent-tracker.js';
+import { OpponentTracker, type OpponentTrackerOptions } from './opponent-tracker.js';
+import { loadConfig } from '../config/load.js';
 import { GameLog, openGameLog } from './game-log.js';
 import {
   formatChoice,
@@ -146,6 +147,11 @@ export interface BattleDriverOptions {
   routeBattle?: (battleId: string) => BattleAssignment;
   onBattleFault?: (battleId: string, fault: 'invalid-move' | 'crash') => void;
   onGame?: (record: LadderGameRecord) => void;
+  /**
+   * Replaces SetInference when this battle's config id is `calibrated`.
+   * Ignored for the champion and the default, which stay on BeliefTracker.
+   */
+  posteriorFactory?: OpponentTrackerOptions['posteriorFactory'];
 }
 
 export interface BattleAssignment {
@@ -178,6 +184,8 @@ export class BattleDriver extends EventEmitter {
   private readonly rooms = new Map<string, RoomState>();
   /** Room ids that already wrote a result. Later lines must not open them again. */
   private readonly closedRooms = new Set<string>();
+  /** `setInference.id` for a config file. Null means the legacy tracker. */
+  private readonly inferenceIds = new Map<string, string | null>();
   private readonly gens = new Generations(Dex);
   private stopped = false;
 
@@ -332,10 +340,38 @@ export class BattleDriver extends EventEmitter {
     }
   }
 
+  /** `calibrated` opts into the posterior. A missing file or any other id stays legacy. */
+  private setInferenceId(configPath: string | null): string | null {
+    if (!configPath) return null;
+    const cached = this.inferenceIds.get(configPath);
+    if (cached !== undefined) return cached;
+    let id: string | null = null;
+    try {
+      id = loadConfig(configPath).config.opponentModel.setInference.id;
+    } catch {
+      id = null;
+    }
+    this.inferenceIds.set(configPath, id);
+    return id;
+  }
+
   private openRoom(roomId: string): RoomState {
     const battle = new Battle(this.gens);
-    const tracker = new OpponentTracker(this.options.format, () => this.rooms.get(roomId)?.ourSide ?? null);
+    const assignment = this.options.routeBattle?.(roomId) ?? null;
+    const configPath = assignment ? assignment.configPath : (this.options.configPath ?? null);
     const log = openGameLog(this.options.logDir, `${toID(this.options.username)}-${roomId}`);
+    const tracker = new OpponentTracker(this.options.format, () => this.rooms.get(roomId)?.ourSide ?? null, {
+      setInference: this.setInferenceId(configPath),
+      onBeliefError: (err, beliefErrors) => {
+        log.write({
+          type: 'belief_error',
+          battleId: roomId,
+          message: safeError(err),
+          beliefErrors,
+        });
+      },
+      posteriorFactory: this.options.posteriorFactory,
+    });
     const room: RoomState = {
       roomId,
       battle,
@@ -376,10 +412,8 @@ export class BattleDriver extends EventEmitter {
       ambiguousPopups: 0,
       noLegalRetryLogged: false,
       prediction: new PredictionLog(),
-      assignment: null,
+      assignment,
     };
-    const assignment = this.options.routeBattle?.(roomId) ?? null;
-    room.assignment = assignment;
     this.rooms.set(roomId, room);
     this.options.client.trackRoom(roomId);
     this.options.decisions.openBattle(
@@ -1131,6 +1165,7 @@ export class BattleDriver extends EventEmitter {
       crashes: room.crashes,
       fallbacks: room.fallbacks,
       mismatches: room.mismatchCount,
+      beliefErrors: room.tracker.beliefErrors(),
       eloBefore,
       eloAfter,
       preRating,

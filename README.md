@@ -601,7 +601,7 @@ Other fields:
 | `opponent`, `opponentRating` | name and pre-game ladder rating from `\|player\|`. Null when the server omits them. |
 | `eloBefore`, `eloAfter` | our rating from the rating popup. `eloBefore` falls back to our `\|player\|` rating. Null when absent. Never 1000. |
 | `gxe` | from the rating line when that parser provides it. Null when absent. Never 50. |
-| `turns`, `invalidChoices`, `invalidChoiceReasons`, `crashes`, `fallbacks`, `mismatches` | existing counters. `invalidChoiceReasons` is the text after `[Invalid choice]` on each `\|error\|` or `\|bigerror\|` line, capped at 8. A chat echo of the same words is not counted. Ops name for `invalidChoices` is `invalid`. |
+| `turns`, `invalidChoices`, `invalidChoiceReasons`, `crashes`, `fallbacks`, `mismatches`, `beliefErrors` | existing counters. `invalidChoiceReasons` is the text after `[Invalid choice]` on each `\|error\|` or `\|bigerror\|` line, capped at 8. A chat echo of the same words is not counted. Ops name for `invalidChoices` is `invalid`. `beliefErrors` counts posterior updates that threw; that battle then uses BeliefTracker. It is 0 when set inference is not `calibrated`. |
 | `durationMs` | wall clock from room open to the record |
 | `decisions` | number of `latencyMs` samples |
 | `latencyP50Ms`, `latencyP95Ms`, `latencyP99Ms` | nearest-rank percentiles of per-turn `latencyMs`, same rule as `metrics.jsonl`. Null when there are no samples. |

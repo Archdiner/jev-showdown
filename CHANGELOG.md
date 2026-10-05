@@ -1,5 +1,9 @@
 # Changelog
 
+## Live opponent beliefs
+
+The ladder client keeps the BeliefTracker from before calibrated set inference unless that battle's config sets `setInference.id` to `calibrated`. The champion file and a run with no config file stay on that tracker, so a restarted runner uses the same opponent beliefs as before. `configs/examples/opponent-calibrated.yaml` is the opt-in. The posterior is not constructed on the legacy path. If a posterior update throws, the client logs it, counts it as `beliefErrors` on the game record, and finishes that battle on BeliefTracker instead of failing the decision.
+
 ## Invalid choices are not retried into a locked turn
 
 A `/choose` that the server already has is not sent again just because the opponent is still deciding. Showdown treats the second `/choose` as a new decision. When the first choice cannot be undone, or the next turn has started, that resend is `|error|[Invalid choice]`, and the client used to keep sending it. The same choice goes out again only when a clock line for us arrives after the send, which is the case where the server still has the choice open.
