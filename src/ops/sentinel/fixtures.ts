@@ -244,13 +244,24 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     '',
   ].join('\n'));
 
-  fs.writeFileSync(path.join(ops, 'cycle.jsonl'), `${JSON.stringify({
-    ts: now - 20 * 60 * 1000,
-    type: 'loss',
-    hypotheses: 1,
-    queued: 0,
-    reason: 'skipped: no self-play variant for hypothesis hyp-loss',
-  })}\n`);
+  const cycleRows = [
+    {
+      ts: now - 20 * 60 * 1000,
+      type: 'loss',
+      hypotheses: 1,
+      queued: 0,
+      reason: 'skipped: no self-play variant for hypothesis hyp-loss',
+    },
+    ...[1, 2, 3].map(index => ({
+      ts: now - (19 - index) * 60 * 1000,
+      type: 'pass',
+      lossesReviewed: 1,
+      hypothesesCreated: 1,
+      jobsQueued: 0,
+      skipped: 1,
+    })),
+  ];
+  fs.writeFileSync(path.join(ops, 'cycle.jsonl'), `${cycleRows.map(row => JSON.stringify(row)).join('\n')}\n`);
 
   const processes: ProcessSnapshot[] = [
     { pid: 50, cmd: 'node tsx src/cli/ladder.ts --username asad', env: { SHOWDOWN_USERNAME: 'asad' } },

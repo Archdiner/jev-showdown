@@ -1,6 +1,8 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { battleRowChoice, isDuplicateDisconnect } from '../../client/game-integrity.js';
 import { GraphDB } from '../../graph/db.js';
+import { degenerateAlert } from '../cycle.js';
 import { compareIncidents } from './incidents.js';
 import { actionable, type Incident, type IncidentEvent, type ObservedGame, type SentinelContext } from './types.js';
 
@@ -37,6 +39,7 @@ export interface Scorecard {
     variants: Array<{ id: string; wins: number; losses: number; ties: number; games: number; winRate: number | null }>;
     loopCycles: number | null;
     loopDetail: string;
+    loopHealth: string;
     promoted: string[];
     rejected: string[];
     regressions: string[];
@@ -128,6 +131,7 @@ export function buildScorecard(ctx: SentinelContext, incidents: Incident[], even
       variants,
       loopCycles: graph.cycles,
       loopDetail: graph.detail,
+      loopHealth: loopHealth(ctx, since),
       promoted: graph.promoted,
       rejected: graph.rejected,
       regressions: graph.regressions,
@@ -194,6 +198,7 @@ export function formatScorecard(card: Scorecard, style: 'text' | 'md' = 'text'):
   }
   const cycles = card.progress.loopCycles === null ? 'unknown' : String(card.progress.loopCycles);
   lines.push(`  loop       ${cycles} cycles  ${card.progress.loopDetail}`);
+  lines.push(`  loop health ${card.progress.loopHealth}`);
   lines.push(`  promoted   ${card.progress.promoted.length ? card.progress.promoted.join(' | ') : 'none'}`);
   lines.push(`  rejected   ${card.progress.rejected.length ? card.progress.rejected.join(' | ') : 'none'}`);
   lines.push(`  regressions ${card.progress.regressions.length ? card.progress.regressions.join(' | ') : 'none'}`);
@@ -403,6 +408,20 @@ function tallyOf(games: ObservedGame[]): { wins: number; losses: number; ties: n
   const ties = games.filter(game => game.outcome === 'tie').length;
   const played = wins + losses + ties;
   return { wins, losses, ties, games: played, winRate: played ? wins / played : null };
+}
+
+function loopHealth(ctx: SentinelContext, since: number): string {
+  const events = ctx.rows
+    .filter(row => path.basename(row.file) === 'cycle.jsonl' && row.value)
+    .map(row => row.value)
+    .filter((value): value is Record<string, unknown> => Boolean(value))
+    .filter(value => {
+      const ts = typeof value.ts === 'number' ? value.ts : null;
+      if (ts === null) return true;
+      return ts >= since && ts <= ctx.now + 60_000;
+    });
+  const alert = degenerateAlert(events);
+  return alert ? alert.message : 'ok';
 }
 
 function readGraph(ctx: SentinelContext, since: number): {

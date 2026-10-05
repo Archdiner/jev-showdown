@@ -49,6 +49,16 @@ export type GameSummary = LadderGameRecord & {
   ambiguousPopups: number;
 };
 
+/** A JSON copy of the private request, so a later miner can rebuild the decision without a `|request|` line. */
+function requestSnapshot(request: unknown): unknown | null {
+  try {
+    const copy = JSON.parse(JSON.stringify(request));
+    return copy && typeof copy === 'object' ? copy : null;
+  } catch {
+    return null;
+  }
+}
+
 function ourHpFromRequest(request: any): number | null {
   const slots: any[] = request?.side?.pokemon || [];
   const active = slots.find(mon => mon?.active) || slots[0];
@@ -635,6 +645,7 @@ export class BattleDriver extends EventEmitter {
           foeHpBefore: foeHpFrom(input.position),
         }
         : null;
+      const request = requestSnapshot(input.request);
       room.log.write({
         type: 'turn',
         kind: 'turn',
@@ -643,6 +654,7 @@ export class BattleDriver extends EventEmitter {
         rqid: input.rqid,
         decision: input.safe,
         choice: input.choice,
+        ...(request ? { request } : {}),
         score: input.score,
         searchMs: input.searchMs,
         latencyMs: input.latencyMs,

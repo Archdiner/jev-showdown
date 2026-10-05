@@ -12,7 +12,7 @@ import { openDb } from './db.js';
 import { beat } from './heartbeat.js';
 import { writeChampion, writeLiveApproved } from './labels.js';
 import type { OpsPaths } from './paths.js';
-import { listProposals, completeJob, type Proposal } from './queue.js';
+import { listHandoffs, listProposals, completeJob, type Proposal } from './queue.js';
 import { countableGameRows } from '../client/game-integrity.js';
 import { readLabels } from './labels-read.js';
 import { sprt, tallySide } from './sprt.js';
@@ -48,6 +48,8 @@ export interface Evidence {
   diagnostics: DiagnosticReport;
   /** Present when the caller is the no-game bootstrap path. It does not skip SPRT. */
   bootstrap?: boolean;
+  /** Set when the tally is against a panel opponent rather than the champion. */
+  opponent?: string;
 }
 
 export interface Verdict {
@@ -98,7 +100,9 @@ export function judge(paths: OpsPaths, evidence: Evidence): Verdict {
   } else if (played === 0) {
     reason = `no paired games against the champion; diagnostics ${evidence.diagnostics.passed}/${evidence.diagnostics.total}`;
   } else if (sprtVerdict === 'reject') {
-    reason = 'SPRT says the challenger is worse than the champion';
+    reason = evidence.opponent
+      ? `SPRT says the challenger is worse than ${evidence.opponent}`
+      : 'SPRT says the challenger is worse than the champion';
   } else if (sprtVerdict === 'continue') {
     reason = 'SPRT inconclusive, no label';
   } else {
@@ -184,6 +188,37 @@ export interface ReviewOptions {
     seed: number,
     parallel: boolean,
   ) => Promise<GameResult[]>;
+}
+
+/**
+ * A factory handoff is a finished max-damage series that did not earn a
+ * live-approved proposal. The gatekeeper records the decision. It does not
+ * label a clean promote from that series; that path is `reviewProposals`.
+ */
+export function reviewHandoffs(
+  paths: OpsPaths,
+  opts: Pick<ReviewOptions, 'diagnostics'> = {},
+): Verdict[] {
+  const diagnostics = opts.diagnostics ?? diagnosticsForConfig;
+  const verdicts: Verdict[] = [];
+  for (const job of listHandoffs(paths)) {
+    const handoff = job.handoff;
+    if (handoff.sprt === 'promote' && handoff.invalid === 0 && handoff.crashes === 0) continue;
+    const loaded = loadConfig(handoff.configPath);
+    const verdict = judge(paths, {
+      configPath: handoff.configPath,
+      action: 'live-approved',
+      wins: handoff.wins,
+      losses: handoff.losses,
+      invalid: handoff.invalid,
+      crashes: handoff.crashes,
+      diagnostics: diagnostics(loaded),
+      opponent: handoff.opponent,
+    });
+    completeJob(paths, job.id, { decisionId: verdict.decisionId, status: 'done' });
+    verdicts.push(verdict);
+  }
+  return verdicts;
 }
 
 export async function reviewProposals(paths: OpsPaths, opts: ReviewOptions = {}): Promise<Verdict[]> {
@@ -542,8 +577,10 @@ export async function runGatekeeper(
       beat(paths, 'gatekeeper', 'ok', verdict.reason);
     }
     const recorded = ingestRecordedEvidence(paths, recordedDiagnostics ? { diagnostics: recordedDiagnostics } : {});
+    const handed = reviewHandoffs(paths, { diagnostics: opts.diagnostics });
     const verdicts = [
       ...recorded,
+      ...handed,
       ...await reviewProposals(paths, { pairs: opts.pairs, diagnostics: opts.diagnostics }),
     ];
     beat(paths, 'gatekeeper', 'ok', verdicts.length ? verdicts.map(item => item.reason).join('; ') : 'idle');

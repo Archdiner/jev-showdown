@@ -552,6 +552,7 @@ P0 is losing games or corrupting data now. P1 is the loop or visibility broken. 
 | ops-worker-missing | P1 | factory, gatekeeper, live, or analyst has no fresh heartbeat while another worker is up |
 | ops-worker-duplicate | P1 | Two fresh pids for one of those workers |
 | improvement-stall | P1 | Losses reviewed and nothing queued for 15 minutes |
+| degenerate-loop | P1 | Three passes queue nothing, every mine fails, every loss is one variant, or every challenger result is the same |
 | analyst-log-dir | P1 | Analyst process has no `LADDER_LOG_DIR` and its default dirs have no game JSONL while the ladder log dir does |
 | circuits-all-pulled | P1 | ops live reports every approved config is pulled, or circuits.json has every approved config pulled |
 | genuine-game-dropped | P1 | A finished game was dropped because a dead pid or another run owned the battle id, or finished heartbeats and progress lines outnumber the rows written. Liveness is `process.kill(pid, 0)` and `ps`, not `/proc` |

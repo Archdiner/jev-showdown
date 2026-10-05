@@ -13,6 +13,7 @@ import { queueHypothesisVariant } from './hypotheses.js';
 import { defaultAnalystDirs, gameFromRow, listGameJsonl, type AnalystGame } from './ingest.js';
 import { appendJsonl, consumeJsonl, type OpsPaths } from './paths.js';
 import { observeLog, readCounts, scrapeReplay, writePriors } from './priors.js';
+import { attachLadderDecisions, findingFromLadderLog, protocolFromGame, reviewTextFor } from './ladder-log.js';
 import { enqueue } from './queue.js';
 import { battleFromSpectatorLog } from './reconstruct.js';
 
@@ -111,7 +112,7 @@ async function reviewGame(paths: OpsPaths, game: AnalystGame): Promise<{ loss: b
           metadata: (node.metadata ?? {}) as Record<string, unknown>,
         })
       : { created: false, reason: `skipped: hypothesis ${hypothesisId} was not stored` };
-    if (variant.created) queued += 1;
+    if (variant.created || variant.resumed) queued += 1;
     notes.push(variant.reason);
   } finally {
     db.close();
@@ -137,8 +138,9 @@ function mineCritical(paths: OpsPaths, game: AnalystGame): { mined: PositionReco
       ? { mined, reason: null }
       : { mined: null, reason: 'skipped mine: input log did not replay' };
   }
-  if (game.log.includes('|request|')) {
-    const mined = labelBattle(paths, () => battleFromSpectatorLog(game.log, game.ourSide!), 'p1');
+  const protocol = protocolFromGame(game);
+  if (protocol.includes('|request|')) {
+    const mined = labelBattle(paths, () => battleFromSpectatorLog(protocol, game.ourSide!), 'p1');
     return mined
       ? { mined, reason: null }
       : { mined: null, reason: 'skipped mine: protocol reconstruction returned no battle' };
@@ -163,15 +165,22 @@ function labelBattle(
 }
 
 async function reviewLoss(paths: OpsPaths, game: AnalystGame, calcText: string): Promise<LossFinding> {
+  const parsed = findingFromLadderLog(game.ladderDecisions ?? []);
   if (process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_AI_GATEWAY_KEY) {
     const reviewer = new LossReviewer(new GatewayClient());
-    const result = await reviewer.review(game.log || '', {
+    const result = await reviewer.review(reviewTextFor(game), {
       calcText,
       battleId: game.id,
       sourcePath: game.sourcePath,
     });
-    if (result.ok && result.finding) return result.finding;
+    if (result.ok && result.finding) {
+      const finding = result.finding;
+      const generic = finding.criticalTurn === 0 && finding.mistakeClass === 'other';
+      if (parsed && generic && (parsed.criticalTurn !== 0 || parsed.mistakeClass !== 'other')) return parsed;
+      return finding;
+    }
   }
+  if (parsed) return parsed;
   return {
     criticalTurn: 0,
     mistakeClass: 'other',
@@ -210,7 +219,7 @@ function unreadGames(paths: OpsPaths, ladderDirs: string[]): {
       files[resolved] = chunk.next;
     }
   }
-  return { games: countableGameRows(games), liveNext: live.next, files, corrupt };
+  return { games: attachLadderDecisions(countableGameRows(games)), liveNext: live.next, files, corrupt };
 }
 
 function safeReal(file: string): string {

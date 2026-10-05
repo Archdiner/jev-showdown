@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { countableGameRows } from '../client/game-integrity.js';
 import { isLocalLiveGame, isPhantomRecord } from '../client/game-record.js';
+import type { LadderDecision } from './ladder-log.js';
 import { inputLogFromTranscript } from './sim-bridge.js';
 
 export type Seat = 'p1' | 'p2';
@@ -23,6 +24,10 @@ export interface AnalystGame {
   ts: number | null;
   contaminated?: boolean;
   winner: string | null;
+  /** Per-battle JSONL path from the result row, when the recorder stored one. */
+  logPath?: string;
+  /** Turn rows read from that per-battle file. Not the numeric `turns` count. */
+  ladderDecisions?: LadderDecision[];
 }
 
 export function defaultAnalystDirs(cwd = process.cwd(), env: NodeJS.ProcessEnv = process.env): string[] {
@@ -131,6 +136,7 @@ export function gameFromRow(row: unknown, sourcePath: string): AnalystGame | nul
     ts: typeof record.ts === 'number' ? record.ts : null,
     contaminated: record.contaminated === true,
     winner: typeof record.winner === 'string' ? record.winner : null,
+    logPath: typeof record.logPath === 'string' ? record.logPath : undefined,
   };
 }
 
@@ -173,14 +179,19 @@ function outcomeOf(row: Record<string, unknown>): AnalystGame['outcome'] {
 }
 
 function protocolOf(row: Record<string, unknown>): string {
-  if (typeof row.log === 'string' && row.log.includes('|')) return row.log;
-  const local = typeof row.localReplayPath === 'string' ? row.localReplayPath : '';
-  if (local && fs.existsSync(local)) {
-    try {
-      return fs.readFileSync(local, 'utf8');
-    } catch {
-      return '';
-    }
+  const embedded = typeof row.log === 'string' ? row.log : '';
+  const local = readReplay(typeof row.localReplayPath === 'string' ? row.localReplayPath : '');
+  if (local.includes('|request|')) return local;
+  if (embedded.includes('|request|')) return embedded;
+  if (local.length > embedded.length) return local;
+  return embedded;
+}
+
+function readReplay(file: string): string {
+  if (!file || !fs.existsSync(file)) return '';
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch {
+    return '';
   }
-  return typeof row.log === 'string' ? row.log : '';
 }
