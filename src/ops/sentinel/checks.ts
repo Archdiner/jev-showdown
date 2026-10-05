@@ -1,5 +1,6 @@
+import * as fs from 'fs';
 import * as path from 'path';
-import { checkGameInvariants } from '../../client/game-integrity.js';
+import { checkGameInvariants, isLadderGameRow } from '../../client/game-integrity.js';
 import { percentile } from '../../client/live-metrics.js';
 import { foldCycle, stallAlert } from '../cycle.js';
 import { invalidChoiceReasonsOf } from './games.js';
@@ -185,6 +186,13 @@ export const CHECKS: InvariantCheck[] = [
     detect: malformedLines,
   },
   {
+    id: 'genuine-game-dropped',
+    severity: 'P1',
+    title: 'A finished game was dropped for an owner that is not a live client in that room',
+    suggestedFix: 'A claim from a dead pid, or from another run whose pid is not still a ladder or ops client, must not block the process that played the battle to the end. Two live clients in one room still keep a single row. Local room ids include the server run, so battle-local-N is not reused after a restart. Liveness is process.kill(pid, 0) and ps, which work on macOS.',
+    detect: genuineGameDropped,
+  },
+  {
     id: 'duplicate-battle-id',
     severity: 'P0',
     title: 'A battle id is stored more than once',
@@ -238,6 +246,175 @@ function integrityHits(ctx: SentinelContext, code: 'duplicate-battle-id' | 'null
         }],
       };
     });
+}
+
+const FINISHED_HEARTBEAT = /^\S+ (win|loss|tie) (?:local|rating(?:\s+\S+)?)$/;
+const LADDER_PROGRESS = /^\[ladder\] \d+\/\d+ (win|loss|tie)\b/;
+const LADDER_UNRECORDED = /^\[ladder\] run=(\S+) \S+ finished (win|loss|tie) not-recorded\b/;
+const LADDER_RUN = /\[ladder\] pid=\d+ run=(\S+)/;
+/** A successful append writes the row, then the heartbeat. A beat this far after the last row is a game that was not stored. */
+const HEARTBEAT_AFTER_ROW_MS = 2000;
+
+function genuineGameDropped(ctx: SentinelContext): CheckHit[] {
+  return [...staleOwnerDrops(ctx), ...heartbeatGap(ctx), ...runLogGap(ctx)];
+}
+
+function staleOwnerDrops(ctx: SentinelContext): CheckHit[] {
+  const hits: CheckHit[] = [];
+  for (const row of ctx.rows) {
+    const value = row.value;
+    if (!value || value.reason !== 'non-owning-process') continue;
+    if (value.schema !== 'jev.game-contamination.v1') continue;
+    if (!inLookback(ctx, numberOf(value.ts))) continue;
+    const note = text(value.note) ?? '';
+    const ownerPid = numberOf(value.ownerPid) ?? pidFromNote(note);
+    const ownerRun = text(value.ownerRunId) ?? runFromNote(note);
+    const writerRun = text(value.runId);
+    const dead = ownerPid === null ? false : !ctx.pidAlive(ownerPid);
+    const differentRun = Boolean(ownerRun && writerRun && ownerRun !== writerRun);
+    if (!dead && !differentRun) continue;
+    const battleId = text(value.battleId) ?? 'battle';
+    const why = dead
+      ? `owner pid ${ownerPid} is not alive`
+      : `owner run ${ownerRun} is not writer run ${writerRun}`;
+    hits.push({
+      key: `${battleId}:${ownerPid ?? 'run'}:${row.line}`,
+      detail: `${battleId} was dropped as non-owning-process but ${why}`,
+      evidence: [{ file: row.file, line: row.line, detail: note || why }],
+    });
+  }
+  return hits;
+}
+
+function heartbeatGap(ctx: SentinelContext): CheckHit[] {
+  const beats = ctx.heartbeats.filter(beat => {
+    if (beat.facility !== 'live' || beat.status !== 'ok') return false;
+    const detail = text(beat.detail) ?? '';
+    if (!FINISHED_HEARTBEAT.test(detail)) return false;
+    return inLookback(ctx, numberOf(beat.ts));
+  });
+  if (beats.length === 0) return [];
+  const rows = writtenRows(ctx, file => path.basename(file) === 'live-games.jsonl');
+  const lastRow = rows.reduce<number | null>((max, game) => {
+    if (game.ts === null) return max;
+    return max === null || game.ts > max ? game.ts : max;
+  }, null);
+  const late = beats.filter(beat => {
+    const ts = numberOf(beat.ts);
+    if (ts === null) return false;
+    return lastRow === null || ts > lastRow + HEARTBEAT_AFTER_ROW_MS;
+  });
+  if (late.length === 0) return [];
+  return [{
+    key: 'live-heartbeats',
+    detail: `${late.length} finished live ${late.length === 1 ? 'heartbeat is' : 'heartbeats are'} after the last live-games.jsonl row (${rows.length} rows in the lookback)`,
+    evidence: late.slice(0, 8).map(beat => ({
+      file: beat.file,
+      line: beat.line,
+      detail: text(beat.detail) ?? 'finished game',
+    })),
+  }];
+}
+
+function runLogGap(ctx: SentinelContext): CheckHit[] {
+  const hits: CheckHit[] = [];
+  for (const file of listBatchLogs(ctx)) {
+    const when = mtimeOf(file);
+    if (when === null || !inLookback(ctx, when)) continue;
+    let textBody = '';
+    try {
+      textBody = fs.readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
+    const header = textBody.match(LADDER_RUN);
+    let progress = 0;
+    let unrecorded = 0;
+    let runId = header?.[1] ?? null;
+    const lines = textBody.split('\n');
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index];
+      const dropped = line.match(LADDER_UNRECORDED);
+      if (dropped) {
+        unrecorded += 1;
+        runId = runId ?? dropped[1];
+        continue;
+      }
+      if (LADDER_PROGRESS.test(line)) progress += 1;
+    }
+    const signals = progress + unrecorded;
+    if (!runId || signals === 0) continue;
+    const rows = rowsForRun(ctx, runId);
+    if (signals <= rows) continue;
+    hits.push({
+      key: `run:${runId}`,
+      detail: `run ${runId} logged ${signals} finished ${signals === 1 ? 'game' : 'games'} and ${rows} ${rows === 1 ? 'row' : 'rows'} were written`,
+      evidence: [{ file, detail: `${progress} progress, ${unrecorded} not-recorded, ${rows} rows` }],
+    });
+  }
+  return hits;
+}
+
+function writtenRows(ctx: SentinelContext, fileTest: (file: string) => boolean): SentinelContext['games'] {
+  return ctx.games.filter(game => fileTest(game.file) && inLookback(ctx, game.ts));
+}
+
+function rowsForRun(ctx: SentinelContext, runId: string): number {
+  let count = 0;
+  for (const row of ctx.rows) {
+    const value = row.value;
+    if (!value || text(value.runId) !== runId) continue;
+    const base = path.basename(row.file);
+    if (base !== 'games.jsonl' && base !== 'live-games.jsonl') continue;
+    if (!isLadderGameRow(value)) continue;
+    count += 1;
+  }
+  return count;
+}
+
+function listBatchLogs(ctx: SentinelContext): string[] {
+  return [...listLogFiles(ctx.layout.ladderLogDir), ...listLogFiles(ctx.layout.liveRunsDir)];
+}
+
+function listLogFiles(dir: string): string[] {
+  if (!dir || !fs.existsSync(dir)) return [];
+  const found: string[] = [];
+  const walk = (current: string) => {
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && entry.name.endsWith('.log')) found.push(full);
+    }
+  };
+  walk(dir);
+  return found;
+}
+
+function mtimeOf(file: string): number | null {
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+function pidFromNote(note: string): number | null {
+  const match = note.match(/owner pid (\d+)/);
+  if (!match) return null;
+  const pid = Number(match[1]);
+  return Number.isInteger(pid) ? pid : null;
+}
+
+function runFromNote(note: string): string | null {
+  const match = note.match(/(?:^|\s)run (\S+)/);
+  return match?.[1] ?? null;
 }
 
 function duplicateLadderRunners(ctx: SentinelContext): CheckHit[] {
