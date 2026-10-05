@@ -3,7 +3,10 @@ import { roomLines } from '../client/protocol-frames.js';
 import { ChoiceTrace, ServerLine } from './invariants.js';
 
 export interface SoakFaults {
-  /** Do not forward the first `/choose` of each room. The watchdog must resend it. */
+  /**
+   * Do not forward the first `/choose` of each room. The proxy then sends our
+   * turn clock. The watchdog resends only when that clock arrives after the choice.
+   */
   dropFirstChoice: boolean;
   /** Deliver `|init|battle` twice for each room. */
   duplicateJoin: boolean;
@@ -80,6 +83,12 @@ export async function startSoakProxy(upstream: string, faults: SoakFaults): Prom
           ackedAt: null,
         });
         console.error(`[soak] dropped choice room=${choice.roomId}`);
+        const clock = '|inactive|Time left: 150 sec this turn | 150 sec total | 60 sec grace';
+        const roomId = choice.roomId;
+        setImmediate(() => {
+          record(roomId, clock);
+          if (client.readyState === WebSocket.OPEN) client.send(`>${roomId}\n${clock}\n`);
+        });
         return;
       }
       if (choice) {

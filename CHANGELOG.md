@@ -6,7 +6,7 @@ Unit tests write sets and stats under `JEV_DATA_DIR` (a temp directory) and set 
 
 `games.jsonl` rows are checked as `jev.ladder-game.v1`. A public game that chose a move needs `minTimerMarginSec`. `replayUrl` is null unless the replay is confirmed. `eloAfter` is required when `eloBefore` or `gxe` is a number. A 0-turn record is only allowed for a disconnect, crash, or unknown end with no decisions.
 
-`npm run test:soak` starts the ops local server and the real ladder client at concurrency 3. It requires zero invalid choices, zero timer losses, every server line in the room that owns it, every forwarded choice acknowledged within 12 seconds, no phantom records, and a drain that finishes inside its bound and stops searching. `--ci` plays one clean game plus the fault and drain phases. The fault phase drops the first choice and duplicates the room join; the choice watchdog must log `cause: "unconfirmed"`.
+`npm run test:soak` starts the ops local server and the real ladder client at concurrency 3. It requires zero invalid choices, zero timer losses, every server line in the room that owns it, every forwarded choice acknowledged within 12 seconds, no phantom records, and a drain that finishes inside its bound and stops searching. `--ci` plays one clean game plus the fault and drain phases. The fault phase drops the first choice, sends our turn clock, and duplicates the room join. The watchdog must log `cause: "unconfirmed"`.
 
 `npm run live:preflight` runs before `run-live.sh` logs in. It requires a clean tree on a commit that is contained in `origin/main`, at least 500 species, no other public ladder process for the account, and a 2-game local canary with the same engine flags.
 
