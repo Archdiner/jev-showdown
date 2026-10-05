@@ -4,27 +4,56 @@ import { loadConfig, toSpec } from '../config/load.js';
 import { loadPool } from '../config/positions.js';
 import { exactSearch } from '../engine/exact/search.js';
 import { ablate } from '../exp/ablate.js';
-import { playPaired, sideWinRate } from '../exp/play.js';
-import { liveProposalAllowed, sprt, tallySide } from './sprt.js';
+import { playPaired } from '../exp/play.js';
+import { liveProposalAllowed, sprt, sprtMaxGames, tallySide } from './sprt.js';
 import { sweep } from '../exp/sweep.js';
 import { tournament } from '../exp/tournament.js';
 import { recordRejected, recordTested } from './cycle.js';
 import { openDb } from './db.js';
-import { enqueueOpenHypotheses } from './hypotheses.js';
+import { enqueueOpenHypotheses, hypothesisGames } from './hypotheses.js';
 import { beat } from './heartbeat.js';
 import type { OpsPaths } from './paths.js';
 import { readJsonl } from './paths.js';
-import { claimNext, completeJob, type Proposal, type QueueJob } from './queue.js';
+import {
+  challengerCanContinue,
+  claimNext,
+  completeJob,
+  reopenContinuable,
+  type Handoff,
+  type Proposal,
+  type QueueJob,
+  type SprtProgress,
+} from './queue.js';
+
+export interface FactoryRunOptions {
+  once?: boolean;
+  /** Stop an inconclusive SPRT here. Defaults to OPS_SPRT_MAX_GAMES. Not part of the job key. */
+  maxGames?: number;
+  play?: typeof playPaired;
+}
+
+interface Outcome {
+  resultId: string;
+  summary: string;
+  proposal?: Proposal;
+  rejectedReason?: string;
+  /** SPRT is still `continue` and the budget is not spent. Leave the job open. */
+  requeue?: boolean;
+  progress?: SprtProgress;
+  handoff?: Handoff;
+}
 
 /**
  * Runs queued experiments and may attach a proposal.
  * It does not write champion or live-approved labels.
  */
-export async function runFactory(paths: OpsPaths, opts: { once?: boolean } = {}): Promise<number> {
+export async function runFactory(paths: OpsPaths, opts: FactoryRunOptions = {}): Promise<number> {
   beat(paths, 'factory', 'ok', 'up');
+  const maxGames = opts.maxGames ?? sprtMaxGames();
   let ran = 0;
   do {
-    const job = claimNext(paths);
+    reopenContinuable(paths, maxGames);
+    const job = claimNext(paths, maxGames);
     if (!job) {
       const added = seedHypotheses(paths);
       if (added > 0) {
@@ -37,14 +66,24 @@ export async function runFactory(paths: OpsPaths, opts: { once?: boolean } = {})
       continue;
     }
     try {
-      if (alreadyDone(paths, job)) {
+      if (alreadyDone(paths, job, maxGames)) {
         ran += 1;
         continue;
       }
-      const outcome = await execute(paths, job);
-      completeJob(paths, job.id, { resultId: outcome.resultId, proposal: outcome.proposal, status: 'done' });
-      recordTested(paths, outcome.summary);
-      if (outcome.rejectedReason) recordRejected(paths, outcome.rejectedReason);
+      const outcome = await execute(paths, job, opts, maxGames);
+      if (outcome.requeue) {
+        completeJob(paths, job.id, { resultId: outcome.resultId, status: 'open', progress: outcome.progress });
+      } else {
+        completeJob(paths, job.id, {
+          resultId: outcome.resultId,
+          proposal: outcome.proposal,
+          status: 'done',
+          progress: outcome.progress,
+          handoff: outcome.handoff,
+        });
+        recordTested(paths, outcome.summary);
+        if (outcome.rejectedReason) recordRejected(paths, outcome.rejectedReason);
+      }
       beat(paths, 'factory', 'ok', outcome.summary);
       ran += 1;
     } catch (error) {
@@ -61,11 +100,14 @@ export async function runFactory(paths: OpsPaths, opts: { once?: boolean } = {})
   return ran;
 }
 
-function alreadyDone(paths: OpsPaths, job: QueueJob): boolean {
+function alreadyDone(paths: OpsPaths, job: QueueJob, maxGames: number): boolean {
   const db = openDb(paths);
   try {
     const id = resultId(job);
-    if (!db.getNode(id)) return false;
+    const node = db.getNode(id);
+    if (!node) return false;
+    const metrics = node.metrics && typeof node.metrics === 'object' ? node.metrics as Record<string, unknown> : null;
+    if (challengerCanContinue(job, metrics, maxGames)) return false;
     completeJob(paths, job.id, { resultId: id, status: 'done' });
     return true;
   } finally {
@@ -82,21 +124,23 @@ function seedHypotheses(paths: OpsPaths): number {
   }
 }
 
-async function execute(paths: OpsPaths, job: QueueJob): Promise<{ resultId: string; summary: string; proposal?: Proposal; rejectedReason?: string }> {
-  if (job.spec.kind === 'challenger') return runChallenger(paths, job);
+async function execute(paths: OpsPaths, job: QueueJob, opts: FactoryRunOptions, maxGames: number): Promise<Outcome> {
+  if (job.spec.kind === 'challenger') return runChallenger(paths, job, opts, maxGames);
   if (job.spec.kind === 'sweep') return runSweep(paths, job);
   if (job.spec.kind === 'ablation') return runAblation(paths, job);
   if (job.spec.kind === 'tournament') return runTournament(paths, job);
   return runPositionReplay(paths, job);
 }
 
-async function runChallenger(paths: OpsPaths, job: QueueJob): Promise<{ resultId: string; summary: string; proposal?: Proposal; rejectedReason?: string }> {
+async function runChallenger(paths: OpsPaths, job: QueueJob, opts: FactoryRunOptions, maxGames: number): Promise<Outcome> {
   const challengerPath = job.spec.challenger || 'configs/champion.yaml';
   const challenger = loadConfig(challengerPath);
   const opponent = loadConfig(job.spec.opponent || 'configs/panel/maxdamage.yaml');
-  const games = evenGames(job.spec.games ?? 4);
-  const results = await playPaired(toSpec(challenger, 'selfplay'), toSpec(opponent, 'selfplay'), games, 1000, false);
-  const rate = sideWinRate(results, challenger.configId);
+  const batch = evenGames(job.spec.games ?? hypothesisGames());
+  const prior = job.progress;
+  const seed = prior?.seed ?? 1000;
+  const play = opts.play ?? playPaired;
+  const results = await play(toSpec(challenger, 'selfplay'), toSpec(opponent, 'selfplay'), batch, seed, false);
   const tally = tallySide(results.map(game => ({
     winner: game.winner,
     p1Id: game.p1ConfigId,
@@ -105,22 +149,56 @@ async function runChallenger(paths: OpsPaths, job: QueueJob): Promise<{ resultId
     p2Invalid: game.p2Invalid,
     crashed: game.crashed,
   })), challenger.configId);
-  const verdict = sprt(tally.wins, tally.losses);
-  const summary = `${tally.wins}/${rate.games} wins, invalid ${tally.invalid}, SPRT ${verdict}`;
-  const rejectedReason = verdict === 'reject' ? summary : undefined;
-  const proposal = liveProposalAllowed(tally.wins, tally.losses, tally.invalid)
-    ? {
-        action: 'live-approved' as const,
+  const wins = (prior?.wins ?? 0) + tally.wins;
+  const losses = (prior?.losses ?? 0) + tally.losses;
+  const invalid = (prior?.invalid ?? 0) + tally.invalid;
+  const crashes = (prior?.crashes ?? 0) + tally.crashes;
+  const playedGames = (prior?.games ?? 0) + results.length;
+  const nextSeed = seed + Math.floor(results.length / 2);
+  const verdict = sprt(wins, losses);
+  const summary = `${wins}/${playedGames} wins, invalid ${invalid}, SPRT ${verdict}`;
+  const progress: SprtProgress = {
+    wins,
+    losses,
+    games: playedGames,
+    invalid,
+    crashes,
+    sprt: verdict,
+    seed: nextSeed,
+    configId: challenger.configId,
+  };
+  const resultId = writeResult(paths, job, summary, { ...progress });
+  const terminal = results.length === 0 || verdict !== 'continue' || playedGames >= maxGames;
+  if (!terminal) return { resultId, summary, requeue: true, progress };
+  if (liveProposalAllowed(wins, losses, invalid)) {
+    return {
+      resultId,
+      summary,
+      progress,
+      proposal: {
+        action: 'live-approved',
         configPath: challengerPath,
         configId: challenger.configId,
         summary,
-      }
-    : undefined;
+      },
+    };
+  }
   return {
-    resultId: writeResult(paths, job, summary, { wins: tally.wins, games: results.length, invalid: tally.invalid, sprt: verdict }),
+    resultId,
     summary,
-    proposal,
-    rejectedReason,
+    progress,
+    rejectedReason: verdict === 'reject' ? summary : undefined,
+    handoff: {
+      configPath: challengerPath,
+      configId: challenger.configId,
+      wins,
+      losses,
+      invalid,
+      crashes,
+      games: playedGames,
+      sprt: verdict,
+      opponent: 'max-damage',
+    },
   };
 }
 

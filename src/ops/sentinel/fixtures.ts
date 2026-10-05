@@ -43,16 +43,17 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     ...row,
   });
 
-  const losses: string[] = [];
+  const batchGames: string[] = [];
   for (let index = 0; index < 10; index++) {
-    losses.push(game({
-      battleId: `battle-loss-${index}`,
+    batchGames.push(game({
+      battleId: `battle-batch-${index}`,
       ts: now - 20 * 60 * 1000 + index * 1000,
       outcome: 'loss',
       endReason: 'ko',
       turns: 12,
-      eloAfter: 1600 - index * 10,
-      gitSha: 'aaa111',
+      eloBefore: 1600 - index * 10,
+      eloAfter: 1600 - (index + 1) * 10,
+      gitSha: 'batch-sha',
       variantId: 'arm-b',
       configId: 'champion',
     }));
@@ -61,33 +62,36 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
   const games = [
     game({
       battleId: 'battle-phantom',
-      ts: older,
+      ts: now - 30 * 60 * 1000,
       outcome: 'tie',
       endReason: 'disconnect',
       turns: 0,
-      eloAfter: 999,
+      eloBefore: 1500,
+      eloAfter: 1500,
       decisions: 0,
       minTimerMarginSec: null,
       replayUrl: null,
       replayStatus: 'unconfirmed',
+      gitSha: 'good222',
     }),
     game({
       battleId: 'battle-dup',
-      ts: older + 1000,
+      ts: now - 29 * 60 * 1000,
       outcome: 'loss',
       endReason: 'our-forfeit',
       turns: 6,
-      eloBefore: 1400,
+      eloBefore: 1500,
       eloAfter: null,
       gitSha: 'good222',
       variantId: 'arm-a',
     }),
     game({
       battleId: 'battle-timer',
-      ts: older + 2000,
+      ts: now - 28 * 60 * 1000,
       outcome: 'loss',
       endReason: 'our-timer',
       turns: 1,
+      eloBefore: 1500,
       eloAfter: 1490,
       decisions: 1,
       minTimerMarginSec: null,
@@ -95,10 +99,11 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     }),
     game({
       battleId: 'battle-replay',
-      ts: older + 3000,
+      ts: now - 27 * 60 * 1000,
       outcome: 'win',
       endReason: 'ko',
       turns: 22,
+      eloBefore: 1490,
       eloAfter: 1505,
       replayUrl: null,
       replayStatus: 'unconfirmed',
@@ -107,19 +112,21 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     }),
     game({
       battleId: 'battle-replay',
-      ts: older + 3500,
+      ts: now - 26 * 60 * 1000,
       outcome: 'tie',
       endReason: 'disconnect',
       turns: 4,
+      eloBefore: 1505,
       eloAfter: null,
       gitSha: 'good222',
     }),
     game({
       battleId: 'battle-bad',
-      ts: older + 4000,
+      ts: now - 25 * 60 * 1000,
       outcome: 'loss',
       endReason: 'ko',
       turns: 15,
+      eloBefore: 1505,
       eloAfter: 1495,
       invalidChoices: 2,
       crashes: 1,
@@ -130,16 +137,18 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     game({
       schema: 'jev.ladder-game.v1',
       battleId: 'battle-missing',
-      ts: older + 5000,
+      ts: now - 24 * 60 * 1000,
       outcome: null,
       endReason: 'ko',
       turns: 8,
       username: 'asad',
       format: null,
+      eloBefore: 1495,
+      eloAfter: 1490,
       gitSha: 'good222',
       minTimerMarginSec: 5,
     }),
-    ...losses,
+    ...batchGames,
     '{not json',
   ];
   fs.writeFileSync(path.join(ladder, 'games.jsonl'), `${games.join('\n')}\n`);
@@ -212,15 +221,26 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     explorer: { consecutiveLosses: 2, ratings: [1400], pulled: true, reason: '2 consecutive losses' },
   }, null, 2));
   fs.writeFileSync(path.join(data, 'gen9-stats.json'), JSON.stringify({ pikachu: { usage: 1 } }));
-  fs.writeFileSync(path.join(runs, '1000.json'), JSON.stringify({
+  const runFile = path.join(runs, '1000.json');
+  fs.writeFileSync(runFile, JSON.stringify({
     runId: '1000',
     pid: 4242,
     engine: 'max-damage',
     username: 'asad',
     local: false,
+    startedAt: older,
+    gitSha: 'good222',
     drainFile: 'live-runs/1000.drain',
     globalDrainFile: 'state/DRAIN',
   }, null, 2));
+  const runTime = older / 1000;
+  fs.utimesSync(runFile, runTime, runTime);
+  fs.writeFileSync(path.join(state, 'ladder-asad.lock'), JSON.stringify({
+    pid: 99999,
+    startedAt: new Date(older).toISOString(),
+    host: 'mac.local',
+    username: 'asad',
+  }));
   const drainAt = (now - 11 * 60 * 1000) / 1000;
   for (const file of [path.join(runs, '1000.drain'), path.join(state, 'DRAIN')]) {
     fs.writeFileSync(file, '');
@@ -247,13 +267,24 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     '',
   ].join('\n'));
 
-  fs.writeFileSync(path.join(ops, 'cycle.jsonl'), `${JSON.stringify({
-    ts: now - 20 * 60 * 1000,
-    type: 'loss',
-    hypotheses: 1,
-    queued: 0,
-    reason: 'skipped: no self-play variant for hypothesis hyp-loss',
-  })}\n`);
+  const cycleRows = [
+    {
+      ts: now - 20 * 60 * 1000,
+      type: 'loss',
+      hypotheses: 1,
+      queued: 0,
+      reason: 'skipped: no self-play variant for hypothesis hyp-loss',
+    },
+    ...[1, 2, 3].map(index => ({
+      ts: now - (19 - index) * 60 * 1000,
+      type: 'pass',
+      lossesReviewed: 1,
+      hypothesesCreated: 1,
+      jobsQueued: 0,
+      skipped: 1,
+    })),
+  ];
+  fs.writeFileSync(path.join(ops, 'cycle.jsonl'), `${cycleRows.map(row => JSON.stringify(row)).join('\n')}\n`);
 
   const processes: ProcessSnapshot[] = [
     { pid: 50, cmd: 'node tsx src/cli/ladder.ts --username asad', env: { SHOWDOWN_USERNAME: 'asad' } },
@@ -269,6 +300,7 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     now,
     layout: {
       cwd: root,
+      liveRepoDir: null,
       opsDir: ops,
       ladderLogDir: ladder,
       liveRunsDir: runs,
@@ -282,6 +314,6 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     phantoms: 1,
     localGames: 1,
     eloFirst: 1490,
-    eloLast: 1510,
+    eloLast: 1500,
   };
 }

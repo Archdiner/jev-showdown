@@ -4,6 +4,16 @@
 
 `exact-1ply-qw` chooses `move N terastallize` when the request allows it. The ops live session treated that string as illegal, sent the first plain move, and logged `choice-fallback`. Because Terastallize never landed, the next turn asked for it again, so one local battle produced a run of fallback heartbeats. The finished row still stored `fallbacks: 0`, so the gatekeeper read those games as clean. The session now sends a Terastallize choice the request allows and writes the fallback count it actually observed. The sentinel raises P1 when those heartbeats pass 2 in one battle, or when the row's count does not match them. The check reads the JSONL files only.
 
+## Closed loop reads ladder losses and finishes SPRT
+
+A live loss was reviewed from the per-battle JSONL as if it were a self-play `>start` log. Those files are turn and result events. The result row does not embed the protocol, and a short `log` that already contains `|` hid the replay. With nothing to classify, every loss became critical turn 0, class `other`, which is the one variant `eval-term: preservation`. Mining then skipped with "no >start input and no |request|". The analyst now reads the turn choice and the request object stored on that row, and appends a `|request|` line when the replay does not already have one. New ladder turns store that request object. The champion policy is unchanged.
+
+The factory job key ignored status, so a finished preservation job was still "already queued" and later losses queued nothing. A done job that SPRT still calls `continue` is resumed. A job that already accepted or rejected is finished, and the skip says so.
+
+A challenger used to play four games at seed 1000, mark itself done on SPRT `continue`, and attach a proposal only when SPRT already said promote. Four games cannot reach that boundary, so the gatekeeper never saw the series. The factory now keeps the same job open and plays further batches, on the next seeds, until SPRT accepts, rejects, or `OPS_SPRT_MAX_GAMES` (default 1200) is spent. A promote against max-damage becomes a live-approved proposal for the gatekeeper to retest against the champion. Anything else is a handoff the gatekeeper records without labeling. The result stores the config id. The summary line does not, so eight identical scores still show up as one string.
+
+`npm run ops -- status` and the scorecard print a P1 when the loop is degenerate: three passes in a row queue nothing, every mine fails, every loss names one variant, or every challenger result is the same. The sentinel check is `degenerate-loop`.
+
 ## Fitted 1-ply is a live A/B challenger
 
 `configs/fitted-1ply.yaml` plays the fitted-team evaluator through greedy 1-ply (depth 1, 8 samples, max-damage opponent). Config id `b010a726fd447898`. Champion exact 1-ply is unchanged.

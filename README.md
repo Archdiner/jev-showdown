@@ -523,17 +523,25 @@ The same page has an Incidents panel and a Scorecard panel. Incidents come from 
 
 ```bash
 npm run ops -- sentinel              # loop every 60s
-npm run ops -- sentinel --once       # one pass; exit 1 when a P0 is open, acknowledged, or fixing
-npm run ops -- sentinel --once --json   # one JSON object; exit 1 when a P0 is open
+npm run ops -- sentinel --once       # one pass; exit 1 only for an open, unacknowledged P0 inside the baseline
+npm run ops -- sentinel --once --json
+npm run ops -- sentinel --since 2026-10-05T22:00:00.000Z
 npm run ops -- scorecard --since 24h
 npm run ops -- scorecard --since 24h --md
 npm run ops -- scorecard --md --since 2026-10-04T00:00:00.000Z
 npm run ops -- sentinel --ack inc-id
 npm run ops -- sentinel --fixing inc-id --pr https://github.com/Archdiner/jev-showdown/pull/1
 npm run ops -- sentinel --root-cause inc-id --text "two runners shared one login"
+npm run ops -- incidents resolve --before 2026-10-05T22:00:00.000Z --reason "pre-fix history"
+npm run ops -- incidents resolve --sha e7a9497 --reason "fixed in a later commit"
+npm run ops -- incidents link inc-id INC-007
 ```
 
-An incident is deduped by check id plus a key. It keeps `firstSeen`, `lastSeen`, `count`, severity, evidence with file and line, status (`open`, `acknowledged`, `fixing`, `resolved`, `verified`), and `rootCause`. A failing check moves a verified incident back to `open`. A check that stops failing marks the incident `resolved`. It becomes `verified` only after the invariant has stayed clear for the soak window (10 minutes, `--soak-ms` to override).
+`LIVE_REPO_DIR` is the ladder runner checkout when it is not the process cwd (`~/jev-search` on the Mac, ops in `~/jev-ops`). When it is unset, the sentinel uses the git root of `LADDER_LOG_DIR` if that root is a different tree. Checkout, drain, lock, and git checks run against that tree and the ops cwd, and each incident names which checkout. `SENTINEL_SINCE` (or `--since`) is the evaluation baseline. When it is unset, the baseline is the current non-local run's start time. Per-game findings older than the baseline do not open an episode and do not reopen one. The daemon and `--once` use that same episode model: an episode opens when a newer game fails, counts those games, and resolves only on a later scan after 10 later live games pass the check or after 30 minutes of live play. A fresh P0 is not resolved on the scan that first sees it.
+
+Runner liveness is `ps -axo pid,ppid,pgid,lstart,command` or `kill -0` on the run-file pid. `/proc` is never that decision. When `/proc` exists it may add the environment of a pid `ps` already listed.
+
+An incident is deduped by check id plus a key. Per-game checks use one incident per check per run; the battles are evidence. It keeps `firstSeen`, `lastSeen`, `count`, `gitSha`, `runId`, severity, evidence with file and line, status (`open`, `acknowledged`, `fixing`, `resolved`, `verified`), `rootCause`, and an optional ledger `ref`. `count` and `lastSeen` live in `incidents.json`. The jsonl log records an open, resolve, verify, or a new evidence key, and it rotates by size. A failing check moves a verified incident back to `open`. A check that stops failing marks the incident `resolved`. It becomes `verified` only after the invariant has stayed clear for the soak window (10 minutes, `--soak-ms` to override).
 
 P0 is losing games or corrupting data now. P1 is the loop or visibility broken. P2 is a degradation or a trend. P3 is hygiene. The checks:
 
@@ -552,6 +560,7 @@ P0 is losing games or corrupting data now. P1 is the loop or visibility broken. 
 | ops-worker-missing | P1 | factory, gatekeeper, live, or analyst has no fresh heartbeat while another worker is up |
 | ops-worker-duplicate | P1 | Two fresh pids for one of those workers |
 | improvement-stall | P1 | Losses reviewed and nothing queued for 15 minutes |
+| degenerate-loop | P1 | Three passes queue nothing, every mine fails, every loss is one variant, or every challenger result is the same |
 | analyst-log-dir | P1 | Analyst process has no `LADDER_LOG_DIR` and its default dirs have no game JSONL while the ladder log dir does |
 | circuits-all-pulled | P1 | ops live reports every approved config is pulled, or circuits.json has every approved config pulled |
 | live-fallback-flood | P1 | More than 2 `choice-fallback` heartbeats in one battle, or an ops live row whose `fallbacks` count disagrees with those heartbeats |
@@ -566,11 +575,12 @@ P0 is losing games or corrupting data now. P1 is the loop or visibility broken. 
 | win-rate-batch | P2 | A 10-game batch (grouped by git sha) more than 10 points under a 50% target |
 | checkout-behind | P2 | `HEAD` is behind `origin/main` |
 | malformed-log-line | P3 | A JSONL line that is not an object |
+| stale-lock | P3 | A ladder account lock is held by a pid that is not running |
 | duplicate-battle-id | P0 | The same battle id on more than one game row |
 | null-replay-url | P2 | `replayUrl` null on a non-phantom game |
 | null-required-field | P2 | A required field null, except a reasoned null opponent rating or `eloAfter` |
 
-The scorecard names its files. It drops phantom games (`phantom: true`, or a 0-turn tie with end reason disconnect or unknown), local games, and a disconnect tie that shares a battle id with one decisive result. It says how many it dropped. `--since` is a duration (`24h`) or an ISO timestamp for the start of the window. Elo, win rate, and the win-loss-tie record are compared with the previous window of the same length. `npm run ops -- sentinel --once --json` prints the current incidents as one JSON object and exits 1 when a P0 is open, so a scheduler can call it. Uptime is the share of the window covered by fresh `live` heartbeats. MTTR is the mean time from an incident's episode open to `verified`. Progress is the Elo series, per-batch and per-variant record, win rate against the target, gate decisions plus finished factory jobs, what was promoted or rejected and why, and open regressions. `src/ops/sentinel/fixtures.ts` writes a log set with all of the failures above for the tests.
+The scorecard names its files. It drops phantom games (`phantom: true`, or a 0-turn tie with end reason disconnect or unknown), local games, and a disconnect tie that shares a battle id with one decisive result. It says how many it dropped. `--since` is a duration (`24h`) or an ISO timestamp for the start of the window. Elo, win rate, and the win-loss-tie record are compared with the previous window of the same length. `npm run ops -- sentinel --once --json` prints the current incidents as one JSON object and exits 1 only when an unacknowledged P0 is open inside the baseline, so a scheduler can call it. Live-runner uptime is the share of the window covered by play spans in `games.jsonl`, grouped by `batchLabel` and `runId`. Ops-worker uptime is the share covered by factory, gatekeeper, live, and analyst heartbeats. Those two numbers are separate. Per-batch W-L uses the same `games.jsonl` rows and the same `batchLabel` / `runId` key, so two batches on one git sha stay separate. Unique battle ids are counted, and an aborted run whose summary has `games: 0` is skipped when its rows have no batch or run id. `opened` counts incidents in the window, not event lines. A ledger ref from `incidents link` is printed on the incident. MTTR is the mean time from an incident's episode open to `verified`. Progress is the Elo series, per-batch and per-variant record, win rate against the target, gate decisions plus finished factory jobs, what was promoted or rejected and why, and open regressions. The open P0 count on the scorecard is the same count as `incidents.json`. `src/ops/sentinel/fixtures.ts` writes a log set with all of the failures above for the tests.
 
 `supervise` does not start the sentinel. A P0 makes `--once` exit 1, and the supervisor would treat that as a crash. Run sentinel beside the other four.
 

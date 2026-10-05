@@ -5,11 +5,11 @@ import { loadConfig } from '../config/load.js';
 import { generalizeFinding } from '../exp/analyst.js';
 import { writeFindingAsHypothesis } from '../llm/loss-reviewer.js';
 import { runAnalyst } from './analyst.js';
-import { foldCycle, readCycle, stallAlert, STALL_MS } from './cycle.js';
+import { degenerateAlert, DEGENERATE_STREAK, foldCycle, stallAlert, STALL_MS } from './cycle.js';
 import { openDb } from './db.js';
 import { enqueueOpenHypotheses, variantFor } from './hypotheses.js';
 import { opsPaths } from './paths.js';
-import { listJobs } from './queue.js';
+import { completeJob, listJobs } from './queue.js';
 import { CHECKS } from './sentinel/checks.js';
 import { loadContext } from './sentinel/load.js';
 import { scanOnce } from './sentinel/run.js';
@@ -85,10 +85,11 @@ describe('live loss reaches the factory', () => {
 
     const jobs = listJobs(paths).filter(job => job.status === 'open' || job.status === 'in_progress');
     expect(jobs.length).toBeGreaterThan(0);
-    expect(jobs.some(job => job.spec.kind === 'challenger' && job.spec.variantId === 'preservation')).toBe(true);
-    const queued = jobs.find(job => job.spec.variantId === 'preservation');
+    expect(jobs.some(job => job.spec.kind === 'challenger' && job.spec.variantId === 'hpDifference')).toBe(true);
+    const queued = jobs.find(job => job.spec.variantId === 'hpDifference');
     const loaded = loadConfig(queued!.spec.challenger!);
     expect(loaded.config.evaluator.id).toBe('weighted');
+    expect(loaded.config.evaluator.params.weights.hpDifference).toBe(1.5);
     expect(loaded.configId).not.toBe(loadConfig('configs/champion.yaml').configId);
 
     const screen = statusReport(paths);
@@ -115,6 +116,29 @@ describe('live loss reaches the factory', () => {
     expect(rows[1].reason).toContain('already queued');
     expect(statusReport(paths)).toContain('cycle losses 2  hypotheses 2  queued 1');
     expect(statusReport(paths)).toContain('skipped 1');
+  });
+
+  test('a finished SPRT-continue job is resumed instead of left queued', async () => {
+    const paths = tempPaths();
+    const ladder = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-archinder-'));
+    ladderLoss(ladder, 'gen9randombattle-7');
+    await runAnalyst(paths, { once: true, ladderDirs: [ladder] });
+    const first = listJobs(paths)[0];
+    completeJob(paths, first.id, {
+      status: 'done',
+      resultId: `result-${first.idempotencyKey}`,
+      progress: { wins: 1, losses: 3, games: 4, invalid: 0, crashes: 0, sprt: 'continue', seed: 1002 },
+    });
+
+    ladderLoss(ladder, 'gen9randombattle-8');
+    await runAnalyst(paths, { once: true, ladderDirs: [ladder] });
+    const jobs = listJobs(paths);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].status).toBe('open');
+    expect(jobs[0].progress?.seed).toBe(1002);
+    const rows = fs.readFileSync(paths.dispositions, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { reason: string });
+    expect(rows[rows.length - 1].reason).toContain('resumed');
+    expect(rows[rows.length - 1].reason).not.toContain('already queued');
   });
 });
 
@@ -217,9 +241,46 @@ describe('improvement stall', () => {
   });
 });
 
+describe('degenerate loop', () => {
+  test('three empty passes, one variant, a mining miss, or one result string is a P1', () => {
+    const pass = (jobsQueued: number) => ({
+      ts: 1,
+      type: 'pass',
+      lossesReviewed: 1,
+      hypothesesCreated: 1,
+      jobsQueued,
+      skipped: jobsQueued === 0 ? 1 : 0,
+    });
+    expect(degenerateAlert([pass(0), pass(0)])).toBeNull();
+    const queued = degenerateAlert([pass(0), pass(0), pass(0)]);
+    expect(queued?.level).toBe('P1');
+    expect(queued?.message).toContain('queued 0');
+    expect(degenerateAlert([pass(0), pass(0), pass(1)])).toBeNull();
+
+    const mine = { ts: 1, type: 'loss', hypotheses: 1, queued: 0, reason: 'skipped mine: ladder log has no >start input and no |request| to reconstruct' };
+    expect(degenerateAlert([mine, mine])).toBeNull();
+    expect(degenerateAlert([mine, mine, mine])?.message).toContain('mining failed');
+
+    const same = { ts: 1, type: 'loss', hypotheses: 1, queued: 0, reason: 'skipped: variant preservation already queued as ops-job-1' };
+    expect(degenerateAlert([same, same, same])?.message).toContain('preservation');
+
+    const tested = { ts: 1, type: 'tested', summary: '1/4 wins, invalid 0, SPRT continue' };
+    expect(degenerateAlert([tested, tested])).toBeNull();
+    expect(degenerateAlert([tested, tested, tested])?.message).toContain('1/4 wins, invalid 0, SPRT continue');
+    expect(DEGENERATE_STREAK).toBe(3);
+
+    const paths = tempPaths();
+    const rows = [pass(0), pass(0), pass(0)].map((row, index) => ({ ...row, ts: Date.now() - 1000 + index }));
+    fs.writeFileSync(paths.cycle, `${rows.map(row => JSON.stringify(row)).join('\n')}\n`);
+    expect(statusReport(paths)).toContain('alert P1');
+    expect(statusReport(paths)).toContain('queued 0');
+  });
+});
+
 function layoutFor(root: string): Layout {
   const layout: Layout = {
     cwd: root,
+    liveRepoDir: null,
     opsDir: root,
     ladderLogDir: path.join(root, 'ladder'),
     liveRunsDir: path.join(root, 'live-runs'),

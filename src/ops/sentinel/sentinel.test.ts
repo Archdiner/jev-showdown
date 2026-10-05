@@ -1,19 +1,19 @@
-import { spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { GraphDB } from '../../graph/db.js';
 import { CHECKS } from './checks.js';
 import { writeTonightFixture } from './fixtures.js';
-import { acknowledge, incidentStore, loadIncidents, markFixing } from './incidents.js';
+import { acknowledge, incidentStore, linkIncident, loadIncidents, markFixing, openP0, resolveMatching } from './incidents.js';
 import { buildScorecard, formatScorecard, parseSince } from './scorecard.js';
-import { loadContext, parseProcessTable, scanProcesses, snapshotProcesses } from './load.js';
+import { loadContext, parseProcessTable, parsePs, scanProcesses, snapshotProcesses } from './load.js';
 import { judge } from '../gatekeeper.js';
 import { openDb } from '../db.js';
 import { opsPaths } from '../paths.js';
 import { readLabels } from '../labels-read.js';
 import { readEvents } from './incidents.js';
-import { layoutFromEnv, renderScorecard, runSentinel, scanOnce } from './run.js';
+import { layoutFromEnv, parseBaseline, renderScorecard, runSentinel, scanOnce } from './run.js';
 import type { GitStatus, Layout, ProcessSnapshot } from './types.js';
 
 const quietGit: GitStatus = { behind: 0, ref: 'origin/main', detail: 'HEAD contains origin/main' };
@@ -29,6 +29,7 @@ function emptyRoot(): { root: string; layout: Layout } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-sentinel-'));
   const layout: Layout = {
     cwd: root,
+    liveRepoDir: null,
     opsDir: path.join(root, 'ops'),
     ladderLogDir: path.join(root, 'ladder'),
     liveRunsDir: path.join(root, 'live-runs'),
@@ -61,7 +62,9 @@ describe('sentinel checks', () => {
     const again = scanOnce(fixture.layout, { now: fixture.now + 1000, processes: fixture.processes, git: behindGit });
     const recounted = loadIncidents(incidentStore(fixture.layout.opsDir)).find(item => item.id === duplicate?.id);
     expect(recounted?.count).toBe(2);
-    expect(again.openP0).toBe(result.openP0);
+    expect(again.openP0).toBeGreaterThan(0);
+    const events = readEvents(incidentStore(fixture.layout.opsDir).eventsPath);
+    expect(events.filter(event => event.type === 'updated' && event.incidentId === duplicate?.id)).toEqual([]);
   });
 
   test('a quiet tree opens nothing', () => {
@@ -479,6 +482,8 @@ describe('scorecard', () => {
     expect(text).toContain('1-13-0 on 14 games');
     expect(text).not.toContain('eloAfter 999');
     expect(text).toContain('7.1%');
+    expect(text).toContain('queued 0');
+    expect(text).toContain('loop health');
     const markdown = formatScorecard(card, 'md');
     expect(markdown.startsWith('# jev scorecard')).toBe(true);
   });
@@ -758,5 +763,555 @@ describe('sentinel docs', () => {
     const layout = layoutFromEnv(process.cwd(), {});
     expect(layout.opsDir).toBe(path.join(process.cwd(), 'state', 'ops'));
     expect(layout.ladderLogDir).toBe(path.join(process.cwd(), 'logs', 'ladder'));
+    expect(layout.liveRepoDir).toBeNull();
+    const live = layoutFromEnv(process.cwd(), { LIVE_REPO_DIR: '~/jev-search' });
+    expect(live.liveRepoDir).toBe(path.join(os.homedir(), 'jev-search'));
+  });
+});
+
+const PS_84701 = `  PID  PPID  PGID STARTED                      COMMAND
+84701     1 84701 Mon Oct  5 23:52:01 2026     node src/cli/ladder.ts
+    1     0     1 Mon Oct  5 00:00:01 2026     /sbin/launchd
+`;
+
+function ladderRow(row: Record<string, unknown>): string {
+  return JSON.stringify({
+    schema: 'jev.ladder-game.v1',
+    kind: 'ladder-game',
+    source: 'ladder',
+    localServer: false,
+    username: 'asad',
+    format: 'gen9randombattle',
+    outcome: 'loss',
+    endReason: 'ko',
+    turns: 12,
+    invalidChoices: 0,
+    crashes: 0,
+    fallbacks: 0,
+    minTimerMarginSec: 8,
+    eloBefore: 1510,
+    eloAfter: 1500,
+    replayUrl: 'https://replay.pokemonshowdown.com/gen9randombattle-1',
+    replayStatus: 'confirmed',
+    ...row,
+  });
+}
+
+function fingerprint(root: string, incidents: Array<Record<string, unknown>>): string {
+  const normalize = (value: unknown): unknown => {
+    if (typeof value === 'string') return value.split(root).join('ROOT');
+    if (Array.isArray(value)) return value.map(normalize);
+    if (value && typeof value === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const key of Object.keys(value as Record<string, unknown>).sort()) out[key] = normalize((value as Record<string, unknown>)[key]);
+      return out;
+    }
+    return value;
+  };
+  return JSON.stringify(normalize(incidents));
+}
+
+describe('sentinel accuracy', () => {
+  test('ps lists a live ladder pid and runner-down does not page for it', () => {
+    const parsed = parsePs(PS_84701);
+    expect(parsed.find(row => row.pid === 84701)?.cmd).toContain('src/cli/ladder.ts');
+    expect(parsed.find(row => row.pid === 84701)?.ppid).toBe(1);
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    fs.mkdirSync(layout.liveRunsDir, { recursive: true });
+    fs.writeFileSync(path.join(layout.liveRunsDir, 'run.json'), JSON.stringify({
+      runId: 'run',
+      pid: 84701,
+      username: 'asad',
+      local: false,
+      startedAt: now - 60_000,
+    }));
+    const processes = parsed.filter(row => row.cmd.includes('ladder.ts'));
+    const up = scanOnce(layout, { now, processes, git: quietGit });
+    expect(up.hits.map(hit => hit.id)).not.toContain('runner-down');
+    const backed = scanOnce(layout, {
+      now,
+      processes: [],
+      pidAlive: pid => pid === 84701,
+      git: quietGit,
+    });
+    expect(backed.hits.map(hit => hit.id)).not.toContain('runner-down');
+    const down = scanOnce(layout, { now: now + 1, processes: [], git: quietGit });
+    expect(down.hits.map(hit => hit.id)).toContain('runner-down');
+  });
+
+  test('scanProcesses uses ps and reads /proc only for the environment', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-proc-'));
+    const proc = path.join(root, 'proc', '84701');
+    fs.mkdirSync(proc, { recursive: true });
+    fs.writeFileSync(path.join(proc, 'cmdline'), 'node\0src/cli/ladder.ts\0');
+    fs.writeFileSync(path.join(proc, 'environ'), 'LADDER_LOG_DIR=/tmp/ladder\0');
+    const found = scanProcesses({ ps: () => PS_84701, procRoot: path.join(root, 'proc') });
+    expect(found.map(row => row.pid)).toEqual([84701]);
+    expect(found[0].env?.LADDER_LOG_DIR).toBe('/tmp/ladder');
+    const psOnly = scanProcesses({ ps: () => PS_84701, procRoot: path.join(root, 'missing') });
+    expect(psOnly.map(row => row.pid)).toEqual([84701]);
+    expect(psOnly[0].env).toBeUndefined();
+    const procOnly = scanProcesses({ ps: () => '', procRoot: path.join(root, 'proc') });
+    expect(procOnly).toEqual([]);
+  });
+
+  test('collectRows handles large JSONL files without stack overflow', () => {
+    const { layout } = emptyRoot();
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    const rows: string[] = [];
+    const baseRow = {
+      schema: 'jev.ladder-game.v1',
+      kind: 'ladder-game',
+      source: 'ladder',
+      localServer: false,
+      battleId: 'battle-test',
+      ts: Date.now(),
+      outcome: 'win',
+      endReason: 'ko',
+      turns: 10,
+      username: 'bot',
+      format: 'gen9randombattle',
+      eloAfter: 1500,
+      invalidChoices: 0,
+      crashes: 0,
+      fallbacks: 0,
+      decisions: 10,
+      minTimerMarginSec: 5,
+      replayUrl: 'https://replay.pokemonshowdown.com/test',
+      replayStatus: 'confirmed',
+    };
+    for (let index = 0; index < 250_000; index++) {
+      rows.push(JSON.stringify({ ...baseRow, battleId: `battle-${index}` }));
+    }
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'large.jsonl'), rows.join('\n'));
+    expect(() => {
+      const ctx = loadContext(layout, { now: Date.now(), processes: [], git: quietGit });
+      expect(ctx.games.length).toBeGreaterThan(0);
+    }).not.toThrow();
+  });
+
+  test('LIVE_REPO_DIR checks name the live checkout separately from ops', () => {
+    const { layout } = emptyRoot();
+    const live = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-live-repo-'));
+    layout.liveRepoDir = live;
+    const now = Date.now();
+    const drain = path.join(live, 'state', 'DRAIN');
+    fs.mkdirSync(path.dirname(drain), { recursive: true });
+    fs.writeFileSync(drain, '');
+    const old = (now - 11 * 60 * 1000) / 1000;
+    fs.utimesSync(drain, old, old);
+    fs.writeFileSync(path.join(live, 'state', 'ladder-asad.lock'), JSON.stringify({ pid: 99999, username: 'asad', host: 'mac', startedAt: '2026-10-05T00:00:00.000Z' }));
+    const result = scanOnce(layout, {
+      now,
+      processes: [],
+      git: quietGit,
+      liveGit: behindGit,
+    });
+    const behind = result.hits.filter(hit => hit.id === 'checkout-behind');
+    expect(behind.map(hit => hit.key)).toEqual(['live']);
+    expect(behind[0].detail).toContain(live);
+    expect(behind[0].detail).toContain('live checkout');
+    const drains = result.hits.filter(hit => hit.id === 'drain-pending');
+    expect(drains.some(hit => hit.detail.includes('live checkout') && hit.detail.includes(drain))).toBe(true);
+    const locks = result.hits.filter(hit => hit.id === 'stale-lock');
+    expect(locks.some(hit => hit.detail.includes('live checkout'))).toBe(true);
+  });
+
+  test('LADDER_LOG_DIR git root is the ladder checkout for behind and drain', () => {
+    const ops = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-ops-'));
+    const live = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-search-'));
+    execFileSync('git', ['init'], { cwd: live, stdio: 'ignore' });
+    const ladder = path.join(live, 'logs', 'ladder');
+    fs.mkdirSync(ladder, { recursive: true });
+    const layout = layoutFromEnv(ops, { LADDER_LOG_DIR: ladder });
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: live, encoding: 'utf8' }).trim();
+    expect(layout.liveRepoDir).toBe(top);
+    expect(path.resolve(layout.cwd)).toBe(path.resolve(ops));
+    const now = Date.now();
+    const drain = path.join(live, 'state', 'DRAIN');
+    fs.mkdirSync(path.dirname(drain), { recursive: true });
+    fs.writeFileSync(drain, '');
+    const old = (now - 11 * 60 * 1000) / 1000;
+    fs.utimesSync(drain, old, old);
+    const result = scanOnce(layout, { now, processes: [], git: quietGit, liveGit: behindGit });
+    const behind = result.hits.filter(hit => hit.id === 'checkout-behind');
+    expect(behind.map(hit => hit.key)).toEqual(['live']);
+    expect(behind[0].detail).toContain(top);
+    expect(behind[0].detail).not.toContain(ops);
+    const drains = result.hits.filter(hit => hit.id === 'drain-pending');
+    expect(drains.some(hit => hit.detail.includes('live checkout') && hit.detail.includes(drain))).toBe(true);
+    expect(drains.some(hit => hit.detail.includes(ops))).toBe(false);
+  });
+
+  test('a repeat scan keeps count on the snapshot and does not append an updated line', () => {
+    const { layout } = emptyRoot();
+    fs.writeFileSync(path.join(layout.dataDir, 'gen9-stats.json'), speciesMap(1));
+    const now = Date.now();
+    scanOnce(layout, { now, processes: [], git: quietGit, maxEventBytes: 1024 * 1024 });
+    scanOnce(layout, { now: now + 1000, processes: [], git: quietGit });
+    const store = incidentStore(layout.opsDir);
+    const incident = loadIncidents(store)[0];
+    expect(incident.count).toBe(2);
+    expect(incident.lastSeen).toBe(now + 1000);
+    const events = readEvents(store.eventsPath);
+    expect(events.map(event => event.type)).toEqual(['opened']);
+  });
+
+  test('the event log rotates by size and the snapshot keeps the incident', () => {
+    const { layout } = emptyRoot();
+    fs.writeFileSync(path.join(layout.dataDir, 'gen9-stats.json'), speciesMap(1));
+    const now = Date.now();
+    scanOnce(layout, { now, processes: [], git: quietGit, maxEventBytes: 1 });
+    const store = incidentStore(layout.opsDir);
+    expect(fs.existsSync(`${store.eventsPath}.1`)).toBe(true);
+    expect(loadIncidents(store)[0].status).toBe('open');
+    expect(loadIncidents(store)[0].checkId).toBe('species-count');
+  });
+
+  test('timer-margin-null skips local games and battle-local rows', () => {
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    fs.mkdirSync(layout.opsDir, { recursive: true });
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'games.jsonl'), [
+      ladderRow({ battleId: 'battle-local-9', ts: now - 1000, localServer: true, username: 'localbot', minTimerMarginSec: null, source: 'local' }),
+      ladderRow({ battleId: 'battle-real', ts: now - 1000, minTimerMarginSec: null }),
+    ].join('\n') + '\n');
+    fs.writeFileSync(path.join(layout.opsDir, 'live-games.jsonl'), `${ladderRow({
+      battleId: 'battle-from-ops',
+      ts: now - 1000,
+      localServer: true,
+      username: 'localbot',
+      minTimerMarginSec: null,
+      source: 'ops',
+    })}\n`);
+    const result = scanOnce(layout, { now, processes: [], git: quietGit });
+    const hits = result.hits.filter(hit => hit.id === 'timer-margin-null');
+    expect(hits.map(hit => hit.key)).toEqual(['battle-real']);
+  });
+
+  test('a 1000-floor forfeit is consistent and mixed ratings do not compare separate rows', () => {
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'games.jsonl'), [
+      ladderRow({ battleId: 'battle-floor', ts: now - 2000, endReason: 'our-forfeit', outcome: 'loss', eloBefore: 1000, eloAfter: null }),
+      ladderRow({ battleId: 'battle-missing-elo', ts: now - 1000, endReason: 'our-forfeit', outcome: 'loss', eloBefore: 1400, eloAfter: null }),
+    ].join('\n') + '\n');
+    fs.writeFileSync(path.join(layout.opsDir, 'heartbeats.jsonl'), [
+      JSON.stringify({ facility: 'live', pid: 1, ts: now - 1000, status: 'ok', detail: 'localbot win rating 1000', scope: 'local' }),
+      JSON.stringify({ facility: 'live', pid: 1, ts: now - 900, status: 'ok', detail: 'asad loss rating 1510', scope: 'ladder' }),
+    ].join('\n') + '\n');
+    const separate = scanOnce(layout, { now, processes: [], git: quietGit });
+    const elo = separate.hits.filter(hit => hit.id === 'elo-null-on-forfeit');
+    expect(elo.map(hit => hit.key)).toEqual(['battle-missing-elo']);
+    expect(separate.hits.map(hit => hit.id)).not.toContain('mixed-ratings');
+    fs.writeFileSync(path.join(layout.opsDir, 'heartbeats.jsonl'), `${JSON.stringify({
+      facility: 'live', pid: 1, ts: now - 1000, status: 'ok', scope: 'local', detail: 'localbot ladder rating 1510 on sim3.psim.us',
+    })}\n`);
+    const mixed = scanOnce(layout, { now: now + 1, processes: [], git: quietGit });
+    expect(mixed.hits.map(hit => hit.id)).toContain('mixed-ratings');
+  });
+
+  test('two pids on a result line for one battle are a duplicate runner', () => {
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    const battle = 'battle-gen9randombattle-1';
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'games.jsonl'), [
+      JSON.stringify({ type: 'result', schema: 'jev.ladder-game.v1', battleId: battle, ts: now - 2000, pid: 2201, username: 'asad', outcome: 'loss', endReason: 'our-forfeit', turns: 4 }),
+      JSON.stringify({ type: 'result', schema: 'jev.ladder-game.v1', battleId: battle, ts: now - 1900, pid: 2202, username: 'asad', outcome: 'loss', endReason: 'our-forfeit', turns: 4 }),
+    ].join('\n') + '\n');
+    const result = scanOnce(layout, { now, processes: [], git: quietGit });
+    expect(result.hits.map(hit => hit.id)).toContain('duplicate-ladder-runners');
+  });
+
+  test('batches count unique games.jsonl battles and skip an aborted 0-game run', () => {
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    const good = Array.from({ length: 6 }, (_, index) => ladderRow({
+      battleId: `battle-batch-${index}`,
+      ts: now - 60_000 + index,
+      outcome: index < 2 ? 'win' : 'loss',
+      gitSha: 'e5e5fe6',
+      eloAfter: 1500 + index,
+    }));
+    const aborted = Array.from({ length: 3 }, (_, index) => ladderRow({
+      battleId: `battle-abort-${index}`,
+      ts: now - 30_000 + index,
+      gitSha: 'dead000',
+      outcome: 'loss',
+    }));
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'games.jsonl'), [...good, ...aborted].join('\n') + '\n');
+    fs.writeFileSync(path.join(layout.opsDir, 'live-games.jsonl'), good.map(line => line.replace('"source":"ladder"', '"source":"ops"')).join('\n') + '\n');
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'asad-battle-gen9randombattle-1.jsonl'), `${JSON.stringify({
+      type: 'result', schema: 'jev.ladder-game.v1', battleId: 'battle-batch-0', ts: now - 1000, outcome: 'win', turns: 12, gitSha: 'e5e5fe6', username: 'asad',
+    })}\n`);
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'summary.json'), JSON.stringify({ games: 0, wins: 0, gitSha: 'dead000', requested: 10 }));
+    const text = renderScorecard(layout, { now, since: '24h', processes: [], git: quietGit, scanProcesses: false });
+    expect(text).toContain('e5e5fe6');
+    expect(text).toContain('2-4-0');
+    expect(text).toContain('n=6');
+    expect(text).not.toContain('dead000');
+    expect(text).not.toContain('n=15');
+    expect(text).toContain('live runner');
+    expect(text).toContain('ops workers');
+  });
+
+  test('scorecard uptime and batch records come from games.jsonl batchLabel and runId', () => {
+    const { layout } = emptyRoot();
+    const now = Date.parse('2026-10-05T23:52:00.000Z');
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    const batch11 = [
+      ladderRow({
+        battleId: 'battle-b11-a',
+        ts: now - 40 * 60 * 1000,
+        outcome: 'win',
+        gitSha: 'c105e48',
+        runId: 'r11',
+        batchLabel: 'batch 11',
+      }),
+      ladderRow({
+        battleId: 'battle-b11-b',
+        ts: now - 10 * 60 * 1000,
+        outcome: 'win',
+        gitSha: 'c105e48',
+        runId: 'r11',
+        batchLabel: 'batch 11',
+      }),
+    ];
+    const batch10 = ladderRow({
+      battleId: 'battle-b10',
+      ts: now - 5 * 60 * 1000,
+      outcome: 'loss',
+      gitSha: 'c105e48',
+      runId: 'r10',
+      batchLabel: 'batch 10',
+    });
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'games.jsonl'), [...batch11, batch10].join('\n') + '\n');
+    fs.writeFileSync(path.join(layout.opsDir, 'live-games.jsonl'), batch11.map(line => line.replace('"source":"ladder"', '"source":"ops"')).join('\n') + '\n');
+    fs.writeFileSync(path.join(layout.opsDir, 'heartbeats.jsonl'), `${JSON.stringify({
+      facility: 'factory', pid: 1, ts: now - 50 * 60 * 1000, status: 'error',
+    })}\n`);
+    const text = renderScorecard(layout, { now, since: '1h', processes: [], git: quietGit, scanProcesses: false });
+    expect(text).toContain('live runner  50.0%');
+    expect(text).toContain('games.jsonl play spans');
+    expect(text).toContain('batch 11 r11');
+    expect(text).toContain('batch 10 r10');
+    expect(text).toMatch(/batch 11 r11\s+2-0-0\s+100\.0%\s+n=2/);
+    expect(text).toMatch(/batch 10 r10\s+0-1-0\s+0\.0%\s+n=1/);
+    // The total 2-1-0 can appear in vs prior and variants sections, just not as a batch
+    expect(text).toContain('2-1-0');
+    expect(text).toContain('win rate   66.7%  2-1-0 on 3 games');
+    expect(text).toContain('record     0-0-0 on 0 games → 2-1-0 on 3 games');
+  });
+
+  test('opened counts incidents in the file, and a ledger ref is on the scorecard', () => {
+    const { layout } = emptyRoot();
+    fs.writeFileSync(path.join(layout.dataDir, 'gen9-stats.json'), speciesMap(1));
+    const now = Date.now();
+    scanOnce(layout, { now, processes: [], git: quietGit });
+    const store = incidentStore(layout.opsDir);
+    const id = loadIncidents(store)[0].id;
+    fs.appendFileSync(store.eventsPath, `${JSON.stringify({ ts: now, type: 'opened', incidentId: 'inc-extra', checkId: 'species-count', key: 'extra', severity: 'P0', title: 'extra', status: 'open' })}\n`);
+    expect(linkIncident(store, id, 'INC-007', now + 1)).toBeNull();
+    const ctx = loadContext(layout, { now: now + 2, processes: [], git: quietGit, scanProcesses: false });
+    const incidents = loadIncidents(store);
+    const card = buildScorecard(ctx, incidents, readEvents(store.eventsPath), 24 * 60 * 60 * 1000);
+    expect(card.reliability.opened).toBe(incidents.filter(item => item.firstSeen >= now - 24 * 60 * 60 * 1000).length);
+    expect(card.reliability.opened).toBe(1);
+    expect(card.reliability.openP0).toBe(openP0(incidents));
+    expect(formatScorecard(card)).toContain('[INC-007]');
+  });
+
+  test('resolve --sha and --before close history with a reason', () => {
+    const { layout } = emptyRoot();
+    const now = Date.parse('2026-10-05T23:00:00.000Z');
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'games.jsonl'), `${ladderRow({
+      battleId: 'battle-old',
+      ts: now - 60_000,
+      invalidChoices: 2,
+      gitSha: 'e7a9497',
+      runId: 'old-run',
+    })}\n`);
+    scanOnce(layout, { now, processes: [], git: quietGit, baselineMs: null });
+    const store = incidentStore(layout.opsDir);
+    const resolved = resolveMatching(store, { sha: 'e7a9497' }, 'fixed after e7a9497', now + 1);
+    expect(resolved.error).toBeNull();
+    expect(resolved.ids.length).toBe(1);
+    const incident = loadIncidents(store)[0];
+    expect(incident.status).toBe('resolved');
+    expect(incident.rootCause).toBe('fixed after e7a9497');
+    expect(incident.inBaseline).toBe(false);
+
+    const older = emptyRoot();
+    fs.mkdirSync(older.layout.ladderLogDir, { recursive: true });
+    fs.writeFileSync(path.join(older.layout.ladderLogDir, 'games.jsonl'), `${ladderRow({
+      battleId: 'battle-before',
+      ts: now - 2 * 60 * 60 * 1000,
+      invalidChoices: 1,
+      gitSha: '085aaa6',
+      runId: 'earlier',
+    })}\n`);
+    scanOnce(older.layout, { now, processes: [], git: quietGit, baselineMs: null });
+    const olderStore = incidentStore(older.layout.opsDir);
+    const byTime = resolveMatching(olderStore, { before: now - 60 * 60 * 1000 }, 'before the cutoff', now + 2);
+    expect(byTime.error).toBeNull();
+    expect(byTime.ids.length).toBe(1);
+    expect(loadIncidents(olderStore)[0].rootCause).toBe('before the cutoff');
+    expect(loadIncidents(olderStore)[0].status).toBe('resolved');
+  });
+
+  test('parseBaseline accepts an ISO instant', () => {
+    const now = Date.parse('2026-10-05T23:00:00.000Z');
+    expect(parseBaseline('2026-10-05T22:00:00.000Z', now)).toBe(Date.parse('2026-10-05T22:00:00.000Z'));
+    expect(parseBaseline('30m', now)).toBe(now - 30 * 60 * 1000);
+  });
+
+  test('--once exits 0 when the only P0 is acknowledged', async () => {
+    const { layout } = emptyRoot();
+    fs.writeFileSync(path.join(layout.dataDir, 'gen9-stats.json'), speciesMap(1));
+    const now = Date.now();
+    const opened = scanOnce(layout, { now, processes: [], git: quietGit });
+    expect(opened.openP0).toBe(1);
+    const store = incidentStore(layout.opsDir);
+    expect(acknowledge(store, loadIncidents(store)[0].id, now + 1)).toBeNull();
+    const logs: string[] = [];
+    const original = console.log;
+    console.log = (line?: unknown) => {
+      logs.push(String(line));
+    };
+    try {
+      const code = await runSentinel(layout, { once: true, json: true, now: now + 2, processes: [], git: quietGit });
+      expect(code).toBe(0);
+    } finally {
+      console.log = original;
+    }
+    const body = JSON.parse(logs.at(-1) ?? '') as { openP0: number };
+    expect(body.openP0).toBe(0);
+    expect(loadIncidents(store)[0].status).toBe('acknowledged');
+  });
+
+  test('daemon and once agree, and a fresh per-game P0 stays open', async () => {
+    const now = Date.parse('2026-10-05T23:52:00.000Z');
+    const write = (root: string): Layout => {
+      const layout: Layout = {
+        cwd: root,
+        liveRepoDir: null,
+        opsDir: path.join(root, 'ops'),
+        ladderLogDir: path.join(root, 'ladder'),
+        liveRunsDir: path.join(root, 'live-runs'),
+        dataDir: path.join(root, 'data'),
+        graphDb: path.join(root, 'graph.db'),
+      };
+      fs.mkdirSync(layout.opsDir, { recursive: true });
+      fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+      fs.mkdirSync(layout.liveRunsDir, { recursive: true });
+      fs.mkdirSync(layout.dataDir, { recursive: true });
+      fs.writeFileSync(path.join(layout.dataDir, 'gen9-stats.json'), speciesMap(500));
+      fs.writeFileSync(path.join(layout.liveRunsDir, 'current.json'), JSON.stringify({
+        runId: 'current',
+        pid: 84701,
+        username: 'asad',
+        local: false,
+        startedAt: now - 30 * 60 * 1000,
+        gitSha: 'e5e5fe6',
+      }));
+      fs.writeFileSync(path.join(layout.ladderLogDir, 'games.jsonl'), [
+        ladderRow({
+          battleId: 'battle-historical',
+          ts: now - 2 * 60 * 60 * 1000,
+          invalidChoices: 2,
+          gitSha: '0312c5a',
+          runId: 'old',
+        }),
+        ladderRow({
+          battleId: 'battle-gen9randombattle-2692998479',
+          ts: now - 60_000,
+          invalidChoices: 2,
+          gitSha: 'e5e5fe6',
+          runId: 'current',
+        }),
+        ladderRow({
+          battleId: 'battle-pass',
+          ts: now - 30_000,
+          outcome: 'win',
+          gitSha: 'e5e5fe6',
+          runId: 'current',
+        }),
+      ].join('\n') + '\n');
+      return layout;
+    };
+    const onceLayout = write(fs.mkdtempSync(path.join(os.tmpdir(), 'jev-once-')));
+    const daemonLayout = write(fs.mkdtempSync(path.join(os.tmpdir(), 'jev-daemon-')));
+    const shared = {
+      now,
+      processes: [{ pid: 84701, cmd: 'node src/cli/ladder.ts --username asad', env: {} }],
+      git: quietGit,
+      since: '2026-10-05T23:22:00.000Z',
+      episodePassGames: 1,
+    };
+    const logs: string[] = [];
+    const original = console.log;
+    console.log = (line?: unknown) => {
+      logs.push(String(line));
+    };
+    let onceCode = 1;
+    let daemonCode = 0;
+    try {
+      onceCode = await runSentinel(onceLayout, { ...shared, once: true, json: true });
+      daemonCode = await runSentinel(daemonLayout, { ...shared, once: false, scans: 1, json: true });
+    } finally {
+      console.log = original;
+    }
+    expect(onceCode).toBe(daemonCode);
+    expect(onceCode).toBe(1);
+    const onceBody = JSON.parse(fs.readFileSync(path.join(onceLayout.opsDir, 'incidents.json'), 'utf8')) as { incidents: Array<Record<string, unknown>> };
+    const daemonBody = JSON.parse(fs.readFileSync(path.join(daemonLayout.opsDir, 'incidents.json'), 'utf8')) as { incidents: Array<Record<string, unknown>> };
+    expect(fingerprint(onceLayout.cwd, onceBody.incidents)).toBe(fingerprint(daemonLayout.cwd, daemonBody.incidents));
+    const fresh = onceBody.incidents.find(item => item.checkId === 'invalid-choices') as {
+      status: string;
+      resolvedAt: number | null;
+      clearSince: number | null;
+      firstSeen: number;
+      count: number;
+      gitSha: string;
+      key: string;
+      detail: string;
+      evidence: Array<{ detail: string }>;
+      inBaseline: boolean;
+    };
+    expect(fresh.status).toBe('open');
+    expect(fresh.resolvedAt).toBeNull();
+    expect(fresh.clearSince).toBeNull();
+    expect(fresh.firstSeen).toBe(now);
+    expect(fresh.gitSha).toBe('e5e5fe6');
+    expect(fresh.key).toBe('run:current');
+    expect(fresh.count).toBe(1);
+    expect(fresh.inBaseline).toBe(true);
+    expect(JSON.stringify(fresh.evidence)).toContain('2692998479');
+    expect(JSON.stringify(fresh)).not.toContain('0312c5a');
+    expect(onceBody.incidents.filter(item => item.checkId === 'invalid-choices')).toHaveLength(1);
+    const ctx = loadContext(onceLayout, { now, processes: shared.processes, git: quietGit, baselineMs: Date.parse(shared.since) });
+    const card = buildScorecard(ctx, loadIncidents(incidentStore(onceLayout.opsDir)), [], 24 * 60 * 60 * 1000);
+    expect(card.reliability.openP0).toBe(openP0(loadIncidents(incidentStore(onceLayout.opsDir))));
+    const again = scanOnce(onceLayout, { ...shared, now: now + 1000, episodePassGames: 1 });
+    const after = loadIncidents(incidentStore(onceLayout.opsDir)).find(item => item.checkId === 'invalid-choices');
+    expect(after?.status).toBe('resolved');
+    expect(after?.resolvedAt).not.toBe(after?.firstSeen);
+    expect(again.openP0).toBe(0);
+    fs.appendFileSync(path.join(onceLayout.ladderLogDir, 'games.jsonl'), `${ladderRow({
+      battleId: 'battle-old-again',
+      ts: now - 3 * 60 * 60 * 1000,
+      invalidChoices: 4,
+      gitSha: '0312c5a',
+      runId: 'old',
+    })}\n`);
+    scanOnce(onceLayout, { ...shared, now: now + 2000 });
+    const stayed = loadIncidents(incidentStore(onceLayout.opsDir)).find(item => item.checkId === 'invalid-choices');
+    expect(stayed?.status).toBe('resolved');
   });
 });

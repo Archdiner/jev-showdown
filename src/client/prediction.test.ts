@@ -310,6 +310,15 @@ describe('BattleDriver prediction log', () => {
     expect(text).toContain('"type":"prediction_error"');
     expect(text).toContain(TURN_FORECAST_SCHEMA);
     expect(text).toContain('"schema":"jev.prediction-error.v1"');
+    const turns = text.split('\n').flatMap(line => {
+      try {
+        const row = JSON.parse(line) as { type?: string; request?: unknown };
+        return row.type === 'turn' ? [row] : [];
+      } catch {
+        return [];
+      }
+    });
+    expect(turns.some(row => row.request && typeof row.request === 'object')).toBe(true);
     const games = JSON.parse(fs.readFileSync(path.join(logDir, 'games.jsonl'), 'utf8'));
     expect(games.calibration.compared).toBe(1);
     await driver.stop();

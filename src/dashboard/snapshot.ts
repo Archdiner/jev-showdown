@@ -526,6 +526,7 @@ function reliabilityView(paths: DashboardPaths, now: number): Snapshot['reliabil
   try {
     const ctx = loadContext({
       cwd: paths.cwd,
+      liveRepoDir: null,
       opsDir: paths.opsDir,
       ladderLogDir: paths.ladderLogDir,
       liveRunsDir: paths.searchLogDir,

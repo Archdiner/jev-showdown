@@ -4,6 +4,9 @@ import { appendJsonl, readJsonl } from './paths.js';
 /** A streak of reviewed losses that queue nothing pages after this long. */
 export const STALL_MS = 15 * 60 * 1000;
 
+/** Consecutive analyst passes, or matching loss/test rows, that mean the loop is not learning. */
+export const DEGENERATE_STREAK = 3;
+
 export interface CycleTotals {
   lossesReviewed: number;
   hypothesesCreated: number;
@@ -155,6 +158,64 @@ export function stallAlert(view: CycleView, now: number): { level: 'P1'; message
     level: 'P1',
     message: `losses reviewed ${view.quietLosses} but nothing queued for ${minutes} min${why}`,
   };
+}
+
+/**
+ * The loop is repeating itself: several passes queue nothing, every mine fails,
+ * every loss names one variant, or every challenger result is the same string.
+ */
+export function degenerateAlert(rows: unknown[]): { level: 'P1'; message: string } | null {
+  const events = rows.map(asEvent).filter((event): event is CycleEvent & { ts: number } => Boolean(event));
+  const passes = events.filter(event => event.type === 'pass');
+  const lastPasses = passes.slice(-DEGENERATE_STREAK);
+  if (
+    lastPasses.length >= DEGENERATE_STREAK
+    && lastPasses.every(event => event.type === 'pass' && event.jobsQueued === 0 && event.lossesReviewed > 0)
+  ) {
+    return {
+      level: 'P1',
+      message: `${DEGENERATE_STREAK} consecutive analyst passes reviewed losses and queued 0 jobs`,
+    };
+  }
+  const losses = events.filter(event => event.type === 'loss');
+  if (losses.length >= DEGENERATE_STREAK && losses.every(event => (event.type === 'loss' ? event.reason ?? '' : '').includes('skipped mine'))) {
+    return {
+      level: 'P1',
+      message: `mining failed on all ${losses.length} reviewed losses`,
+    };
+  }
+  if (losses.length >= DEGENERATE_STREAK) {
+    const variants = new Set(losses.map(event => event.type === 'loss' ? variantToken(event.reason) : null).filter((id): id is string => Boolean(id)));
+    if (variants.size === 1) {
+      const id = [...variants][0];
+      return {
+        level: 'P1',
+        message: `${losses.length} losses collapsed to one hypothesis (${id})`,
+      };
+    }
+  }
+  const tested = events.filter(event => event.type === 'tested' && event.summary);
+  if (tested.length >= DEGENERATE_STREAK) {
+    const summaries = new Set(tested.map(event => event.type === 'tested' ? event.summary : ''));
+    if (summaries.size === 1) {
+      return {
+        level: 'P1',
+        message: `${tested.length} challenger results are identical (${[...summaries][0]})`,
+      };
+    }
+  }
+  return null;
+}
+
+function variantToken(reason: string | undefined): string | null {
+  if (!reason) return null;
+  const named = /variant ([a-z0-9-]+)/i.exec(reason);
+  if (named) return named[1];
+  const term = /eval-term:\s*([A-Za-z]+)/.exec(reason);
+  if (term) return term[1];
+  const mechanism = /mechanism:\s*([a-z0-9-]+)/.exec(reason);
+  if (mechanism) return mechanism[1];
+  return null;
 }
 
 export function cycleLines(view: CycleView, now: number): string[] {
