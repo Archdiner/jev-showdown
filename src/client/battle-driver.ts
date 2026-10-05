@@ -32,6 +32,7 @@ import { ladderPolicy } from './ladder-engine.js';
 import { parseEngine } from './engines.js';
 import { PredictionLog, PredictionScore } from './prediction.js';
 import { TurnForecast, forecastLine, hpFraction, hpFractionText } from './turn-forecast.js';
+import { battleInitRoom } from './protocol-frames.js';
 
 export type GameSummary = LadderGameRecord & {
   choiceDeliveryFailures: number;
@@ -140,6 +141,8 @@ export class BattleDriver extends EventEmitter {
   private readonly rooms = new Map<string, RoomState>();
   /** Room ids that already wrote a result. Later lines must not open them again. */
   private readonly closedRooms = new Set<string>();
+  /** Lines seen for a room before its `|init|battle`. They do not open a game. */
+  private readonly beforeInit = new Map<string, string[]>();
   private readonly gens = new Generations(Dex);
   private stopped = false;
 
@@ -172,12 +175,14 @@ export class BattleDriver extends EventEmitter {
   async stop(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
+    this.beforeInit.clear();
     await this.fillMissingRatings();
     for (const room of [...this.rooms.values()]) {
       if (room.requestTimer) clearTimeout(room.requestTimer);
       if (room.finalizeTimer) clearTimeout(room.finalizeTimer);
       if (room.deliveryTimer) clearTimeout(room.deliveryTimer);
       this.clearChoiceWatch(room);
+      this.beforeInit.delete(room.roomId);
       if (!room.finalized) {
         if (!room.ended) room.disconnected = true;
         await this.finalize(room);
@@ -186,13 +191,37 @@ export class BattleDriver extends EventEmitter {
     await this.options.decisions.stop();
   }
 
+  /**
+   * A game is keyed by the room id on its `|init|battle`, not by which
+   * search was sent first. A bare `|init|battle` uses the framing `>roomid`.
+   * `|init|battle|battle-...` uses the id written on that line.
+   */
+  private roomIdForLine(framingRoomId: string, line: string): string | null {
+    const named = battleInitRoom(line);
+    if (named !== null && named.startsWith('battle-')) return named;
+    return framingRoomId.startsWith('battle-') ? framingRoomId : null;
+  }
+
   private onLine(roomId: string, line: string): void {
     if (this.stopped || !roomId.startsWith('battle-')) return;
-    if (this.closedRooms.has(roomId)) return;
-    if (this.namesAnotherBattle(roomId, line)) return;
-    let room = this.rooms.get(roomId);
-    if (!room) room = this.openRoom(roomId);
-    if (room.finalized) return;
+    const id = this.roomIdForLine(roomId, line);
+    if (!id || this.closedRooms.has(id)) return;
+    if (this.namesAnotherBattle(id, line)) return;
+    if (!this.rooms.has(id)) {
+      if (battleInitRoom(line) === null) {
+        const queued = this.beforeInit.get(id) ?? [];
+        if (queued.length < 64) queued.push(line);
+        this.beforeInit.set(id, queued);
+        return;
+      }
+      this.openRoom(id);
+      const queued = this.beforeInit.get(roomId) ?? [];
+      this.beforeInit.delete(roomId);
+      if (id !== roomId) this.beforeInit.delete(id);
+      for (const earlier of queued) this.onLine(id, earlier);
+    }
+    const room = this.rooms.get(id);
+    if (!room || room.finalized) return;
 
     const clock = ourClockUpdate(line, this.options.username);
     if (clock !== undefined) room.secondsLeft = clock;

@@ -54,6 +54,7 @@ async function finish(lines: string[]): Promise<{ summaryGxe: number | null; sum
   });
   const room = 'battle-gen9randombattle-1';
   const socket = (driver as unknown as { options: { client: EventEmitter } }).options.client;
+  socket.emit('line', room, '|init|battle');
   for (const line of lines) socket.emit('line', room, line);
   const summary = await ended;
   await driver.stop();

@@ -10,6 +10,8 @@ A room left over from an earlier session is rejoined when the runner logs in. If
 
 ## A sent choice is resent until the turn moves
 
+A battle is opened only by `|init|battle`. Its room id is the `>roomid` on that message, or the id written on `|init|battle|battle-...` when the line names one. A `|request|` with no init does not start a game and is not answered. Two battles in one frame stay on those two ids, not on whichever search was sent first.
+
 `/choose` returning true is not the server applying the move. If no new `|request|` and no later `|turn|` follows that send within 8 seconds, the same choice and the same rqid are sent again, including on turn 1. A `|turn|1` that arrives after the move was sent does not count: that line starts the turn. A clock line for us with no new turn also resends. Each `choice-delivery` row has `intendedRoomId` (the battle the request belonged to) and `sentRoomId` (the room id written on `/choose`). A choice whose rqid is no longer the room's request is not sent. One websocket frame can carry several battles; each `>roomid` switches the room, so a later battle's `|request|` is not answered in the earlier room. A replay popup names the battle in its URL, including the password after the id, and is not written onto a different open battle or onto whichever room was active most recently. A popup line that names another battle is dropped instead of being stored on the room that happened to receive it. A finished battle ignores later lines, so it does not log a second `game_start`.
 
 ## Self-play uses the ladder's hidden information
