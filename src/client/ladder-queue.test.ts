@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { budgetSearchMs, clampConcurrency, MAX_LADDER_CONCURRENCY, parseEngine } from './engines.js';
 import { isAlreadySearching, isSearchRejection, LadderQueue, parseUpdateSearch } from './ladder-queue.js';
 import type { ShowdownClient } from './showdown-client.js';
