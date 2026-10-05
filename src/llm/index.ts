@@ -13,6 +13,8 @@ export {
   resolveReviewerModel,
 } from './models.js';
 export { renderContextBrief, BRIEF_SECTIONS } from './context-brief.js';
+export { strategistDecide, strategistChoices, parseStrategist, STRATEGIST_TIMEOUT_MS } from './strategist.js';
+export type { GamePlan, StrategistDecision } from './strategist.js';
 export type { ContextBrief, BriefSection } from './context-brief.js';
 export { DEFAULT_BLEND_CONFIG } from './types.js';
 export type { BlendConfig, BlendMode, BlendOutcome, CandidateSearch, ScoredAction } from './types.js';
