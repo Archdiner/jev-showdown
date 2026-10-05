@@ -75,6 +75,8 @@ export interface AttributedDecision {
   advisorSource?: string;
   overBudget: boolean;
   gamePlan: GamePlan | null;
+  predictedSwitch?: boolean;
+  answersPredictedSwitch?: boolean;
 }
 
 export interface BotSpec {

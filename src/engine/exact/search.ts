@@ -11,11 +11,16 @@ import {
   snapshot,
 } from './battle-utils.js';
 import { maxDamageChoice } from './max-damage.js';
+import { SearchProfile } from './config.js';
+import switchProfile from '../../../experiments/switch-depth2/config.json' with { type: 'json' };
+import { rankedSwitches } from './matchup.js';
+import { pruneReplies, replyDistribution, WeightedChoice } from './switch-model.js';
+import { teamEval } from './team-eval.js';
 
 export interface ExactConfig {
   depth: number;
-  opponentModel: 'max-damage' | 'uniform';
-  evalMode: 'hp' | 'full';
+  opponentModel: 'max-damage' | 'uniform' | 'switch';
+  evalMode: 'hp' | 'full' | 'team';
   /**
    * Legacy bug: a branch whose choice the sim rejects is scored as a loss
    * instead of being ignored. The old search did this for every
@@ -27,6 +32,10 @@ export interface ExactConfig {
    * move as a hit or a miss; the average ranks it by how often it lands.
    */
   samples?: number;
+  maxReplies?: number;
+  minReplyProb?: number;
+  /** Own actions below the root. The root always sees every legal switch. */
+  deeperChoices?: number;
 }
 
 export const EXACT_1PLY: ExactConfig = {
@@ -37,6 +46,8 @@ export const EXACT_1PLY: ExactConfig = {
   samples: 8,
 };
 
+export const SWITCH_DEPTH2: ExactConfig = switchProfile as SearchProfile;
+
 export interface ScoredChoice {
   choice: string;
   score: number;
@@ -45,6 +56,10 @@ export interface ScoredChoice {
 export interface SearchTrace {
   choice: string;
   scores: ScoredChoice[];
+  /** The switch model's most likely reply is a switch. */
+  predictedSwitch?: boolean;
+  /** Our choice is also the best answer to that switch. */
+  answersPredictedSwitch?: boolean;
 }
 
 const fullEvaluator = new Evaluator();
@@ -107,21 +122,41 @@ function evaluate(battle: Battle, sideId: SideId, config: ExactConfig): number {
     const unit = fullEvaluator.getWeights().material || 1;
     return raw / unit;
   }
+  if (config.evalMode === 'team') return teamEval(battle, sideId);
   return hpEval(battle, sideId);
 }
 
-function opponentLines(battle: Battle, opp: SideId, config: ExactConfig): string[] {
+function opponentDistribution(battle: Battle, opp: SideId, config: ExactConfig): WeightedChoice[] {
   const legal = legalChoices(battle, opp);
   if (legal.length === 0) return [];
-  if (config.opponentModel === 'uniform') return legal;
+  if (config.opponentModel === 'switch') {
+    return pruneReplies(
+      replyDistribution(battle, opp, legal),
+      config.maxReplies ?? 2,
+      config.minReplyProb ?? 0,
+    );
+  }
+  if (config.opponentModel === 'uniform') {
+    return legal.map(choice => ({ choice, prob: 1 / legal.length }));
+  }
   const moves = legal.filter(choice => choice.startsWith('move '));
-  if (moves.length === 0) return legal;
-  return [maxDamageChoice(battle, opp, moves)];
+  if (moves.length === 0) return [{ choice: legal[0], prob: 1 }];
+  return [{ choice: maxDamageChoice(battle, opp, moves), prob: 1 }];
 }
 
-function average(values: number[]): number {
-  if (values.length === 0) return 0;
-  return values.reduce((sum, n) => sum + n, 0) / values.length;
+function ownChoices(battle: Battle, sideId: SideId, config: ExactConfig, atRoot: boolean): string[] {
+  const legal = legalChoices(battle, sideId);
+  const cap = config.deeperChoices ?? 0;
+  if (atRoot || cap <= 0 || legal.length <= cap) return legal;
+  const moves = legal.filter(choice => choice.startsWith('move '));
+  const switches = rankedSwitches(battle, sideId).map(row => row.choice);
+  const kept = [...moves];
+  for (const choice of switches) {
+    if (kept.length >= cap) break;
+    if (!kept.includes(choice)) kept.push(choice);
+  }
+  if (kept.length === 0) return legal.slice(0, cap);
+  return kept.slice(0, cap);
 }
 
 /**
@@ -129,25 +164,44 @@ function average(values: number[]): number {
  * Every branch is a clone of the real battle stepped with Battle.choose.
  */
 export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig = EXACT_1PLY): SearchTrace {
-  const mine = legalChoices(battle, sideId);
+  const mine = ownChoices(battle, sideId, config, true);
   if (mine.length === 0) return { choice: 'default', scores: [] };
   if (mine.length === 1) return { choice: mine[0], scores: [{ choice: mine[0], score: 0 }] };
 
   const snap = snapshot(battle);
+  const replies = opponentDistribution(battle, otherSide(sideId), config);
+  const switchReply = replies.find(reply => reply.choice.startsWith('switch')) || null;
+  const modal = replies.reduce<WeightedChoice | null>((best, reply) => {
+    if (!best || reply.prob > best.prob) return reply;
+    return best;
+  }, null);
+  const predictedSwitch = Boolean(modal?.choice.startsWith('switch'));
+
   const scores: ScoredChoice[] = [];
   let best = mine[0];
   let bestScore = -Infinity;
+  let answer = mine[0];
+  let bestAgainstSwitch = -Infinity;
 
   for (const choice of mine) {
-    const score = scoreChoice(snap, battle, sideId, choice, config.depth, config, config.samples ?? 1);
-    scores.push({ choice, score });
-    if (score > bestScore) {
-      bestScore = score;
+    const parts = scoreChoice(snap, sideId, choice, config.depth, config, config.samples ?? 1, replies, switchReply?.choice || null);
+    scores.push({ choice, score: parts.mean });
+    if (parts.mean > bestScore) {
+      bestScore = parts.mean;
       best = choice;
+    }
+    if (parts.againstSwitch != null && parts.againstSwitch > bestAgainstSwitch) {
+      bestAgainstSwitch = parts.againstSwitch;
+      answer = choice;
     }
   }
 
-  return { choice: best, scores };
+  return {
+    choice: best,
+    scores,
+    predictedSwitch,
+    answersPredictedSwitch: predictedSwitch && best === answer,
+  };
 }
 
 function reseed(battle: Battle, sample: number): void {
@@ -155,29 +209,46 @@ function reseed(battle: Battle, sample: number): void {
   battle.resetRNG(prng.startingSeed);
 }
 
+interface ChoiceScore {
+  mean: number;
+  againstSwitch: number | null;
+}
+
 function scoreChoice(
   snap: string,
-  live: Battle,
   sideId: SideId,
   myChoice: string,
   depth: number,
   config: ExactConfig,
   samples: number,
-): number {
-  const root = snap ? cloneFromSnapshot(snap) : live;
-  const opp = otherSide(sideId);
-  const lines = opponentLines(root, opp, config);
+  replies: WeightedChoice[] | null,
+  switchReply: string | null,
+): ChoiceScore {
+  const root = cloneFromSnapshot(snap);
+  const lines = replies ?? opponentDistribution(root, otherSide(sideId), config);
   const draws = Math.max(1, samples);
-  const replies = lines.length > 0 ? lines : [undefined];
-  const values: number[] = [];
+  const used = lines.length > 0 ? lines : [{ choice: '', prob: 1 }];
+  let weighted = 0;
+  let weight = 0;
+  let againstSwitch: number | null = null;
+  let switchWeight = 0;
   for (let sample = 0; sample < draws; sample++) {
-    for (const oppChoice of replies) {
+    for (const reply of used) {
       const battle = cloneFromSnapshot(snap);
       reseed(battle, sample);
-      values.push(rollout(battle, sideId, myChoice, oppChoice, depth, config));
+      const value = rollout(battle, sideId, myChoice, reply.choice || undefined, depth, config);
+      weighted += reply.prob * value;
+      weight += reply.prob;
+      if (switchReply && reply.choice === switchReply) {
+        againstSwitch = (againstSwitch ?? 0) + value;
+        switchWeight++;
+      }
     }
   }
-  return average(values);
+  return {
+    mean: weight > 0 ? weighted / weight : 0,
+    againstSwitch: switchWeight > 0 && againstSwitch != null ? againstSwitch / switchWeight : null,
+  };
 }
 
 function rollout(
@@ -194,13 +265,13 @@ function rollout(
   }
   if (battle.ended || depth <= 1) return evaluate(battle, sideId, config);
 
-  const next = legalChoices(battle, sideId);
+  const next = ownChoices(battle, sideId, config, false);
   if (next.length === 0) return evaluate(battle, sideId, config);
 
   const snap = snapshot(battle);
   let best = -Infinity;
   for (const choice of next) {
-    const score = scoreChoice(snap, battle, sideId, choice, depth - 1, config, 1);
+    const score = scoreChoice(snap, sideId, choice, depth - 1, config, 1, null, null).mean;
     if (score > best) best = score;
   }
   return best;

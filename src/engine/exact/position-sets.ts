@@ -386,13 +386,13 @@ export async function generateSplits(): Promise<void> {
   }
 }
 
-function choiceFor(kind: 'search' | 'maxdamage', battle: Battle, side: SideId): string {
+function choiceFor(kind: 'search' | 'maxdamage', battle: Battle, side: SideId, config: ExactConfig): string {
   const legal = legalChoices(battle, side);
   if (kind === 'maxdamage') return maxDamageChoice(battle, side, legal);
-  return exactSearch(battle, side, EXACT_1PLY).choice;
+  return exactSearch(battle, side, config).choice;
 }
 
-export function scoreSplit(split: SplitName): SplitScore {
+export function scoreSplit(split: SplitName, config: ExactConfig = EXACT_1PLY): SplitScore {
   const file = loadSplit(split);
   const score: SplitScore = {
     split,
@@ -405,8 +405,8 @@ export function scoreSplit(split: SplitName): SplitScore {
 
   for (const position of file.positions) {
     const battle = cloneFromSnapshot(position.snapshot);
-    const searchChoice = choiceFor('search', battle, position.side);
-    const heuristic = choiceFor('maxdamage', cloneFromSnapshot(position.snapshot), position.side);
+    const searchChoice = choiceFor('search', battle, position.side, config);
+    const heuristic = choiceFor('maxdamage', cloneFromSnapshot(position.snapshot), position.side, config);
     if (position.labelKind === 'forced-win') {
       score.forcedWin.total++;
       if (searchChoice === position.label) score.forcedWin.hit++;
@@ -420,7 +420,11 @@ export function scoreSplit(split: SplitName): SplitScore {
   return score;
 }
 
-export function heldOutPasses(score: SplitScore): { ok: boolean; reason: string } {
+export function heldOutPasses(
+  score: SplitScore,
+  options: { attackerAgreement?: boolean } = {},
+): { ok: boolean; reason: string } {
+  const attackerAgreement = options.attackerAgreement !== false;
   if (score.split !== 'heldout') return { ok: false, reason: 'not the held-out split' };
   if (score.positions < 100) return { ok: false, reason: `held-out set has ${score.positions} positions` };
   if (score.forcedWin.total > 0 && score.forcedWin.hit < score.forcedWin.total) {
@@ -432,16 +436,14 @@ export function heldOutPasses(score: SplitScore): { ok: boolean; reason: string 
   if (score.deepAgree.total === 0) return { ok: false, reason: 'held-out deep-search slice is empty' };
   const searchRate = score.deepAgree.hit / score.deepAgree.total;
   const heuristicRate = score.maxDamageDeepAgree.hit / score.maxDamageDeepAgree.total;
-  if (searchRate < heuristicRate) {
+  const summary = `held-out forced-win ${score.forcedWin.hit}/${score.forcedWin.total}, deep agreement ${(searchRate * 100).toFixed(1)}% vs max-damage ${(heuristicRate * 100).toFixed(1)}% (${score.replayPositions} replay positions)`;
+  if (attackerAgreement && searchRate < heuristicRate) {
     return {
       ok: false,
       reason: `held-out agreement ${(searchRate * 100).toFixed(1)}% is below max-damage ${(heuristicRate * 100).toFixed(1)}%`,
     };
   }
-  return {
-    ok: true,
-    reason: `held-out forced-win ${score.forcedWin.hit}/${score.forcedWin.total}, deep agreement ${(searchRate * 100).toFixed(1)}% vs max-damage ${(heuristicRate * 100).toFixed(1)}% (${score.replayPositions} replay positions)`,
-  };
+  return { ok: true, reason: summary };
 }
 
 function percent(part: Agreement): string {

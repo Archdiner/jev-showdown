@@ -120,7 +120,7 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
       const plan = await planFor(active, activeConfig, input, client, spend, runtime);
       const legal = legalChoices(input.battle, input.side);
       const trace = legal.length === 0
-        ? { choice: 'default', scores: [] as Array<{ choice: string; score: number }> }
+        ? { choice: 'default', scores: [] as Array<{ choice: string; score: number }>, predictedSwitch: undefined, answersPredictedSwitch: undefined }
         : await active.search.search(input.battle, input.side, {
           evaluate: active.evaluate,
           behavior: active.behavior,
@@ -155,6 +155,8 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
         advisorSource,
         overBudget: ms > budget,
         gamePlan: plan,
+        predictedSwitch: trace.predictedSwitch,
+        answersPredictedSwitch: trace.answersPredictedSwitch,
       };
       logger.decision({
         ts: Date.now(),

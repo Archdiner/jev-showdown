@@ -20,6 +20,8 @@ export interface SearchTrace {
   choice: string;
   scores: Array<{ choice: string; score: number }>;
   note?: string;
+  predictedSwitch?: boolean;
+  answersPredictedSwitch?: boolean;
 }
 
 export interface SearchCtx {

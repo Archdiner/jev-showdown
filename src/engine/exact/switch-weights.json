@@ -1,0 +1,8 @@
+{
+  "features": ["bias", "foeThreat", "ourThreat", "outspeed", "benchMargin", "hazard", "ourHp", "foeHp"],
+  "weights": [0, 0, 0, 0, 0, 0, 0, 0],
+  "lambda": 1,
+  "epochs": 200,
+  "learningRate": 0.05,
+  "note": "Placeholder until fit-switch-model writes the fitted weights."
+}

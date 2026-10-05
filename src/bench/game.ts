@@ -1,6 +1,7 @@
 import { PRNG, type PokemonSet } from '@pkmn/sim';
 import { buildBot } from '../config/bot.js';
 import type { BotSpec } from '../config/interfaces.js';
+import { isBotSpec } from '../config/load.js';
 import { hazardScore } from '../config/layers/battle.js';
 import {
   hpEval,
@@ -9,14 +10,18 @@ import {
   startRandomBattle,
   type SideId,
 } from '../engine/exact/battle-utils.js';
+import { decide, type PolicySpec } from '../engine/exact/policies.js';
+
+/** A config bot (buildBot) or an engine policy (exact / switch / random). */
+export type BenchPlayer = BotSpec | PolicySpec;
 
 export interface GameJob {
   index: number;
   seed: number;
   p1Team: PokemonSet[];
   p2Team: PokemonSet[];
-  p1: BotSpec;
-  p2: BotSpec;
+  p1: BenchPlayer;
+  p2: BenchPlayer;
   logDecisions?: boolean;
   logProtocol?: boolean;
 }
@@ -48,14 +53,71 @@ export interface GameResult {
   p2ConfigId: string;
   p1Situations: SideSituations;
   p2Situations: SideSituations;
-  decisions?: Array<{ side: SideId; turn: number; choice: string; configId: string }>;
+  p1Decisions: number;
+  p1Switches: number;
+  p1Predicted: number;
+  p1Answered: number;
+  p2Decisions: number;
+  p2Switches: number;
+  p2Predicted: number;
+  p2Answered: number;
+  decisions?: Array<{
+    side: SideId;
+    turn: number;
+    choice: string;
+    configId: string;
+    scores?: Array<{ choice: string; score: number }>;
+  }>;
   log?: string;
 }
 
 const MAX_LOOPS = 800;
 
+export function playerId(player: BenchPlayer): string {
+  if (isBotSpec(player)) return player.configId;
+  return `policy:${JSON.stringify(player)}`;
+}
+
+function notePlay(
+  result: GameResult,
+  side: SideId,
+  legal: string[],
+  decision: { choice: string; predictedSwitch?: boolean; answersPredictedSwitch?: boolean },
+): void {
+  const voluntary = legal.some(choice => choice.startsWith('move'));
+  if (!voluntary) return;
+  if (side === 'p1') {
+    result.p1Decisions++;
+    if (decision.choice.startsWith('switch')) result.p1Switches++;
+    if (decision.predictedSwitch) {
+      result.p1Predicted++;
+      if (decision.answersPredictedSwitch) result.p1Answered++;
+    }
+  } else {
+    result.p2Decisions++;
+    if (decision.choice.startsWith('switch')) result.p2Switches++;
+    if (decision.predictedSwitch) {
+      result.p2Predicted++;
+      if (decision.answersPredictedSwitch) result.p2Answered++;
+    }
+  }
+}
+
+interface Opened {
+  id: string;
+  bot?: ReturnType<typeof buildBot>;
+  policy?: PolicySpec;
+}
+
+function openPlayer(player: BenchPlayer): Opened {
+  if (isBotSpec(player)) return { id: player.configId, bot: buildBot(player) };
+  return { id: playerId(player), policy: player };
+}
+
 export async function runGame(job: GameJob): Promise<GameResult> {
   const rng = new PRNG([job.seed >>> 0, 3, 5, 7] as never);
+  const p1 = openPlayer(job.p1);
+  const p2 = openPlayer(job.p2);
   const result: GameResult = {
     index: job.index,
     seed: job.seed,
@@ -66,17 +128,23 @@ export async function runGame(job: GameJob): Promise<GameResult> {
     crashed: false,
     p1TurnTimes: [],
     p2TurnTimes: [],
-    p1ConfigId: job.p1.configId,
-    p2ConfigId: job.p2.configId,
+    p1ConfigId: p1.id,
+    p2ConfigId: p2.id,
     p1Situations: emptySituations(),
     p2Situations: emptySituations(),
+    p1Decisions: 0,
+    p1Switches: 0,
+    p1Predicted: 0,
+    p1Answered: 0,
+    p2Decisions: 0,
+    p2Switches: 0,
+    p2Predicted: 0,
+    p2Answered: 0,
     decisions: job.logDecisions ? [] : undefined,
   };
-  const p1 = buildBot(job.p1);
-  const p2 = buildBot(job.p2);
-  const gameId = `${job.p1.configId}:${job.p2.configId}:${job.seed}:${job.index}`;
-  p1.beginGame({ gameId, seed: job.seed, opponentConfigId: job.p2.configId });
-  p2.beginGame({ gameId, seed: job.seed, opponentConfigId: job.p1.configId });
+  const gameId = `${p1.id}:${p2.id}:${job.seed}:${job.index}`;
+  p1.bot?.beginGame({ gameId, seed: job.seed, opponentConfigId: p2.id });
+  p2.bot?.beginGame({ gameId, seed: job.seed, opponentConfigId: p1.id });
   let teraFirst: SideId | null = null;
 
   try {
@@ -90,24 +158,38 @@ export async function runGame(job: GameJob): Promise<GameResult> {
       const p2Legal = legalChoices(battle, 'p2');
       if (p1Legal.length === 0 && p2Legal.length === 0) {
         result.crashed = true;
-        result.error = `stuck at turn ${battle.turn}`;
+        result.error = `stuck at turn ${battle.turn} request=${battle.requestState}`;
         break;
       }
       if (p1Legal.length) {
-        const decision = await p1.decide({ battle, side: 'p1', rng, gameId, seed: job.seed });
+        const decision = await choose(p1, battle, 'p1', rng, gameId, job.seed);
         result.p1TurnTimes.push(decision.ms);
+        notePlay(result, 'p1', p1Legal, decision);
         if (!p1Legal.includes(decision.choice) && decision.choice !== 'default') result.p1Invalid++;
         const ok = safeChoose(battle, 'p1', decision.choice);
         if (!ok) result.p1Invalid++;
-        result.decisions?.push({ side: 'p1', turn: battle.turn, choice: decision.choice, configId: decision.configId });
+        result.decisions?.push({
+          side: 'p1',
+          turn: battle.turn,
+          choice: decision.choice,
+          configId: decision.configId,
+          scores: decision.scores,
+        });
       }
       if (!battle.ended && p2Legal.length) {
-        const decision = await p2.decide({ battle, side: 'p2', rng, gameId, seed: job.seed });
+        const decision = await choose(p2, battle, 'p2', rng, gameId, job.seed);
         result.p2TurnTimes.push(decision.ms);
+        notePlay(result, 'p2', p2Legal, decision);
         if (!p2Legal.includes(decision.choice) && decision.choice !== 'default') result.p2Invalid++;
         const ok = safeChoose(battle, 'p2', decision.choice);
         if (!ok) result.p2Invalid++;
-        result.decisions?.push({ side: 'p2', turn: battle.turn, choice: decision.choice, configId: decision.configId });
+        result.decisions?.push({
+          side: 'p2',
+          turn: battle.turn,
+          choice: decision.choice,
+          configId: decision.configId,
+          scores: decision.scores,
+        });
       }
     }
     result.turns = battle.turn;
@@ -124,9 +206,37 @@ export async function runGame(job: GameJob): Promise<GameResult> {
     result.error = error instanceof Error ? error.message : String(error);
   }
 
-  p1.endGame({ winner: result.winner, turns: result.turns, invalid: result.p1Invalid, situations: { ...result.p1Situations } });
-  p2.endGame({ winner: result.winner === 'p1' ? 'p2' : result.winner === 'p2' ? 'p1' : 'tie', turns: result.turns, invalid: result.p2Invalid, situations: { ...result.p2Situations } });
+  p1.bot?.endGame({ winner: result.winner, turns: result.turns, invalid: result.p1Invalid, situations: { ...result.p1Situations } });
+  p2.bot?.endGame({
+    winner: result.winner === 'p1' ? 'p2' : result.winner === 'p2' ? 'p1' : 'tie',
+    turns: result.turns,
+    invalid: result.p2Invalid,
+    situations: { ...result.p2Situations },
+  });
   return result;
+}
+
+async function choose(
+  player: Opened,
+  battle: Parameters<typeof legalChoices>[0],
+  side: SideId,
+  rng: PRNG,
+  gameId: string,
+  seed: number,
+): Promise<{
+  choice: string;
+  ms: number;
+  configId: string;
+  scores?: Array<{ choice: string; score: number }>;
+  predictedSwitch?: boolean;
+  answersPredictedSwitch?: boolean;
+}> {
+  if (player.policy) {
+    const decision = await decide(player.policy, battle, side, rng);
+    return { ...decision, configId: player.id };
+  }
+  const decision = await player.bot!.decide({ battle, side, rng, gameId, seed });
+  return decision;
 }
 
 function emptySituations(): SideSituations {

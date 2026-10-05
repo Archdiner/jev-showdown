@@ -1,9 +1,8 @@
 import { specForAlias } from '../config/aliases.js';
-import type { BotSpec } from '../config/interfaces.js';
+import { BenchPlayer, GameJob, GameResult, playerId } from './game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
-import { EXACT_1PLY } from '../engine/exact/search.js';
+import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2 } from '../engine/exact/search.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
-import { GameJob, GameResult } from './game.js';
 import { p99, runGamesParallel } from './pool.js';
 
 function arg(name: string, fallback: string): string {
@@ -11,11 +10,28 @@ function arg(name: string, fallback: string): string {
   return hit ? hit.slice(name.length + 3) : fallback;
 }
 
-function policy(name: string): BotSpec {
+/** Engine names play the policy directly. Config aliases and file paths play through buildBot. */
+function policy(name: string): BenchPlayer {
+  if (name === 'random') return { kind: 'random' };
+  if (name === 'maxdamage') return { kind: 'maxdamage' };
+  if (name === 'legacy') return { kind: 'legacy' };
+  if (name === 'exact') return { kind: 'exact', config: EXACT_1PLY };
+  if (name === 'switch') return { kind: 'exact', config: SWITCH_DEPTH2 };
+  if (name.startsWith('exact')) {
+    const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',');
+    const config: ExactConfig = {
+      depth: Number(depth) || EXACT_1PLY.depth,
+      opponentModel: model === 'uniform' ? 'uniform' : model === 'switch' ? 'switch' : 'max-damage',
+      evalMode: evalMode === 'team' ? 'team' : evalMode === 'full' ? 'full' : 'hp',
+      errorAsLoss: name.includes(',loss'),
+      samples: 1,
+    };
+    return { kind: 'exact', config };
+  }
   return specForAlias(name, 'selfplay');
 }
 
-function pairedJobs(pairs: number, a: BotSpec, b: BotSpec, seedStart: number): GameJob[] {
+function pairedJobs(pairs: number, a: BenchPlayer, b: BenchPlayer, seedStart: number): GameJob[] {
   const jobs: GameJob[] = [];
   for (let i = 0; i < pairs; i++) {
     const seed = seedStart + i;
@@ -40,7 +56,7 @@ function pairedJobs(pairs: number, a: BotSpec, b: BotSpec, seedStart: number): G
   return jobs;
 }
 
-export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate: BotSpec): {
+export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate: BenchPlayer): {
   wins: number;
   losses: number;
   ties: number;
@@ -57,10 +73,11 @@ export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate
   let invalid = 0;
   let crashes = 0;
   const times: number[] = [];
+  const candidateId = playerId(candidate);
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
     const job = jobs[i];
-    const side = JSON.stringify(job.p1) === JSON.stringify(candidate) ? 'p1' : 'p2';
+    const side = playerId(job.p1) === candidateId ? 'p1' : 'p2';
     if (result.crashed) crashes++;
     if (result.winner === 'tie') ties++;
     else if (result.winner === side) wins++;
@@ -79,6 +96,43 @@ export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate
     crashes,
     p99ms: p99(times),
     maxMs: times.length ? Math.max(...times) : 0,
+  };
+}
+
+function playRate(results: GameResult[], jobs: GameJob[], candidate: BenchPlayer): {
+  decisions: number;
+  switches: number;
+  predicted: number;
+  answered: number;
+  switchRate: number;
+  punishRate: number;
+} {
+  let decisions = 0;
+  let switches = 0;
+  let predicted = 0;
+  let answered = 0;
+  const candidateId = playerId(candidate);
+  for (let i = 0; i < results.length; i++) {
+    const side = playerId(jobs[i].p1) === candidateId ? 'p1' : 'p2';
+    if (side === 'p1') {
+      decisions += results[i].p1Decisions || 0;
+      switches += results[i].p1Switches || 0;
+      predicted += results[i].p1Predicted || 0;
+      answered += results[i].p1Answered || 0;
+    } else {
+      decisions += results[i].p2Decisions || 0;
+      switches += results[i].p2Switches || 0;
+      predicted += results[i].p2Predicted || 0;
+      answered += results[i].p2Answered || 0;
+    }
+  }
+  return {
+    decisions,
+    switches,
+    predicted,
+    answered,
+    switchRate: decisions ? switches / decisions : 0,
+    punishRate: predicted ? answered / predicted : 0,
   };
 }
 
@@ -103,6 +157,8 @@ async function main() {
   console.log('\n=== Result ===');
   console.log(`A win rate: ${(summary.winRate * 100).toFixed(1)}% (${summary.wins}W-${summary.losses}L-${summary.ties}T / ${summary.games})`);
   console.log(`invalid=${summary.invalid} crashes=${summary.crashes} p99=${summary.p99ms.toFixed(0)}ms max=${summary.maxMs.toFixed(0)}ms`);
+  const play = playRate(results, jobs, a);
+  console.log(`switch rate ${(play.switchRate * 100).toFixed(1)}% (${play.switches}/${play.decisions}) predicted-switch punish ${(play.punishRate * 100).toFixed(1)}% (${play.answered}/${play.predicted})`);
   console.log(`elapsed ${seconds}s`);
   const errors = results.filter(r => r.crashed).slice(0, 3);
   for (const error of errors) console.log(`crash seed=${error.seed}: ${error.error}`);

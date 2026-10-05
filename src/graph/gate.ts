@@ -1,7 +1,9 @@
 import { GraphDB } from './db.js';
 import { specForAlias } from '../config/aliases.js';
+import { championBlueprint, specFromId } from '../engine/exact/policies.js';
+import { EXACT_1PLY, ExactConfig } from '../engine/exact/search.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
-import { GameJob, GameResult as BenchGame } from '../bench/game.js';
+import { BenchPlayer, GameJob, GameResult as BenchGame } from '../bench/game.js';
 import { runGamesParallel } from '../bench/pool.js';
 import { heldOutPasses, scoreSplit, SplitScore } from '../engine/exact/position-sets.js';
 
@@ -36,8 +38,16 @@ export const GATE_CONFIG = {
   panel: [
     'random-v1',
     'maxdamage-v1',
+    'exact-1ply',
   ],
 };
+
+export interface PlayCount {
+  decisions: number;
+  switches: number;
+  predicted: number;
+  answered: number;
+}
 
 export interface GameResult {
   winner: 'p1' | 'p2' | 'tie';
@@ -48,6 +58,8 @@ export interface GameResult {
   protocol_log: string;
   p1_metrics: BotMetrics;
   p2_metrics: BotMetrics;
+  p1_play?: PlayCount;
+  p2_play?: PlayCount;
 }
 
 export interface BotMetrics {
@@ -107,6 +119,19 @@ export interface GuardrailsCheck {
   state_mismatches: number;
 }
 
+/** Config aliases play through buildBot. Engine-only ids, including switch-depth2, play the policy. */
+export function gatePlayer(id: string): BenchPlayer {
+  try {
+    return specForAlias(id, 'gate');
+  } catch (aliasError) {
+    try {
+      return specFromId(id);
+    } catch {
+      throw aliasError;
+    }
+  }
+}
+
 export class Gate {
   private db: GraphDB;
 
@@ -162,7 +187,7 @@ export class Gate {
     console.log(`State mismatches: ${guardrails.state_mismatches} (max ${GATE_CONFIG.guardrails.max_state_mismatches})`);
     console.log(`Passed: ${guardrails.passed ? 'YES' : 'NO'}`);
 
-    const heldOut = this.scoreHeldOut();
+    const heldOut = this.scoreHeldOut(challengerId);
     console.log(`\n=== Held-out ===`);
     console.log(heldOut.reason);
 
@@ -207,8 +232,8 @@ export class Gate {
     // baseline, so we do not also replay champion-v0: that engine rebuilds
     // a battle per node and the rebuild rejects the choice.
     void champion;
-    const challengerSpec = specForAlias(challenger, 'gate');
-    const opponentSpec = specForAlias(opponent, 'gate');
+    const challengerSpec = gatePlayer(challenger);
+    const opponentSpec = gatePlayer(opponent);
     const jobs: GameJob[] = [];
     const labels: Array<{ p1: string; p2: string }> = [];
 
@@ -263,6 +288,8 @@ export class Gate {
       protocol_log: game.error || '',
       p1_metrics: metrics(game.p1Invalid, game.p1TurnTimes, game.crashed),
       p2_metrics: metrics(game.p2Invalid, game.p2TurnTimes, game.crashed),
+      p1_play: { decisions: game.p1Decisions || 0, switches: game.p1Switches || 0, predicted: game.p1Predicted || 0, answered: game.p1Answered || 0 },
+      p2_play: { decisions: game.p2Decisions || 0, switches: game.p2Switches || 0, predicted: game.p2Predicted || 0, answered: game.p2Answered || 0 },
     };
   }
 
@@ -325,6 +352,36 @@ export class Gate {
     return 1500 - 400 * Math.log10(1 / winRate - 1);
   }
 
+  private playSummary(challengerId: string, games: GameResult[]): {
+    switch_rate: number;
+    punish_rate: number;
+    decisions: number;
+    switches: number;
+    predicted: number;
+    answered: number;
+  } {
+    let decisions = 0;
+    let switches = 0;
+    let predicted = 0;
+    let answered = 0;
+    for (const game of games) {
+      const play = game.p1 === challengerId ? game.p1_play : game.p2 === challengerId ? game.p2_play : undefined;
+      if (!play) continue;
+      decisions += play.decisions;
+      switches += play.switches;
+      predicted += play.predicted;
+      answered += play.answered;
+    }
+    return {
+      switch_rate: decisions ? switches / decisions : 0,
+      punish_rate: predicted ? answered / predicted : 0,
+      decisions,
+      switches,
+      predicted,
+      answered,
+    };
+  }
+
   private checkGuardrails(botId: string, games: GameResult[]): GuardrailsCheck {
     const botGames = games.filter(g => g.p1 === botId || g.p2 === botId);
     const metrics = botGames.map(g => g.p1 === botId ? g.p1_metrics : g.p2_metrics);
@@ -362,18 +419,22 @@ export class Gate {
   }
 
   /**
-   * Held-out positions are scored in aggregate. A missing file, a missed
-   * forced win, or deep-search agreement below the max-damage line rejects
-   * the challenger. Hand-written diagnostics are not consulted.
+   * Held-out positions are scored in aggregate. A missing file or a missed
+   * forced win rejects the challenger. Agreement with the always-attack
+   * labeler is required only for an always-attack search. A switch model
+   * is supposed to disagree with that labeler; its promotion test is the
+   * paired win rate. Hand-written diagnostics are not consulted.
    */
-  private scoreHeldOut(): HeldOutCheck {
+  private scoreHeldOut(challengerId: string): HeldOutCheck {
+    const spec = specFromId(challengerId);
+    const config: ExactConfig = spec.kind === 'exact' ? spec.config : EXACT_1PLY;
     let score: SplitScore;
     try {
-      score = scoreSplit('heldout');
+      score = scoreSplit('heldout', config);
     } catch {
       return { ok: false, reason: 'held-out set was not generated' };
     }
-    const verdict = heldOutPasses(score);
+    const verdict = heldOutPasses(score, { attackerAgreement: config.opponentModel !== 'switch' });
     return {
       ok: verdict.ok,
       reason: verdict.reason,
@@ -473,6 +534,7 @@ export class Gate {
         panel_results: result.panel_results,
         guardrails: result.guardrails,
         held_out: result.held_out,
+        play: this.playSummary(result.challenger_id, result.games),
       },
     };
 
@@ -499,21 +561,24 @@ export class Gate {
 
       const vsRandom = result.panel_results.find(r => r.opponent.includes('random'));
       const vsMax = result.panel_results.find(r => r.opponent.includes('max'));
-      const championNodeId = 'champion-exact-1ply';
+      const vsChampion = result.panel_results.find(r => r.opponent.includes('exact'));
+      const blueprint = championBlueprint(result.challenger_id);
+      const championNodeId = blueprint.id;
       this.db.addNode({
         id: championNodeId,
         type: 'Champion',
         status: 'active',
-        title: 'Champion: exact 1-ply HP search',
-        description: '1-ply exact @pkmn/sim battle clone. Opponent model is max-damage. Eval is HP fraction plus faint counts.',
+        title: blueprint.title,
+        description: blueprint.description,
         created_at: Date.now(),
         updated_at: Date.now(),
-        version: 'exact-1ply',
-        config_path: 'src/engine/exact/search.ts',
+        version: blueprint.version,
+        config_path: blueprint.config_path,
         promoted_at: Date.now(),
         metrics: {
           win_rate_vs_random: vsRandom?.win_rate,
           win_rate_vs_maxdamage: vsMax?.win_rate,
+          win_rate_vs_champion: vsChampion?.win_rate,
           invalid_choices: result.guardrails.invalid_choices,
           crashes: result.guardrails.crashes,
           timeouts: result.guardrails.timeouts,
