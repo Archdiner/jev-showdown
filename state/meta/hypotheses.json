@@ -1,0 +1,98 @@
+[
+ {
+  "id": "H01",
+  "change": "Add a Tera-hold prior: penalize Tera before ~turn 10 / before the opponent has Teraed unless it changes a KO or survival threshold this turn (e.g., value bonus for 'opponent Tera spent, ours available').",
+  "expected_effect": "Later median Tera turn (toward top-player ~turn 20) and higher win rate, especially in endgames.",
+  "metric": "Win rate over ≥1000 fixed-seed self-play games vs baseline; median Tera turn; % games where we Tera second."
+ },
+ {
+  "id": "H02",
+  "change": "Raise the opponent-switch probability in the opponent model from a near-zero/attack-only prior to ~0.25 overall (~0.32 on turn 1), conditioned on how threatened their active is.",
+  "expected_effect": "Better punish-switch move choice (coverage/hazards/status on predicted switch-ins); fewer wasted super-effective hits into switch-ins.",
+  "metric": "Win rate vs baseline; % of our attacks that hit a different mon than targeted with low effectiveness; damage dealt per turn."
+ },
+ {
+  "id": "H03",
+  "change": "Calibrate our own hard-switch rate toward top-player levels (target ~20–25% of decisions, tapering by phase) via a switch-value bonus when the switch-in takes the expected hit at ≤ X% and threatens back.",
+  "expected_effect": "Fewer mons lost from high HP; higher win rate.",
+  "metric": "Hard-switch rate per phase; % of our faints that start the turn at ≥80% HP (top players ~19%, low ~27%); win rate."
+ },
+ {
+  "id": "H04",
+  "change": "Gate setup moves: disallow boosting before turn 4 or before ≥3 opponent mons are revealed unless no revealed/inferred opposing mon can punish (calc-based check).",
+  "expected_effect": "Fewer failed sweeps; setup usage shifts later (top players ~6% of setup in turns 1–3).",
+  "metric": "Share of setup moves used turns 1–3; setup-sweeper survival rate after boosting; win rate."
+ },
+ {
+  "id": "H05",
+  "change": "Use the pkmn randbats stats JSON as the Bayesian prior and add hard-evidence filters (status move ⇒ no AV; hazard damage ⇒ no Boots; priority ⇒ no Scarf; 4 same-category attacks ⇒ Choice; hazard revealed ⇒ no setup on that mon).",
+  "expected_effect": "More accurate opponent set prediction and fewer surprise KOs.",
+  "metric": "Log-likelihood / top-1 accuracy of predicted moves & items vs revealed sets at game end; win rate."
+ },
+ {
+  "id": "H06",
+  "change": "Add team-generation constraint inference for unrevealed opponent slots (≤2 per type, ≤3 weak to a type, ≤1 shared 4x weakness, ≤1 level 100, ≤1 Tera Blast user, ≤1 SR/Web/TSpikes/remover).",
+  "expected_effect": "Better sampling of hidden mons in determinized search; better 'hide my win condition' decisions.",
+  "metric": "Accuracy of predicted unrevealed species types at game end; win rate in games where ≥2 opponent mons stay hidden past turn 15."
+ },
+ {
+  "id": "H07",
+  "change": "Add a hazard-context term: value hazards by (number of opponent mons without Boots/removal expected) and penalize setting hazards when the opponent's active can set up or KO the setter.",
+  "expected_effect": "Hazards set more often in safe spots; fewer setters lost for nothing.",
+  "metric": "Hazard turns used; setter survival; opponent hazard damage taken per game; win rate."
+ },
+ {
+  "id": "H08",
+  "change": "Win-condition preservation bonus: identify our likely wincon(s) at turn 1 (setup, Scarf, priority, fastest, unresisted STAB) and add eval weight to keeping them healthy and unrevealed until opponent checks are weakened.",
+  "expected_effect": "Higher late-game conversion rate.",
+  "metric": "Win rate; average HP of designated wincon at its first appearance; turn of first reveal of wincon."
+ },
+ {
+  "id": "H09",
+  "change": "Information-hiding term: small penalty for revealing an extra unrevealed mon when an already-revealed mon is an acceptable choice.",
+  "expected_effect": "Opponent has less information mid-game; marginal win-rate gain.",
+  "metric": "Average number of our mons revealed by turn 10 vs opponent's; win rate."
+ },
+ {
+  "id": "H10",
+  "change": "Sack-choice heuristic: when no safe switch exists, prefer sacking the mon with the lowest remaining 'role value' (job done, low HP, statused, outclassed) to get a free switch for the wincon.",
+  "expected_effect": "Fewer wasted healthy mons; better tempo.",
+  "metric": "Rate of faints from ≥80% HP; win rate."
+ },
+ {
+  "id": "H11",
+  "change": "Endgame mode: when ≤3 mons per side, increase search depth/time and include PP tracking and priority/Tera branches.",
+  "expected_effect": "Fewer endgame chokes; better PP-stall handling (a known bot weakness).",
+  "metric": "Win rate in games reaching ≤3v3; win rate in games longer than 40 turns."
+ },
+ {
+  "id": "H12",
+  "change": "Opponent Tera anticipation: when the opponent stays in or brings a mon that is a non-answer to our boosted threat, raise probability of their defensive Tera and pick moves robust to their role's Tera list.",
+  "expected_effect": "Fewer sweeps stopped by surprise Tera.",
+  "metric": "% of our setup sweeps ending in ≥2 KOs; damage efficiency on Tera turns."
+ },
+ {
+  "id": "H13",
+  "change": "Level-aware threat assessment: compute exact stats from level for all speed/damage judgements and drop any tier-based heuristics in the LLM prompt.",
+  "expected_effect": "Fewer misjudged outspeeds and KOs.",
+  "metric": "Outspeed prediction accuracy (predicted vs observed move order); KO-prediction accuracy."
+ },
+ {
+  "id": "H14",
+  "change": "Pivot preference: when expected values are close, prefer U-turn/Volt Switch/Flip Turn over a direct attack early in the game (except into likely immunities).",
+  "expected_effect": "More information gained early; better switch-ins.",
+  "metric": "Number of opponent mons revealed by turn 8; pivot usage share (top ~4% of moves vs low ~3%); win rate."
+ },
+ {
+  "id": "H15",
+  "change": "LLM strategist role limited to tie-breaking and post-game review, never sole decider; compare to LLM-overrides-search.",
+  "expected_effect": "Search+LLM tie-break beats LLM-override.",
+  "metric": "Win rate head-to-head over ≥1000 games; LLM call latency and timeouts."
+ },
+ {
+  "id": "H16",
+  "change": "Treat negative evidence from opponent switch behavior (sacking into or repeatedly sending non-answers to one of our mons) as a signal that the opponent lacks a check; increase that mon's wincon score.",
+  "expected_effect": "Better wincon identification mid-game.",
+  "metric": "Win rate; correlation between flagged mon and the mon that gets the most KOs."
+ }
+]
