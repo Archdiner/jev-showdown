@@ -23,26 +23,9 @@ import {
 import { alignToRequest, cloneGameState, mismatchData, overlayProtocol } from './tracked-state.js';
 import { FoeMon, LivePosition } from './decision-battle.js';
 import { safeError, toID } from './ids.js';
+import { appendGameRecord, buildLadderGameRecord, gxeOf, LadderGameRecord } from './game-record.js';
 
-export interface GameSummary {
-  battleId: string;
-  format: string;
-  username: string;
-  opponent: string | null;
-  outcome: 'win' | 'loss' | 'tie';
-  winner: string | null;
-  turns: number;
-  replayId: string | null;
-  replayUrl: string | null;
-  localReplayPath: string;
-  eloBefore: number | null;
-  eloAfter: number | null;
-  invalidChoices: number;
-  crashes: number;
-  fallbacks: number;
-  mismatches: number;
-  logPath: string;
-}
+export type { LadderGameRecord as GameSummary } from './game-record.js';
 
 function boostsOf(mon: ClientPokemon): LivePosition['ourBoosts'] {
   return {
@@ -76,6 +59,11 @@ interface RoomState {
   turns: number;
   replay: ReplayNotice | null;
   elo: { before: number; after: number } | null;
+  gxe: number | null;
+  startedAt: number;
+  latencies: number[];
+  minTimerMarginSec: number | null;
+  disconnected: boolean;
   secondsLeft: number | null;
   lastRequest: any;
   lastLegal: Action[];
@@ -93,6 +81,13 @@ export interface BattleDriverOptions {
   logDir: string;
   decisionTimeoutMs: number;
   replayDir?: string;
+  configId?: string | null;
+  configHash?: string | null;
+  gitSha?: string | null;
+  concurrency?: number;
+  localServer?: boolean;
+  /** How long to wait for a replay popup. Tests use 0. */
+  settleMs?: number;
 }
 
 /**
@@ -116,14 +111,23 @@ export class BattleDriver extends EventEmitter {
     client.on('popup', (message: string) => {
       this.onPopup(message);
     });
+    client.on('disconnect', () => {
+      for (const room of this.rooms.values()) {
+        if (!room.ended) room.disconnected = true;
+      }
+    });
   }
 
   async stop(): Promise<void> {
+    if (this.stopped) return;
     this.stopped = true;
-    for (const room of this.rooms.values()) {
+    for (const room of [...this.rooms.values()]) {
       if (room.requestTimer) clearTimeout(room.requestTimer);
       if (room.finalizeTimer) clearTimeout(room.finalizeTimer);
-      if (!room.finalized && room.ended) await this.finalize(room);
+      if (!room.finalized) {
+        if (!room.ended) room.disconnected = true;
+        await this.finalize(room);
+      }
     }
     await this.options.decisions.stop();
   }
@@ -156,12 +160,18 @@ export class BattleDriver extends EventEmitter {
     if (line.startsWith('|inactive|')) {
       const seconds = line.match(/(\d+) seconds left/);
       const aboutUs = line.includes(this.options.username) || /You have/i.test(line);
-      if (seconds && aboutUs) room.secondsLeft = Number(seconds[1]);
+      if (seconds && aboutUs) {
+        room.secondsLeft = Number(seconds[1]);
+        room.minTimerMarginSec = room.minTimerMarginSec === null
+          ? room.secondsLeft
+          : Math.min(room.minTimerMarginSec, room.secondsLeft);
+      }
     }
 
     const rating = parseRatingLine(line);
     if (rating && toID(rating.username) === toID(this.options.username)) {
       room.elo = { before: rating.before, after: rating.after };
+      room.gxe = gxeOf(rating);
     }
 
     if (line.startsWith('|request|')) {
@@ -228,6 +238,11 @@ export class BattleDriver extends EventEmitter {
       turns: 0,
       replay: null,
       elo: null,
+      gxe: null,
+      startedAt: Date.now(),
+      latencies: [],
+      minTimerMarginSec: null,
+      disconnected: false,
       secondsLeft: null,
       lastRequest: null,
       lastLegal: [],
@@ -335,6 +350,7 @@ export class BattleDriver extends EventEmitter {
     }
 
     const latencyMs = Date.now() - startedAt;
+    room.latencies.push(latencyMs);
     if (room.ended || (rqid !== null && room.answered.has(rqid))) {
       this.emit('decision', {
         battleId: room.roomId,
@@ -363,6 +379,7 @@ export class BattleDriver extends EventEmitter {
     const choice = formatChoice(safe, rqid ?? undefined);
     room.log.write({
       type: 'turn',
+      kind: 'turn',
       battleId: room.roomId,
       turn: state.turn,
       rqid,
@@ -501,7 +518,7 @@ export class BattleDriver extends EventEmitter {
     }
     room.finalizeTimer = setTimeout(() => {
       void this.finalize(room);
-    }, 2000);
+    }, this.options.settleMs ?? 2000);
   }
 
   private onPopup(message: string): void {
@@ -525,8 +542,6 @@ export class BattleDriver extends EventEmitter {
     room.finalized = true;
     const opponentSide = room.ourSide === 'p1' ? 'p2' : room.ourSide === 'p2' ? 'p1' : null;
     const opponent = opponentSide ? room.players[opponentSide] ?? null : null;
-    const weWon = room.winner ? toID(room.winner) === toID(this.options.username) : false;
-    const outcome = room.winner ? (weWon ? 'win' : 'loss') : 'tie';
     const eloBefore = room.elo?.before ?? (room.ourSide ? room.preRating[room.ourSide] ?? null : null);
     const eloAfter = room.elo?.after ?? null;
     const replayDir = this.options.replayDir ?? path.join(this.options.logDir, 'replays');
@@ -537,30 +552,45 @@ export class BattleDriver extends EventEmitter {
     );
     fs.writeFileSync(localReplayPath, room.lines.join('\n'));
 
-    const summary: GameSummary = {
+    const summary: LadderGameRecord = buildLadderGameRecord({
+      startedAt: room.startedAt,
       battleId: room.roomId,
       format: this.options.format.id,
       username: this.options.username,
       opponent,
-      outcome,
+      opponentRating: opponentSide ? room.preRating[opponentSide] ?? null : null,
+      lines: room.lines,
       winner: room.winner,
       turns: room.turns || room.battle.turn || 0,
-      replayId: room.replay?.id ?? null,
-      replayUrl: room.replay?.url ?? null,
-      localReplayPath,
-      eloBefore,
-      eloAfter,
       invalidChoices: room.invalidChoices,
       crashes: room.crashes,
       fallbacks: room.fallbacks,
       mismatches: room.mismatchCount,
+      eloBefore,
+      eloAfter,
+      gxe: room.gxe,
+      latencies: room.latencies,
+      minTimerMarginSec: room.minTimerMarginSec,
+      engine: this.options.engineName,
+      configId: this.options.configId ?? null,
+      configHash: this.options.configHash ?? null,
+      gitSha: this.options.gitSha ?? null,
+      concurrency: this.options.concurrency ?? 1,
+      replayId: room.replay?.id ?? null,
+      replayUrl: room.replay?.url ?? null,
+      localReplayPath,
+      localServer: this.options.localServer ?? false,
+      disconnected: room.disconnected,
       logPath: room.log.filePath,
-    };
+    });
 
     room.log.write({ type: 'result', ...summary });
+    appendGameRecord(this.options.logDir, summary);
     this.options.decisions.closeBattle(room.roomId);
     await room.log.close();
     this.options.client.untrackRoom(room.roomId);
+    room.lines = [];
+    this.rooms.delete(room.roomId);
     this.emit('gameEnd', summary);
   }
 }

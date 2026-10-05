@@ -474,6 +474,64 @@ This is a research project. Contributions welcome:
 - **Data**: Monthly set/stat refreshes
 - **Ladder**: Measured Elo reports
 
+## Ladder game records
+
+Every finished battle appends one JSON object. The ladder client writes `logs/ladder/games.jsonl` (or `--log-dir`). `ops live` writes the same fields to `state/ops/live-games.jsonl` (`source` is `ops`, plus `configPath`, `inputLog`, `log`, and `variantId` when a Thompson arm was drawn). The ladder per-battle file also stores this object as its `result` row, with `type: "result"` added by the battle log. `logs/` is gitignored. The stdout line is unchanged (`turns`, `invalid`, `crashes`, `fallbacks`, `elo`).
+
+Schema id: `jev.ladder-game.v1`. `kind` is `ladder-game`. `source` is `ladder` or `ops`.
+
+`outcome` is who won: `win`, `loss`, or `tie`. A game with no `|win|` and no `|tie` is `outcome: "tie"` only so the old line stays three words. **Count ties from `endReason: "tie"`.** `endReason` is how it ended:
+
+| `endReason` | Meaning |
+| --- | --- |
+| `ko` | `|win|` and no forfeit or inactivity line |
+| `opponent-forfeit` | opponent forfeited |
+| `our-forfeit` | we forfeited |
+| `our-timer` | we lost due to inactivity |
+| `opponent-timer` | they lost due to inactivity |
+| `disconnect` | no winner, and our socket dropped or the process stopped |
+| `crash` | simulator crash line (`\|bigerror\|` / "battle crashed") |
+| `tie` | `|tie` |
+| `unknown` | no winner and none of the above |
+
+Other fields:
+
+| Field | Meaning |
+| --- | --- |
+| `battleId` | Showdown room id, `battle-gen9randombattle-…` |
+| `opponent`, `opponentRating` | name and pre-game ladder rating from `\|player\|`. Null when the server omits them. |
+| `eloBefore`, `eloAfter` | our rating from the rating popup. `eloBefore` falls back to our `\|player\|` rating. Null when absent. Never 1000. |
+| `gxe` | from the rating line when that parser provides it. Null when absent. Never 50. |
+| `turns`, `invalidChoices`, `crashes`, `fallbacks`, `mismatches` | existing counters. Ops name for `invalidChoices` is `invalid`. |
+| `durationMs` | wall clock from room open to the record |
+| `decisions` | number of `latencyMs` samples |
+| `latencyP50Ms`, `latencyP95Ms`, `latencyP99Ms` | nearest-rank percentiles of per-turn `latencyMs`, same rule as `metrics.jsonl`. Null when there are no samples. |
+| `latencyMaxMs` | largest `latencyMs` sample. Null when there are no samples. |
+| `minTimerMarginSec` | smallest Showdown seconds-left observed for us. Null if no timer line. |
+| `engine` | ladder engine name, or the ops search layer id |
+| `configId` | caller-supplied. Null on `npm run ladder` until a config layer passes one. `ops live` writes the config id. |
+| `configHash` | 16 hex chars. Same function as `configIdOf`. The ladder hashes the engine name plus `BotConfig`. Ops writes the config id. |
+| `gitSha` | `JEV_GIT_SHA` or `GIT_COMMIT` or `GITHUB_SHA`, else `git rev-parse HEAD` |
+| `concurrency` | configured `--concurrency` |
+| `replayId`, `replayUrl` | set when the server sends a `replay.pokemonshowdown.com` URL. Otherwise null. |
+| `replayUploaded` | true only when `replayUrl` is set |
+| `replayStatus` | `confirmed` (URL arrived), `local-only` (local server), or `unconfirmed` (public server, `/savereplay` sent, no URL yet) |
+| `localReplayPath` | raw protocol log on disk |
+| `logPath` | per-battle JSONL |
+| `ts`, `startedAt` | epoch ms. `pid` is the process id. |
+
+Per-turn rows in the battle file (not copied into `games.jsonl`):
+
+- `searchMs`: engine time.
+- `latencyMs`: wall clock spent choosing. The game row's percentiles are computed from these samples.
+- `secondsLeft`: Showdown clock at the decision. Null when no `|inactive|` for us has been seen.
+
+Example:
+
+```json
+{"schema":"jev.ladder-game.v1","kind":"ladder-game","source":"ladder","battleId":"battle-gen9randombattle-1","opponent":"Rival","opponentRating":1400,"outcome":"win","endReason":"ko","turns":21,"invalidChoices":0,"crashes":0,"fallbacks":0,"eloBefore":1073,"eloAfter":1089,"gxe":null,"durationMs":84000,"decisions":20,"latencyP50Ms":40,"latencyP95Ms":180,"latencyP99Ms":400,"latencyMaxMs":400,"minTimerMarginSec":12,"engine":"max-damage","configId":null,"configHash":"ab12","gitSha":"87b268f","concurrency":1,"replayUrl":null,"replayStatus":"unconfirmed"}
+```
+
 ## License
 
 MIT

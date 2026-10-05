@@ -155,7 +155,8 @@ npm run ladder -- --games 10 --format gen9randombattle --engine max-damage --con
 
 That connects to `wss://sim3.psim.us/showdown/websocket`, logs in with `POST https://play.pokemonshowdown.com/action.php` (`act=login`, `name`, `pass`, `challstr`), then sends `/trn username,0,ASSERTION`. It searches `gen9randombattle`, plays `--games` battles, sends `/savereplay`, and exits. On an engine error or timer squeeze it plays the best legal move and records the fallback. Logs are JSONL in `logs/ladder/`:
 
-- one file per battle, named with the username and room id: turns, decisions, scores, state mismatches, opponent role probabilities, result, replay id, replay URL, Elo before/after
+- one file per battle, named with the username and room id. Turn rows include `searchMs` (engine time), `latencyMs` (wall clock), and `secondsLeft`. The `result` row is the same object as the aggregate file. `ops live` writes that same object to `live-games.jsonl`.
+- `logs/ladder/games.jsonl`, one `jev.ladder-game.v1` object per finished game. Schema is in the README.
 - `logs/ladder/summary.json` for the run
 
 Override the login endpoint with `SHOWDOWN_LOGIN_URL` if action.php moves. Optional flags: `--search-ms`, `--decision-ms`, `--log-dir`, `--engine`, `--concurrency`.

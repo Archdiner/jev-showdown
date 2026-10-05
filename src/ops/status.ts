@@ -1,3 +1,4 @@
+import { recordedElo, recordedOutcome } from '../client/game-record.js';
 import { openDb } from './db.js';
 import { latestHeartbeats } from './heartbeat.js';
 import { readLabels } from './labels-read.js';
@@ -7,9 +8,11 @@ import { listJobs } from './queue.js';
 interface LiveRow {
   ts: number;
   configId: string;
-  winner: 'win' | 'loss' | 'tie';
-  rating: number;
-  gxe: number;
+  winner?: string | null;
+  outcome?: 'win' | 'loss' | 'tie';
+  rating?: number | null;
+  eloAfter?: number | null;
+  gxe: number | null;
 }
 
 export function statusReport(paths: OpsPaths, now = Date.now()): string {
@@ -40,15 +43,16 @@ export function statusReport(paths: OpsPaths, now = Date.now()): string {
   }
   lines.push(`queue ${queued.length}  (${queued.map(job => job.spec.kind).join(', ') || 'empty'})`);
   const last = games[games.length - 1];
-  lines.push(`rating ${last ? last.rating : 'n/a'}  gxe ${last ? last.gxe : 'n/a'}`);
+  lines.push(`rating ${last ? recordedElo(last) ?? 'n/a' : 'n/a'}  gxe ${last?.gxe ?? 'n/a'}`);
   const ids = new Set([...labels.map(label => label.configId), ...games.map(game => game.configId)]);
   if (ids.size === 0) lines.push('live record: none');
   for (const id of ids) {
     const rows = games.filter(game => game.configId === id);
-    const wins = rows.filter(game => game.winner === 'win').length;
-    const losses = rows.filter(game => game.winner === 'loss').length;
+    const wins = rows.filter(game => recordedOutcome(game) === 'win').length;
+    const losses = rows.filter(game => recordedOutcome(game) === 'loss').length;
     const label = labels.find(item => item.configId === id);
-    lines.push(`  ${id} [${label?.labels.join('+') || 'unlabeled'}] ${wins}-${losses} rating ${rows.at(-1)?.rating ?? 'n/a'}`);
+    const lastRow = rows.at(-1);
+    lines.push(`  ${id} [${label?.labels.join('+') || 'unlabeled'}] ${wins}-${losses} rating ${lastRow ? recordedElo(lastRow) ?? 'n/a' : 'n/a'}`);
   }
   lines.push(`open regressions ${regressions}`);
   return lines.join('\n');
