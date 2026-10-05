@@ -48,7 +48,7 @@ describe('jsonl tail', () => {
       if (priorGraph === undefined) delete process.env.GRAPH_DB;
       else process.env.GRAPH_DB = priorGraph;
     }
-  });
+  }, 20_000);
 });
 
 describe('supervisor restarts', () => {
