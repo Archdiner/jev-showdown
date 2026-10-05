@@ -52,7 +52,7 @@ function setId(species: string): string {
   return Dex.species.get(species).id;
 }
 
-function damaging(id: string): boolean {
+export function damaging(id: string): boolean {
   const move = Dex.moves.get(id);
   return Boolean(move.exists && move.category !== 'Status' && move.basePower);
 }
@@ -176,7 +176,7 @@ function poolFor(species: string, revealed: string[]): string[] {
   return picked.slice(0, 4);
 }
 
-function writeMoves(mon: any, moveIds: string[]): void {
+export function writeMoves(mon: any, moveIds: string[]): void {
   const slots = [];
   for (const id of moveIds) {
     const move = Dex.moves.get(id);

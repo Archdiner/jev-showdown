@@ -5,6 +5,7 @@ import { legalChoices } from '../engine/exact/battle-utils.js';
 import { EngineName } from './engines.js';
 import { sameAction } from './choice.js';
 import { ladderPolicy } from './ladder-engine.js';
+import { markFoeHidden } from '../engine/exact/stats-prior.js';
 
 export interface StatBoosts {
   atk?: number;
@@ -26,6 +27,10 @@ export interface FoeMon {
   moves: string[];
   boosts?: StatBoosts;
   fainted?: boolean;
+  /** The protocol has not revealed this mon's item (never shown, not removed). */
+  itemUnknown?: boolean;
+  /** The protocol has not revealed this mon's ability. */
+  abilityUnknown?: boolean;
 }
 
 /**
@@ -306,6 +311,11 @@ export function buildDecisionBattle(position: LivePosition, options?: { quickWin
       if (slot) slot.revivalblessing = { id: 'revivalblessing' };
     }
     if (legalChoices(battle, 'p1').length === 0) return null;
+    // Read only by opt-in search priors (stats-prior.ts); no effect otherwise.
+    markFoeHidden(battle, foe.kept.map(mon => ({
+      itemUnknown: mon.itemUnknown === true,
+      abilityUnknown: mon.abilityUnknown === true,
+    })));
     return battle;
   } catch {
     return null;

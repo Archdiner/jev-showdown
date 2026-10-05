@@ -133,6 +133,7 @@ async function runSearch(
       opponentModel: model,
       evalMode: evalModeOf(ctx),
       deadlineMs: ctx.deadlineMs,
+      statsPrior: statsPriorOf(params.foeStats),
     });
     return trace;
   }
@@ -153,6 +154,11 @@ async function runSearch(
   const trace = outlined(battle, side, params, ctx, params.depth);
   if (params.samples > 1) trace.note = `samples=${params.samples} recorded; this battle is one world`;
   return trace;
+}
+
+function statsPriorOf(mode: SearchParams['foeStats']): ExactConfig['statsPrior'] {
+  if (!mode || mode === 'off') return undefined;
+  return { items: mode === 'items' || mode === 'full', abilities: mode === 'full' };
 }
 
 function useExact(id: string, params: SearchParams, ctx: SearchCtx): boolean {

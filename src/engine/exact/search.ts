@@ -17,6 +17,7 @@ import switchProfile from '../../../experiments/switch-depth2/config.json' with 
 import { rankedSwitches } from './matchup.js';
 import { koProbability } from './ko-groups.js';
 import { applyFoePrior, progressPenalty } from './public.js';
+import { applyStatsPrior, foeHiddenOf, type StatsPriorOptions } from './stats-prior.js';
 import { pruneReplies, replyDistribution, WeightedChoice } from './switch-model.js';
 import { teamEval } from './team-eval.js';
 import { fittedTeamEval } from './fitted-eval.js';
@@ -87,6 +88,11 @@ export interface ExactConfig {
    * rollout. A four-move set is left as it is.
    */
   foePrior?: boolean;
+  /**
+   * With foePrior: fill the foe from the randbats usage posterior instead of
+   * the first matching set (opt-in; see stats-prior.ts).
+   */
+  statsPrior?: StatsPriorOptions;
 }
 
 /** True when the deadline has passed and the search already has a score to return. */
@@ -302,7 +308,7 @@ function ownChoices(battle: Battle, sideId: SideId, config: ExactConfig, atRoot:
  */
 export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig = EXACT_1PLY): SearchTrace {
   if (config.selective && config.depth >= 2) return selectiveDepth2(battle, sideId, config);
-  const working = config.foePrior ? withFoePrior(battle, sideId) : battle;
+  const working = config.foePrior ? withFoePrior(battle, sideId, config.statsPrior) : battle;
   const mine = ownChoices(working, sideId, config, true);
   if (mine.length === 0) return { choice: 'default', scores: [] };
   if (mine.length === 1) return { choice: mine[0], scores: [{ choice: mine[0], score: 0 }] };
@@ -345,9 +351,15 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
   };
 }
 
-function withFoePrior(battle: Battle, sideId: SideId): Battle {
+function withFoePrior(battle: Battle, sideId: SideId, statsPrior?: StatsPriorOptions): Battle {
   const clone = cloneFromSnapshot(snapshot(battle));
-  applyFoePrior(clone, sideId);
+  if (statsPrior) {
+    // Hidden marks index p2 of the decision battle (our side is p1 there).
+    const hidden = otherSide(sideId) === 'p2' ? foeHiddenOf(battle) : undefined;
+    applyStatsPrior(clone, sideId, hidden, statsPrior);
+  } else {
+    applyFoePrior(clone, sideId);
+  }
   return clone;
 }
 

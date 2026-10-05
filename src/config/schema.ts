@@ -61,6 +61,13 @@ export const SearchParamsSchema = z.object({
   variancePenalty: z.number().nonnegative().default(0),
   opponentModel: z.enum(['max-damage', 'uniform']).default('max-damage'),
   evalMode: z.enum(['hp', 'full']).default('hp'),
+  /**
+   * Opt-in foe set prior for exact-1ply-qw (see engine/exact/stats-prior.ts).
+   * Unset keeps QW's first-matching-set move fill and existing config ids.
+   * moves: role-posterior move fill. items: + posterior-mode hidden item.
+   * full: + posterior-mode hidden ability.
+   */
+  foeStats: z.enum(['off', 'moves', 'items', 'full']).optional(),
 }).strict();
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
 
