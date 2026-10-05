@@ -17,6 +17,35 @@ function averageDamage(damage: number | number[] | number[][]): number {
   return flat.reduce((sum, n) => sum + n, 0) / flat.length;
 }
 
+/** The roll chart for one damaging move. Multi-hit uses the fullest hit row. */
+export function damageRollChart(damage: unknown): number[] {
+  if (typeof damage === 'number') return [damage];
+  if (!Array.isArray(damage) || damage.length === 0) return [];
+  if (Array.isArray(damage[0])) {
+    const rows = damage as number[][];
+    const fullest = rows.reduce((best, row) => (row.length > best.length ? row : best), rows[0]);
+    return fullest.filter(value => typeof value === 'number');
+  }
+  return (damage as unknown[]).filter((value): value is number => typeof value === 'number');
+}
+
+/**
+ * Damage rolls from @smogon/calc. Null when the move is status or has no base power.
+ */
+export function damageRolls(attacker: any, defender: any, moveName: string, weatherId?: string): number[] | null {
+  try {
+    const move = new Move(9, moveName);
+    if (move.category === 'Status' || !move.bp) return null;
+    const weather = weatherId ? WEATHER[weatherId] : undefined;
+    const field = new Field(weather ? { weather } : {});
+    const result = calculate(9, calcMon(attacker), calcMon(defender), move, field);
+    const rolls = damageRollChart(result.damage);
+    return rolls.length ? rolls : null;
+  } catch {
+    return null;
+  }
+}
+
 function dexName(kind: 'abilities' | 'items' | 'natures', raw: unknown): string | undefined {
   if (typeof raw !== 'string' || raw.length === 0) return undefined;
   const entry = Dex[kind].get(raw);

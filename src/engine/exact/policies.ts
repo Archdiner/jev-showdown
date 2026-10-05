@@ -2,7 +2,7 @@ import { Battle, PRNG } from '@pkmn/sim';
 import { Action } from '../../types/index.js';
 import { SideId, legalChoices, moveSlotIndex } from './battle-utils.js';
 import { maxDamageChoice } from './max-damage.js';
-import { EXACT_1PLY, ExactConfig, SWITCH_DEPTH2, ScoredChoice, battleToState, exactSearch } from './search.js';
+import { EXACT_1PLY, ExactConfig, FITTED_1PLY, FITTED_DEPTH2, SWITCH_DEPTH2, ScoredChoice, battleToState, exactSearch } from './search.js';
 
 export type PolicySpec =
   | { kind: 'random' }
@@ -100,6 +100,12 @@ export function specFromId(id: string): PolicySpec {
     case 'switch-depth2':
     case 'challenger-switch-depth2':
       return { kind: 'exact', config: SWITCH_DEPTH2 };
+    case 'fitted-1ply':
+    case 'fitted':
+      return { kind: 'exact', config: FITTED_1PLY };
+    case 'fitted-depth2':
+    case 'fitted-d2':
+      return { kind: 'exact', config: FITTED_DEPTH2 };
     default:
       if (id.startsWith('exact:')) {
         const [, depth, model, evalMode] = id.split(':');

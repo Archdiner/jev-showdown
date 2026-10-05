@@ -1,5 +1,6 @@
 import type { Battle } from '@pkmn/sim';
 import { hpEval, type SideId } from '../../engine/exact/battle-utils.js';
+import { fittedTeamEval } from '../../engine/exact/fitted-eval.js';
 import { battleToState } from '../../engine/exact/search.js';
 import { Evaluator } from '../../engine/evaluator.js';
 import { register } from '../registry.js';
@@ -10,8 +11,12 @@ import { bestStat, boostSum, hazardScore, hpFrac, otherSide } from './battle.js'
 export interface EvalImpl {
   id: string;
   params: EvaluatorParams;
-  /** `exact` leaves are scored by exactSearch. `weighted` is scored here. */
-  kind: 'hp' | 'full' | 'weighted';
+  /**
+   * `hp`, `full`, and `fitted` are scored inside exactSearch.
+   * `weighted` is scored here from the config weights.
+   * `fitted` reads the logistic team-eval weights.
+   */
+  kind: 'hp' | 'full' | 'weighted' | 'fitted';
   score(battle: Battle, side: SideId, plan: GamePlan | null): number;
 }
 
@@ -41,6 +46,19 @@ export function registerEvaluators(): void {
       params,
       kind: 'full' as const,
       score: (battle: Battle, side: SideId) => legacy.evaluate(battleToState(battle, side)).score,
+    }),
+  });
+
+  register<EvaluatorParams>({
+    layer: 'evaluator',
+    id: 'fitted-team',
+    schema: EvaluatorParamsSchema,
+    defaults: { weights: defaultWeights() },
+    create: params => ({
+      id: 'fitted-team',
+      params,
+      kind: 'fitted' as const,
+      score: (battle: Battle, side: SideId) => fittedTeamEval(battle, side),
     }),
   });
 
