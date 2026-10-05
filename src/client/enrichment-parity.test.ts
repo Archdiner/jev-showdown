@@ -1,7 +1,7 @@
 import { PRNG, type Battle } from '@pkmn/sim';
 import { buildBot } from '../config/bot.js';
 import { loadConfig } from '../config/load.js';
-import { cloneBattle, startRandomBattle, teamsForSeed } from '../engine/exact/battle-utils.js';
+import { cloneBattle, legalChoices, startRandomBattle, teamsForSeed } from '../engine/exact/battle-utils.js';
 import { maxDamageChoice } from '../engine/exact/max-damage.js';
 import { decide } from '../engine/exact/policies.js';
 import { EXACT_1PLY, EXACT_1PLY_QW } from '../engine/exact/search.js';
@@ -70,8 +70,19 @@ describe('decision enrichment stays off the default engines', () => {
     const hybrid = loadConfig('configs/hybrid.yaml').config;
     expect(champ.search.id).not.toBe('hybrid');
     expect(champ.hybrid).toBeUndefined();
+    expect(champ.opponentModel.setInference.id).not.toBe('calibrated');
     expect(hybrid.search.id).toBe('hybrid');
     expect(hybrid.hybrid?.params.enrichDecisionState).toBe(true);
+    expect(hybrid.hybrid?.params.sampler).toBe('loose');
+    expect(loadConfig('configs/hybrid-calibrated.yaml').config.hybrid?.params.sampler).toBe('calibrated');
+
+    const battle = open(7);
+    const plain = legalChoices(battle, 'p1');
+    const withTera = legalChoices(battle, 'p1', { tera: true });
+    expect(plain.some(choice => choice.includes('terastallize'))).toBe(false);
+    expect(new Set(withTera).size).toBe(withTera.length);
+    const added = withTera.filter(choice => !plain.includes(choice));
+    expect(added.every(choice => /^move \d+ terastallize$/.test(choice))).toBe(true);
   });
 
   it('ignores hazards, revealed Tera, and turn unless enrich is set', () => {

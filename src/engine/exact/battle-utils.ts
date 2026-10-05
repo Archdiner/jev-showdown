@@ -92,7 +92,7 @@ export function legalChoices(battle: Battle, sideId: SideId, options?: { tera?: 
       if (mon && !mon.fainted && !mon.isActive) choices.push(`switch ${i + 1}`);
     }
   }
-  return options?.tera ? appendTeraChoices(battle, sideId, choices) : choices;
+  return choices;
 }
 
 /** True when `battle.choose` would accept the string, including a Tera move. */
