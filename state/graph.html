@@ -13,9 +13,9 @@
 </head>
 <body>
   <h1>Development Graph</h1>
-  <p>Exported: 2026-10-04T23:23:25.669Z</p>
+  <p>Exported: 2026-10-05T00:07:43.681Z</p>
   
-  <h2>Nodes (28)</h2>
+  <h2>Nodes (30)</h2>
   
     <div class="node Goal open">
       <strong>Goal: #1 on gen9randombattle ladder</strong>
@@ -241,8 +241,24 @@
       
     </div>
   
+    <div class="node Task done">
+      <strong>Task: Live ladder client</strong>
+      <div>Status: done</div>
+      <div>Websocket ladder client with login, per-room state, legal choices, JSONL logs, replay save, --engine, and --concurrency.</div>
+      <div>Commit: <code>6e9948c</code></div>
+      
+    </div>
   
-  <h2>Edges (24)</h2>
+    <div class="node Result done">
+      <strong>Result: Concurrency 4 local verification</strong>
+      <div>Status: done</div>
+      <div>15 gen9randombattle games on one login pair at concurrency 4, engine max-damage. invalid=0 crashes=0 fallbacks=0 mismatches=0. Peak of 4 simultaneous battles. Earlier head-to-head: max-damage 12, search 1.</div>
+      <div>Commit: <code>6e9948c</code></div>
+      <div>Metrics: {"invalid_choices":0,"crashes":0,"fallbacks":0,"mismatches":0,"concurrency":4,"games":15}</div>
+    </div>
+  
+  
+  <h2>Edges (26)</h2>
   <ul>
   
     <li>decision-typescript-pkmn --[supports]--> goal-ladder-1</li>
@@ -292,6 +308,10 @@
     <li>task-llm-layer --[produced]--> experiment-llm-jev-prior</li>
   
     <li>task-llm-layer --[supports]--> decision-loss-reviewer-grok-4-7</li>
+  
+    <li>task-live-ladder --[produced]--> result-live-ladder-c4</li>
+  
+    <li>task-live-ladder --[supports]--> goal-ladder-1</li>
   
   </ul>
 </body>
