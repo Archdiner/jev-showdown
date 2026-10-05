@@ -66,9 +66,14 @@ export interface ExactConfig {
   replyCap?: number;
   /**
    * Leaf override for a config evaluator that is not one of the built-in
-   * modes. The hybrid engine and weighted evaluator pass this through.
+   * modes. Only selective-depth2 sets this. Unset leaves the built-in eval.
    */
   leaf?: (battle: Battle, side: SideId) => number;
+  /**
+   * When set, a depth-2 rollout stops at deadlineMs. Existing depth-n
+   * searches leave this unset and finish the node, matching main.
+   */
+  rolloutDeadline?: boolean;
 }
 
 /** True when the deadline has passed and the search already has a score to return. */
@@ -522,7 +527,7 @@ function rollout(
   let scored = 0;
   let complete = true;
   for (const choice of next) {
-    if (searchBudgetExpired(config.deadlineMs, scored)) {
+    if (config.rolloutDeadline && searchBudgetExpired(config.deadlineMs, scored)) {
       complete = false;
       break;
     }

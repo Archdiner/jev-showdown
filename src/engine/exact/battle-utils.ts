@@ -16,13 +16,6 @@ export function otherSide(side: SideId): SideId {
   return side === 'p1' ? 'p2' : 'p1';
 }
 
-/** Revival Blessing's follow-up must target a fainted teammate. */
-function isReviving(side: { active: Array<{ position: number } | null>; slotConditions?: Array<Record<string, unknown>> }): boolean {
-  const active = side.active[0];
-  if (!active) return false;
-  return Boolean(side.slotConditions?.[active.position]?.revivalblessing);
-}
-
 /**
  * 0-based request slot. `move 4` and `move 4 terastallize` are both slot 3.
  * The slot stays put when a neighbor is disabled, out of PP, or Choice-locked.
@@ -45,11 +38,9 @@ export function legalChoices(battle: Battle, sideId: SideId): string[] {
 
   if (req.forceSwitch) {
     const choices: string[] = [];
-    const reviving = isReviving(side);
     for (let i = 0; i < side.pokemon.length; i++) {
       const mon = side.pokemon[i];
-      if (!mon || mon.isActive) continue;
-      if (reviving ? mon.fainted : !mon.fainted) choices.push(`switch ${i + 1}`);
+      if (mon && !mon.fainted && !mon.isActive) choices.push(`switch ${i + 1}`);
     }
     return choices;
   }

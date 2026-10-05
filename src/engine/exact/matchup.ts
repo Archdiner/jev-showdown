@@ -1,6 +1,6 @@
 import { Battle, Dex, Teams } from '@pkmn/sim';
 import { Pokemon as CalcPokemon } from '@smogon/calc';
-import { expectedDamage, speciesForCalc } from './max-damage.js';
+import { expectedDamage } from './max-damage.js';
 import { SideId, ensureGenerators, legalChoices } from './battle-utils.js';
 
 /**
@@ -66,7 +66,7 @@ export function estimatedMaxHp(species: string, level: number): number {
 const damageCache = new Map<string, number>();
 
 function synth(species: string, level: number, hpFrac: number): any {
-  const name = speciesForCalc(species);
+  const name = Dex.species.get(species).name || species;
   const maxhp = estimatedMaxHp(name, level);
   const hp = Math.max(1, Math.round(maxhp * Math.max(0, Math.min(1, hpFrac))));
   return {

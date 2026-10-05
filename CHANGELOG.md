@@ -6,7 +6,7 @@ The leaf score is no longer only HP and faints. `fitted-team` averages the 1v1 m
 
 Dev (n=780): team log loss 0.5615, accuracy 70.5%. HP-only log loss 0.5536, accuracy 70.4%. Constant log loss 0.6931. Held-out (n=800): team log loss 0.6092, accuracy 65.3%. HP-only log loss 0.6255, accuracy 65.3%.
 
-`selective-depth2` scores every legal move at depth 1, then spends the remaining deadline on the top-N of those moves against the opponent's top-M replies. Damaging rolls are two buckets, KO and non-KO. A transposition table remembers finished nodes for that decision. Both pieces are config components (`fitted-team`, `selective-depth2`). `exactSearch` honors `evalMode: 'fitted'` and `selective`, so sampled-world search and the hybrid engine pass the same config.
+`selective-depth2` scores every legal move at depth 1, then spends the remaining deadline on the top-N of those moves against the opponent's top-M replies. Damaging rolls are two buckets, KO and non-KO. A transposition table remembers finished nodes for that decision. Both pieces are config components (`fitted-team`, `selective-depth2`). `exactSearch` honors `evalMode: 'fitted'`, `selective`, a leaf override, and an inner rollout deadline only when the caller sets them. Champion, weighted, and the other existing configs do not, so their scores stay the same.
 
 Info-honest bench, 60 pairs, sides swapped, 120 games, each policy sees only its public observation. Opponent is exact 1-ply (8 samples, HP eval). Invalid choices 0, crashes 0, view misses 0. Randbats generator species 508.
 
@@ -14,8 +14,6 @@ Info-honest bench, 60 pairs, sides swapped, 120 games, each policy sees only its
 | --- | --- | --- | --- | --- |
 | fitted 1-ply | 70W-50L-0T (58.3%) | 49.4–66.8% | 77ms | 126ms |
 | fitted depth-2 | 58W-62L-0T (48.3%) | 39.6–57.2% | 119ms | 313ms |
-
-A Revival Blessing follow-up now switches to a fainted teammate. The previous switch list offered a healthy Pokémon, which the sim rejects. The hidden-info battle copies the request's `reviving` flag, so the search and the real battle agree.
 
 ## Live losses reach the factory
 

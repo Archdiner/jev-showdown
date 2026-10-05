@@ -1,0 +1,442 @@
+[
+  {
+    "id": "champion",
+    "configId": "064cad7ec4ed0241",
+    "seed": 4,
+    "choice": "move 2",
+    "scores": [
+      {
+        "choice": "move 1",
+        "score": -0.6102280890804601
+      },
+      {
+        "choice": "move 2",
+        "score": 1.1197168342911876
+      },
+      {
+        "choice": "move 3",
+        "score": -0.5646701388888888
+      },
+      {
+        "choice": "move 4",
+        "score": -0.5646701388888888
+      },
+      {
+        "choice": "switch 2",
+        "score": -0.8472727272727273
+      },
+      {
+        "choice": "switch 3",
+        "score": -0.7149280575539568
+      },
+      {
+        "choice": "switch 4",
+        "score": -0.3399182561307905
+      },
+      {
+        "choice": "switch 5",
+        "score": -0.5411036036036035
+      },
+      {
+        "choice": "switch 6",
+        "score": -3
+      }
+    ]
+  },
+  {
+    "id": "champion",
+    "configId": "064cad7ec4ed0241",
+    "seed": 11,
+    "choice": "move 1",
+    "scores": [
+      {
+        "choice": "move 1",
+        "score": -0.13378149224806168
+      },
+      {
+        "choice": "move 2",
+        "score": -0.14767156862745057
+      },
+      {
+        "choice": "move 3",
+        "score": -0.37545955882352944
+      },
+      {
+        "choice": "move 4",
+        "score": -0.1875
+      },
+      {
+        "choice": "switch 2",
+        "score": -0.4336642599277978
+      },
+      {
+        "choice": "switch 3",
+        "score": -0.4806273062730626
+      },
+      {
+        "choice": "switch 4",
+        "score": -0.4799651567944252
+      },
+      {
+        "choice": "switch 5",
+        "score": -0.41652097902097907
+      },
+      {
+        "choice": "switch 6",
+        "score": -0.43459302325581395
+      }
+    ]
+  },
+  {
+    "id": "weighted",
+    "configId": "f16851694ac7c704",
+    "seed": 4,
+    "choice": "move 2",
+    "scores": [
+      {
+        "choice": "move 2",
+        "score": 0.39798850574712574
+      },
+      {
+        "choice": "switch 4",
+        "score": -0.31335149863760225
+      },
+      {
+        "choice": "switch 5",
+        "score": -0.5
+      },
+      {
+        "choice": "move 3",
+        "score": -0.5138888888888893
+      },
+      {
+        "choice": "move 4",
+        "score": -0.5138888888888893
+      },
+      {
+        "choice": "move 1",
+        "score": -0.5347222222222223
+      },
+      {
+        "choice": "switch 3",
+        "score": -0.6582733812949639
+      },
+      {
+        "choice": "switch 2",
+        "score": -0.7854545454545452
+      },
+      {
+        "choice": "switch 6",
+        "score": -3
+      }
+    ]
+  },
+  {
+    "id": "weighted",
+    "configId": "f16851694ac7c704",
+    "seed": 11,
+    "choice": "move 2",
+    "scores": [
+      {
+        "choice": "move 2",
+        "score": -0.13568741450068345
+      },
+      {
+        "choice": "move 1",
+        "score": -0.13699840401276742
+      },
+      {
+        "choice": "move 4",
+        "score": -0.1875
+      },
+      {
+        "choice": "move 3",
+        "score": -0.3786764705882355
+      },
+      {
+        "choice": "switch 5",
+        "score": -0.40209790209790164
+      },
+      {
+        "choice": "switch 6",
+        "score": -0.4215116279069768
+      },
+      {
+        "choice": "switch 2",
+        "score": -0.4223826714801442
+      },
+      {
+        "choice": "switch 4",
+        "score": -0.463414634146341
+      },
+      {
+        "choice": "switch 3",
+        "score": -0.46494464944649394
+      }
+    ]
+  },
+  {
+    "id": "depth-2",
+    "configId": "c1e3efb394d9801d",
+    "seed": 4,
+    "choice": "move 2",
+    "scores": [
+      {
+        "choice": "move 1",
+        "score": -0.15213185407466534
+      },
+      {
+        "choice": "move 2",
+        "score": 1.9765498987988979
+      },
+      {
+        "choice": "move 3",
+        "score": -0.10609497668002932
+      },
+      {
+        "choice": "move 4",
+        "score": -0.10609497668002932
+      },
+      {
+        "choice": "switch 2",
+        "score": -0.8472727272727273
+      },
+      {
+        "choice": "switch 3",
+        "score": -0.6459625403125778
+      },
+      {
+        "choice": "switch 4",
+        "score": -0.10306983202313402
+      },
+      {
+        "choice": "switch 5",
+        "score": -0.4576537744641195
+      },
+      {
+        "choice": "switch 6",
+        "score": -3
+      }
+    ]
+  },
+  {
+    "id": "depth-2",
+    "configId": "c1e3efb394d9801d",
+    "seed": 11,
+    "choice": "move 1",
+    "scores": [
+      {
+        "choice": "move 1",
+        "score": -0.11134860921112633
+      },
+      {
+        "choice": "move 2",
+        "score": -0.34450880642954873
+      },
+      {
+        "choice": "move 3",
+        "score": -0.572296796625627
+      },
+      {
+        "choice": "move 4",
+        "score": -0.29508663930688517
+      },
+      {
+        "choice": "switch 2",
+        "score": -0.6624465477506761
+      },
+      {
+        "choice": "switch 3",
+        "score": -0.43187676362057736
+      },
+      {
+        "choice": "switch 4",
+        "score": -0.4799651567944251
+      },
+      {
+        "choice": "switch 5",
+        "score": -0.5555282183616658
+      },
+      {
+        "choice": "switch 6",
+        "score": -0.49737089603283213
+      }
+    ]
+  },
+  {
+    "id": "exact-1ply",
+    "configId": "exact-1ply",
+    "seed": 4,
+    "choice": "move 2",
+    "scores": [
+      {
+        "choice": "move 1",
+        "score": -0.6102280890804601
+      },
+      {
+        "choice": "move 2",
+        "score": 1.1197168342911876
+      },
+      {
+        "choice": "move 3",
+        "score": -0.5646701388888888
+      },
+      {
+        "choice": "move 4",
+        "score": -0.5646701388888888
+      },
+      {
+        "choice": "switch 2",
+        "score": -0.8472727272727273
+      },
+      {
+        "choice": "switch 3",
+        "score": -0.7149280575539568
+      },
+      {
+        "choice": "switch 4",
+        "score": -0.3399182561307905
+      },
+      {
+        "choice": "switch 5",
+        "score": -0.5411036036036035
+      },
+      {
+        "choice": "switch 6",
+        "score": -3
+      }
+    ]
+  },
+  {
+    "id": "switch-depth2",
+    "configId": "switch-depth2",
+    "seed": 4,
+    "choice": "move 2",
+    "scores": [
+      {
+        "choice": "move 1",
+        "score": 0.25953694638863745
+      },
+      {
+        "choice": "move 2",
+        "score": 2.408547978812636
+      },
+      {
+        "choice": "move 3",
+        "score": 0.28977403245248284
+      },
+      {
+        "choice": "move 4",
+        "score": 0.28977403245248284
+      },
+      {
+        "choice": "switch 2",
+        "score": -1.405945469651317
+      },
+      {
+        "choice": "switch 3",
+        "score": -0.6894261543072486
+      },
+      {
+        "choice": "switch 4",
+        "score": 0.15870610902832083
+      },
+      {
+        "choice": "switch 5",
+        "score": -0.8888541322970108
+      },
+      {
+        "choice": "switch 6",
+        "score": -2.4974613852890553
+      }
+    ]
+  },
+  {
+    "id": "exact-1ply",
+    "configId": "exact-1ply",
+    "seed": 11,
+    "choice": "move 1",
+    "scores": [
+      {
+        "choice": "move 1",
+        "score": -0.13378149224806168
+      },
+      {
+        "choice": "move 2",
+        "score": -0.14767156862745057
+      },
+      {
+        "choice": "move 3",
+        "score": -0.37545955882352944
+      },
+      {
+        "choice": "move 4",
+        "score": -0.1875
+      },
+      {
+        "choice": "switch 2",
+        "score": -0.4336642599277978
+      },
+      {
+        "choice": "switch 3",
+        "score": -0.4806273062730626
+      },
+      {
+        "choice": "switch 4",
+        "score": -0.4799651567944252
+      },
+      {
+        "choice": "switch 5",
+        "score": -0.41652097902097907
+      },
+      {
+        "choice": "switch 6",
+        "score": -0.43459302325581395
+      }
+    ]
+  },
+  {
+    "id": "switch-depth2",
+    "configId": "switch-depth2",
+    "seed": 11,
+    "choice": "move 1",
+    "scores": [
+      {
+        "choice": "move 1",
+        "score": 0.22485908567994342
+      },
+      {
+        "choice": "move 2",
+        "score": -0.19942293035800762
+      },
+      {
+        "choice": "move 3",
+        "score": -0.5909656069628905
+      },
+      {
+        "choice": "move 4",
+        "score": -0.33972971859714757
+      },
+      {
+        "choice": "switch 2",
+        "score": -0.7138962400599463
+      },
+      {
+        "choice": "switch 3",
+        "score": -0.3305366439069697
+      },
+      {
+        "choice": "switch 4",
+        "score": -0.7482040842779248
+      },
+      {
+        "choice": "switch 5",
+        "score": -0.7255833211910345
+      },
+      {
+        "choice": "switch 6",
+        "score": -0.2175016608856743
+      }
+    ]
+  }
+]

@@ -59,6 +59,7 @@ export function selectiveDepth2(battle: Battle, side: SideId, config: ExactConfi
       maxReplies: topM,
       rollGrouping: config.rollGrouping ?? 'ko',
       deeperChoices: config.deeperChoices ?? topN,
+      rolloutDeadline: true,
     };
     let deepened = 0;
     for (const row of ranked) {

@@ -136,7 +136,6 @@ async function runSearch(
     const model = ctx.behavior.exactModel || params.opponentModel;
     const depth = id === 'greedy-1ply' ? params.depth : params.depth;
     const config = exactConfig(params, model, evalModeOf(ctx), depth, ctx.deadlineMs);
-    config.leaf = leafOf(ctx);
     return exactSearch(battle, side, config);
   }
   const trace = outlined(battle, side, params, ctx, params.depth);

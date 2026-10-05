@@ -52,43 +52,13 @@ function dexName(kind: 'abilities' | 'items' | 'natures', raw: unknown): string 
   return entry?.exists ? entry.name : raw;
 }
 
-const calcSpeciesCache = new Map<string, string>();
-
-/**
- * Name @smogon/calc can build. Cosmetic formes (Gastrodon-East) are not in
- * its dex; the base forme has the same battle stats. A forme the calc lists
- * (Ogerpon-Wellspring) is kept.
- */
-export function speciesForCalc(species: string): string {
-  const known = calcSpeciesCache.get(species);
-  if (known) return known;
-  const dex = Dex.species.get(species);
-  const primary = dex.exists ? dex.name : species;
-  const candidates = [primary];
-  if (dex.baseSpecies && !candidates.includes(dex.baseSpecies)) candidates.push(dex.baseSpecies);
-  let picked = primary;
-  for (const name of candidates) {
-    try {
-      const mon = new CalcPokemon(9, name, { level: 80 });
-      if (mon.species?.baseStats?.hp) {
-        picked = name;
-        break;
-      }
-    } catch {
-      // Try the base forme.
-    }
-  }
-  calcSpeciesCache.set(species, picked);
-  return picked;
-}
-
 function calcMon(pokemon: any): CalcPokemon {
   const set = pokemon.set || {};
   const status = pokemon.status && pokemon.status !== '???' ? pokemon.status : undefined;
   // The sim stores ids ("levitate"). @smogon/calc only applies the display
   // name ("Levitate"). Passing the id overrides the species ability and
   // Ground moves hit Levitate targets.
-  return new CalcPokemon(9, speciesForCalc(pokemon.species.name), {
+  return new CalcPokemon(9, pokemon.species.name, {
     level: pokemon.level,
     ability: dexName('abilities', pokemon.ability || set.ability),
     item: dexName('items', pokemon.item || set.item),

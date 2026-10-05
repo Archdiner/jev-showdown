@@ -7,7 +7,7 @@ import { legalChoices, safeChoose, startRandomBattle, teamsForSeed } from './bat
 import { maxDamageChoice } from './max-damage.js';
 import { fitLogistic, scoreLogistic } from './logistic.js';
 import { koProbability } from './ko-groups.js';
-import { damageRollChart, speciesForCalc } from './max-damage.js';
+import { damageRollChart } from './max-damage.js';
 import { FITTED_1PLY, FITTED_DEPTH2, exactSearch } from './search.js';
 import { fittedModel, fittedTeamEval } from './fitted-eval.js';
 import {
@@ -123,7 +123,6 @@ describe('fitted team eval', () => {
   });
 
   test('damage rolls collapse to a KO probability in range', () => {
-    expect(speciesForCalc('Gastrodon-East')).toBe('Gastrodon');
     expect(damageRollChart([1, 2, 3])).toEqual([1, 2, 3]);
     expect(damageRollChart([[1, 2], [3, 4, 5]])).toEqual([3, 4, 5]);
     const { battle, legal } = withMoves(6);
