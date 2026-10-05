@@ -1,8 +1,9 @@
 import { Battle } from '@pkmn/sim';
 import { SideId, hpEval } from './battle-utils.js';
 import {
+  battleMargin,
+  battleSpeed,
   hazardFraction,
-  marginAgainst,
   priorSpecies,
   speciesLevel,
   synthThreat,
@@ -27,11 +28,11 @@ export function teamEval(battle: Battle, side: SideId): number {
   const weather = (battle.field as any).weather?.id as string | undefined;
   if (!active || !foe) return base;
 
-  const activeMargin = marginAgainst(active, foe, true, weather);
+  const activeMargin = battleMargin(active, foe, weather);
   let bestBench = activeMargin;
   for (const mon of us.pokemon) {
     if (!mon || mon.fainted || mon.isActive) continue;
-    const margin = marginAgainst(mon, foe, true, weather) - hazardFraction(mon);
+    const margin = battleMargin(mon, foe, weather) - hazardFraction(mon);
     if (margin > bestBench) bestBench = margin;
   }
 
@@ -44,7 +45,7 @@ export function teamEval(battle: Battle, side: SideId): number {
       continue;
     }
     if (mon.isActive) continue;
-    const margin = marginAgainst(mon, active, false, weather);
+    const margin = battleMargin(mon, active, weather);
     if (margin > theirBest) theirBest = margin;
   }
 
@@ -55,17 +56,11 @@ export function teamEval(battle: Battle, side: SideId): number {
   return base
     + 1.5 * activeMargin
     + 0.5 * (bestBench - activeMargin)
-    + (publicOutspeeds(active, foe) ? 0.4 : -0.4)
+    + (battleSpeed(active) > battleSpeed(foe) ? 0.4 : -0.4)
     + (weTera ? 0.3 : 0)
     - (theyTera ? 0.3 : 0)
     - 0.15 * unrevealed * prior
     - (theirBest > 0 ? 0.25 * theirBest : 0);
-}
-
-function publicOutspeeds(our: any, foe: any): boolean {
-  const ourSpeed = (our.species.baseStats?.spe || 0) * (our.level || 80);
-  const foeSpeed = (foe.species.baseStats?.spe || 0) * (foe.level || 80);
-  return ourSpeed > foeSpeed;
 }
 
 const priorCache = new Map<string, number>();

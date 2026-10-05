@@ -229,6 +229,29 @@ export interface Margin {
  * public estimate (neutral spread, revealed moves or the randbats pool).
  * Positive means we threaten them more than they threaten us.
  */
+function slotMoves(pokemon: any): string[] {
+  const slots = (pokemon?.moveSlots || []).map((slot: any) => slot.id as string).filter(Boolean);
+  if (slots.length) return slots;
+  return likelyMoves(pokemon?.species?.name || '', []);
+}
+
+/**
+ * Matchup on the live pokemon: real stats, ability, item, and moves.
+ * The neutral estimate is only for the fitted switch features, where a
+ * replay log does not contain EVs or unrevealed moves.
+ */
+export function battleMargin(our: any, foe: any, weather?: string): number {
+  if (!our || !foe || our.fainted || our.hp <= 0) return -2;
+  const ourDmg = bestDamage(our, foe, slotMoves(our), weather);
+  const foeDmg = bestDamage(foe, our, slotMoves(foe), weather);
+  return threatRatio(ourDmg, foe.hp || foe.maxhp || 1) - threatRatio(foeDmg, our.hp || our.maxhp || 1);
+}
+
+export function battleSpeed(pokemon: any): number {
+  if (typeof pokemon?.getStat === 'function') return pokemon.getStat('spe');
+  return publicSpeed(pokemon?.species?.name || '', pokemon?.level || 80);
+}
+
 export function marginAgainst(our: any, foe: any, ownMoves: boolean, weather?: string): number {
   if (!our || !foe || our.fainted) return -2;
   const ourLevel = our.level || speciesLevel(our.species.name);
@@ -316,7 +339,7 @@ export function rankedSwitches(battle: Battle, side: SideId, knowOwnMoves = true
     ranked.push({
       choice,
       species: mon.species.name,
-      margin: marginAgainst(mon, foe, knowOwnMoves, weather) - hazardFraction(mon),
+      margin: (knowOwnMoves ? battleMargin(mon, foe, weather) : marginAgainst(mon, foe, false, weather)) - hazardFraction(mon),
     });
   }
   ranked.sort((a, b) => b.margin - a.margin || a.choice.localeCompare(b.choice));
