@@ -546,6 +546,7 @@ P0 is losing games or corrupting data now. P1 is the loop or visibility broken. 
 | runner-down | P1 | A `live-runs/*.json` pid that is not `ladder.ts`, and `summary.json` is not newer |
 | ops-worker-missing | P1 | factory, gatekeeper, live, or analyst has no fresh heartbeat while another worker is up |
 | ops-worker-duplicate | P1 | Two fresh pids for one of those workers |
+| improvement-stall | P1 | Losses reviewed and nothing queued for 15 minutes |
 | analyst-log-dir | P1 | Analyst process has no `LADDER_LOG_DIR` and its default dirs have no game JSONL while the ladder log dir does |
 | circuits-all-pulled | P1 | Every entry in `circuits.json` is pulled, so ops live stays idle |
 | mixed-ratings | P1 | A local rating and a ladder rating in the same lookback window |

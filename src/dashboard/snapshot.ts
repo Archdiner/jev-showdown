@@ -226,6 +226,9 @@ function opsBundle(root: string, graph: string): OpsPaths {
     priors: path.join(root, 'behavior.json'),
     pool: path.join(root, 'mined-pool.json'),
     variants: path.join(root, 'variants.json'),
+    cycle: path.join(root, 'cycle.jsonl'),
+    dispositions: path.join(root, 'dispositions.jsonl'),
+    hypotheses: path.join(root, 'hypotheses.json'),
   };
 }
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## Live losses reach the factory
+
+A ladder loss used to write a hypothesis and then stop. Per-battle logs have no `>start` input log, so position mining returned nothing and no factory job was enqueued. The same generic fallback text for every loss never became a self-play variant. Each reviewed loss now queues a challenger for that mechanism or eval term, or a mined position when the log can be reconstructed, or a line in `state/ops/dispositions.jsonl` saying why it was skipped. The factory claims open hypotheses, including `state/meta/hypotheses.json` rows, and plays them against max-damage. `npm run ops -- status` prints the cycle counts. The sentinel check `improvement-stall` is a P1 when losses were reviewed and nothing was queued for 15 minutes.
+
 ## Live opponent beliefs
 
 The ladder client keeps the BeliefTracker from before calibrated set inference unless that battle's config sets `setInference.id` to `calibrated`. The champion file and a run with no config file stay on that tracker, so a restarted runner uses the same opponent beliefs as before. `configs/examples/opponent-calibrated.yaml` is the opt-in. The posterior is not constructed on the legacy path. If a posterior update throws, the client logs it, counts it as `beliefErrors` on the game record, and finishes that battle on BeliefTracker instead of failing the decision.

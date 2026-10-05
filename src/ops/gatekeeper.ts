@@ -5,6 +5,7 @@ import type { GameResult } from '../bench/game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
 import type { ExactConfig } from '../engine/exact/search.js';
 import { playPaired } from '../exp/play.js';
+import { recordPromoted, recordRejected } from './cycle.js';
 import { openDb } from './db.js';
 import { beat } from './heartbeat.js';
 import { writeChampion, writeLiveApproved } from './labels.js';
@@ -113,6 +114,8 @@ export function judge(paths: OpsPaths, evidence: Evidence): Verdict {
     });
     if (labeled && evidence.action === 'champion') writeChampion(db, evidence.configPath);
     if (labeled && evidence.action === 'live-approved') writeLiveApproved(db, evidence.configPath);
+    if (labeled) recordPromoted(paths, reason);
+    else if (sprtVerdict === 'reject' && played > 0) recordRejected(paths, reason);
     if (!labeled && sprtVerdict === 'reject') {
       db.addNode({
         id: `regression-${decisionId}`,
