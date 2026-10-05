@@ -1,8 +1,11 @@
 import { informationMode, type InformationMode } from '../client/hidden-info.js';
+import { dataLoader } from '../data/data-loader.js';
+import { publishDataResult } from '../data/publish.js';
+import { gen9RandomBattle } from '../formats/gen9-randombattle.js';
 import { specForAlias } from '../config/aliases.js';
 import { BenchPlayer, GameJob, GameResult, playerId } from './game.js';
 import { runDiagnosticSuite } from '../engine/exact/diagnostics.js';
-import { EXACT_1PLY, ExactConfig, FITTED_1PLY, FITTED_DEPTH2, SWITCH_DEPTH2 } from '../engine/exact/search.js';
+import { EXACT_1PLY, EXACT_1PLY_QW, ExactConfig, FITTED_1PLY, FITTED_DEPTH2, SWITCH_DEPTH2 } from '../engine/exact/search.js';
 import { assertRandbatsSpecies, randbatsSpeciesCount, statsFileSpeciesCount } from '../engine/exact/team-features.js';
 import { wilson } from '../dashboard/stats.js';
 import { teamsForSeed } from '../engine/exact/battle-utils.js';
@@ -21,6 +24,7 @@ function policy(name: string): BenchPlayer {
   if (name === 'exact') return { kind: 'exact', config: EXACT_1PLY };
   if (name === 'fitted' || name === 'fitted-1ply') return { kind: 'exact', config: FITTED_1PLY };
   if (name === 'fitted-depth2' || name === 'fitted-d2') return { kind: 'exact', config: FITTED_DEPTH2 };
+  if (name === 'qw' || name === 'exact-qw') return { kind: 'exact', config: EXACT_1PLY_QW };
   if (name === 'switch') return { kind: 'exact', config: SWITCH_DEPTH2 };
   if (name.startsWith('exact')) {
     const [depth, model, evalMode] = name.replace(/^exact:?/, '').split(',');
@@ -79,6 +83,17 @@ function pairedJobs(
     });
   }
   return jobs;
+}
+
+/** Wilson score interval. Ties stay in the denominator, so a tie is not a win. */
+export function wilsonCI(wins: number, total: number): [number, number] {
+  if (total <= 0) return [0, 1];
+  const z = 1.96;
+  const p = wins / total;
+  const denom = 1 + (z * z) / total;
+  const center = (p + (z * z) / (2 * total)) / denom;
+  const margin = (z * Math.sqrt((p * (1 - p)) / total + (z * z) / (4 * total * total))) / denom;
+  return [Math.max(0, center - margin), Math.min(1, center + margin)];
 }
 
 export function scoreCandidate(results: GameResult[], jobs: GameJob[], candidate: BenchPlayer): {
@@ -178,6 +193,7 @@ async function main() {
     process.exit(result.failed === 0 ? 0 : 1);
   }
 
+  await dataLoader.load(gen9RandomBattle);
   const pairs = Number(arg('pairs', '10'));
   const a = policy(arg('a', 'exact'));
   const b = policy(arg('b', 'random'));
@@ -208,6 +224,14 @@ async function main() {
   console.log(`elapsed ${seconds}s`);
   const errors = results.filter(r => r.crashed).slice(0, 3);
   for (const error of errors) console.log(`crash seed=${error.seed}: ${error.error}`);
+  publishDataResult('logs/bench.json', {
+    pairs,
+    information,
+    summary,
+    viewMiss,
+    play,
+    seconds: Number(seconds),
+  });
 }
 
 main().catch(error => {

@@ -79,7 +79,7 @@ function isSwitchLegal(request: any, switchIndex: number): boolean {
 }
 
 /** Every choice the raw request allows, independent of the format helper. */
-export function strictLegalActions(request: any): Action[] {
+export function strictLegalActions(request: any, options?: { tera?: boolean }): Action[] {
   if (!request || isWaitRequest(request) || isTeamPreview(request)) return [];
   const actions: Action[] = [];
 
@@ -97,6 +97,9 @@ export function strictLegalActions(request: any): Action[] {
     for (let i = 0; i < active.moves.length; i++) {
       const action: Action = { type: 'move', moveIndex: i + 1 };
       if (isMoveLegal(request, action.moveIndex, false)) actions.push(action);
+      if (options?.tera && active.canTerastallize && isMoveLegal(request, i + 1, true)) {
+        actions.push({ type: 'move', moveIndex: i + 1, terastallize: true });
+      }
     }
   }
 
@@ -112,11 +115,13 @@ export function strictLegalActions(request: any): Action[] {
  * Legal actions for the engine. Starts from the format helper, then drops
  * anything the live request would reject.
  */
-export function legalActionsForRequest(request: any, format: Format): Action[] {
+export function legalActionsForRequest(request: any, format: Format, options?: { tera?: boolean }): Action[] {
   if (isWaitRequest(request) || isTeamPreview(request)) return [];
   const proposed = format.getLegalActions(request).filter(action => isActionLegal(action, request));
-  if (proposed.length > 0) return proposed;
-  return strictLegalActions(request);
+  const base = proposed.length > 0 ? proposed : strictLegalActions(request);
+  if (!options?.tera) return base;
+  const extra = strictLegalActions(request, { tera: true }).filter(action => action.type === 'move' && action.terastallize && isActionLegal(action, request));
+  return [...base, ...extra];
 }
 
 export function formatChoice(action: Action, rqid?: number): string {

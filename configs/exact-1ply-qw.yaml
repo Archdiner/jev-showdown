@@ -1,0 +1,7 @@
+name: exact-1ply-qw
+extends: champion.yaml
+search:
+  id: exact-1ply-qw
+  params:
+    depth: 1
+    samples: 8

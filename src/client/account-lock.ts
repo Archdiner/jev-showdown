@@ -48,6 +48,38 @@ export function accountLockPath(stateDir: string, username: string): string {
   return path.join(stateDir, `ladder-${id}.lock`);
 }
 
+/**
+ * The holder when `state/ladder-<userid>.lock` belongs to a live runner.
+ * Does not create, replace, or delete the file. A missing file or a stale
+ * pid on this host returns null.
+ */
+export function readHeldAccountLock(username: string, options: AccountLockOptions = {}): AccountLockHeldError | null {
+  let file: string;
+  try {
+    file = accountLockPath(options.stateDir ?? path.resolve('state'), username);
+  } catch {
+    return null;
+  }
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+  const holder = parseLock(raw);
+  if (!holder) return null;
+  const host = options.host ?? os.hostname();
+  const alive = options.alive ?? pidAlive;
+  if (!lockIsHeld(holder, alive, host)) return null;
+  return new AccountLockHeldError(
+    holder.username || username,
+    holder.pid,
+    holder.startedAt,
+    holder.host || host,
+    file,
+  );
+}
+
 /** Stderr line for a second runner. Names the host, the live pid, and when it started. */
 export function accountLockRefusal(err: AccountLockHeldError): string {
   return `[ladder] another runner already holds ${err.username} on ${err.host} (pid ${err.holderPid}, started ${err.startedAt}). Exiting so this process does not send choices into the same battles. Lock: ${err.lockPath}`;

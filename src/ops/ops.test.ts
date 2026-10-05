@@ -17,11 +17,11 @@ import { countsFromLiveGames, loadVariantPool, thompsonDraw } from './variants.j
 import { runAnalyst } from './analyst.js';
 import { openDb } from './db.js';
 import { runFactory } from './factory.js';
-import { bootstrapChampion, diagnosticsForConfig, exactDiagnosticsConfig, judge, reviewProposals, sprt } from './gatekeeper.js';
+import { bootstrapChampion, diagnosticsForConfig, exactDiagnosticsConfig, ingestRecordedEvidence, judge, reviewProposals, sprt } from './gatekeeper.js';
 import type { GameResult } from '../bench/game.js';
 import { loadConfig } from '../config/load.js';
 import { liveProposalAllowed, tallySide } from './sprt.js';
-import { completeJob, claimNext, enqueue, listJobs } from './queue.js';
+import { completeJob, claimNext, enqueue, listJobs, listProposals } from './queue.js';
 import { readLabels } from './labels-read.js';
 import { startLocalServer } from './local-server.js';
 import { liveSlotLimit, recordedRating, rememberRating, runLive, seatForChoice } from './live.js';
@@ -428,6 +428,87 @@ describe('gatekeeper labels', () => {
     expect(crashed[0].sprt).toBe('promote');
     expect(crashed[0].labeled).toBe(false);
     expect(crashed[0].reason).toContain('crashes=');
+  });
+});
+
+describe('recorded screens', () => {
+  const screen = {
+    policyId: 'EXACT_1PLY_QW',
+    searchId: 'exact-1ply-qw',
+    configPath: 'configs/exact-1ply-qw.yaml',
+    action: 'live-approved' as const,
+    opponent: 'EXACT_1PLY',
+    information: 'hidden',
+    seed: 1,
+    samples: 8,
+    games: 200,
+    wins: 115,
+    losses: 85,
+    ties: 0,
+    invalid: 0,
+    crashes: 0,
+    viewMiss: 0,
+    p99ms: 175,
+    maxMs: 510,
+    wilson95: [0.506, 0.641] as [number, number],
+  };
+
+  function writeScreen(dir: string, patch: Partial<typeof screen> = {}): void {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'exact-1ply-qw.json'), JSON.stringify({ ...screen, ...patch }));
+  }
+
+  test('a 115-85 screen is live-approved once and is not replayed', () => {
+    const paths = tempPaths();
+    const dir = path.join(paths.root, 'recorded');
+    writeScreen(dir);
+    const loaded = loadConfig(path.join(process.cwd(), 'configs/exact-1ply-qw.yaml'));
+    expect(loaded.config.search.id).toBe('exact-1ply-qw');
+    expect(exactDiagnosticsConfig(loaded)?.tera).toBe(true);
+    expect(exactDiagnosticsConfig(loadConfig(path.join(process.cwd(), 'configs/champion.yaml')))?.tera).toBeUndefined();
+    let calls = 0;
+    const first = ingestRecordedEvidence(paths, {
+      dir,
+      diagnostics: () => {
+        calls += 1;
+        return { passed: 22, failed: 0, total: 22 };
+      },
+    });
+    expect(first[0].labeled).toBe(true);
+    expect(first[0].sprt).toBe('continue');
+    expect(calls).toBe(1);
+    const labels = labelsOf(paths);
+    expect(labels.some(item => item.configId === loaded.configId && item.labels.includes('live-approved') && !item.labels.includes('champion'))).toBe(true);
+    expect(listProposals(paths)).toHaveLength(0);
+    const db = openDb(paths);
+    const result = db.getNodesByType('Result')[0];
+    db.close();
+    expect(result?.type).toBe('Result');
+    expect(result?.metrics).toMatchObject({ wins: 115, losses: 85, games: 200, invalid: 0, p99ms: 175 });
+    if (result?.type === 'Result') expect(result.confidence_interval).toEqual([0.506, 0.641]);
+
+    const second = ingestRecordedEvidence(paths, {
+      dir,
+      diagnostics: () => {
+        calls += 1;
+        return { passed: 22, failed: 0, total: 22 };
+      },
+    });
+    expect(second[0].labeled).toBe(true);
+    expect(calls).toBe(1);
+  });
+
+  test('invalid moves in a recorded screen stay unlabeled', () => {
+    const paths = tempPaths();
+    const dir = path.join(paths.root, 'recorded');
+    writeScreen(dir, { invalid: 1 });
+    const verdict = ingestRecordedEvidence(paths, {
+      dir,
+      diagnostics: () => ({ passed: 22, failed: 0, total: 22 }),
+    });
+    expect(verdict[0].labeled).toBe(false);
+    expect(verdict[0].sprt).toBe('continue');
+    expect(labelsOf(paths)).toHaveLength(0);
   });
 });
 

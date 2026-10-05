@@ -7,12 +7,11 @@ import { CHECKS } from './checks.js';
 import { writeTonightFixture } from './fixtures.js';
 import { acknowledge, incidentStore, loadIncidents, markFixing } from './incidents.js';
 import { buildScorecard, formatScorecard, parseSince } from './scorecard.js';
-import { loadContext, scanProcesses } from './load.js';
+import { loadContext, parseProcessTable, scanProcesses, snapshotProcesses } from './load.js';
 import { judge } from '../gatekeeper.js';
 import { openDb } from '../db.js';
 import { opsPaths } from '../paths.js';
 import { readLabels } from '../labels-read.js';
-import { loadContext, parseProcessTable, snapshotProcesses } from './load.js';
 import { readEvents } from './incidents.js';
 import { layoutFromEnv, renderScorecard, runSentinel, scanOnce } from './run.js';
 import type { GitStatus, Layout, ProcessSnapshot } from './types.js';
@@ -159,7 +158,7 @@ describe('sentinel checks', () => {
 describe('pulled-config invariant', () => {
   test('ops live idle and every approved config pulled are P1 without /proc', () => {
     const missing = path.join(os.tmpdir(), `jev-noproc-${process.pid}`);
-    expect(scanProcesses(missing)).toEqual([]);
+    expect(scanProcesses({ procRoot: missing })).toEqual([]);
 
     const { layout } = emptyRoot();
     const now = Date.now();
@@ -209,6 +208,8 @@ describe('pulled-config invariant', () => {
     fs.writeFileSync(path.join(layout.opsDir, 'circuits.json'), JSON.stringify(openFile));
     const quiet = scanOnce(layout, { now: now + 20, scanProcesses: false, git: quietGit });
     expect(quiet.hits.map(hit => hit.id)).not.toContain('circuits-all-pulled');
+  });
+});
 
 describe('runner exit without a drain', () => {
   test('a runner that timed out without a drain is a P1', () => {

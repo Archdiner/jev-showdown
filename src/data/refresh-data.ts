@@ -2,8 +2,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-
-const DATA_DIR = path.join(process.cwd(), 'data');
+import { dataDir } from './paths.js';
 
 const SOURCES = {
   sets: 'https://raw.githubusercontent.com/smogon/pokemon-showdown/master/data/random-battles/gen9/sets.json',
@@ -30,24 +29,25 @@ async function fetchText(url: string): Promise<string> {
 }
 
 async function main() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
+  const dir = dataDir();
+  await fs.mkdir(dir, { recursive: true });
 
   const sets = await fetchJSON(SOURCES.sets);
   await fs.writeFile(
-    path.join(DATA_DIR, 'gen9-sets.json'),
+    path.join(dir, 'gen9-sets.json'),
     JSON.stringify(sets, null, 2)
   );
   console.log(`✓ Saved gen9-sets.json (${Object.keys(sets).length} species)`);
 
   const stats = await fetchJSON(SOURCES.stats);
   await fs.writeFile(
-    path.join(DATA_DIR, 'gen9-stats.json'),
+    path.join(dir, 'gen9-stats.json'),
     JSON.stringify(stats, null, 2)
   );
   console.log(`✓ Saved gen9-stats.json (${Object.keys(stats).length} species)`);
 
   const formats = await fetchText(SOURCES.formats);
-  await fs.writeFile(path.join(DATA_DIR, 'formats.ts'), formats);
+  await fs.writeFile(path.join(dir, 'formats.ts'), formats);
   console.log(`✓ Saved formats.ts`);
 
   console.log('\n✓ Data refresh complete');

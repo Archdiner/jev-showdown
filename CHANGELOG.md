@@ -1,5 +1,17 @@
 # Changelog
 
+## Development constraints
+
+Unit tests write sets and stats under `JEV_DATA_DIR` (a temp directory) and set `JEV_ALLOW_SMALL_DATA=1`. The data guard fails the run if anything under `data/` changes. The loader throws when it sees fewer than 500 species unless that test-only flag is set. Live preflight ignores the flag. Benchmarks and self-play print `data species=N hash=H` and write those fields on the results file.
+
+`games.jsonl` rows are checked as `jev.ladder-game.v1`. `replayUrl` is always present: a confirmed `replay.pokemonshowdown.com` link, a synthesized public URL, `unavailable` with `replayUnavailableReason: unrecognized-room-id`, or a local log path with `replayUnavailableReason: local-server`. `minTimerMarginSec` is always a number; when no clock was seen it is 150 with `minTimerMarginReason: no-timer-update`. `eloAfter` may be null when `eloAfterReason` is `unreported`. A 0-turn record is only allowed for a disconnect, crash, or unknown end with no decisions.
+
+`npm run test:soak` starts the ops local server and the real ladder client at concurrency 3. It requires zero invalid choices, zero timer losses, every server line in the room that owns it, every forwarded choice acknowledged within 12 seconds, no phantom records, and a drain that finishes inside its bound and stops searching. `--ci` plays one clean game plus the fault and drain phases. The fault phase drops the first choice, sends our turn clock, and duplicates the room join. The watchdog must log `cause: "unconfirmed"`.
+
+`npm run live:preflight` runs before `run-live.sh` logs in. It requires a clean tree on a commit that is contained in `origin/main`, at least 500 species, no other public ladder process for the account, and a 2-game local canary with the same engine flags.
+
+Unit tests clear `VERCEL_AI_GATEWAY_KEY`, `AI_GATEWAY_API_KEY`, `XAI_API_KEY`, `OPENAI_API_KEY`, `CEREBRAS_API_KEY`, and `POSTHOG_API_KEY`, and replace `fetch` with a stub that throws. A test fails if any attempt was recorded, including when the caller catches the error.
+
 ## The live breaker cannot idle the only champion
 
 A loss streak no longer pulls the champion. Five losses is normal variance for a config winning about 20% of games, and pulling the only approved config made `ops live` exit every cycle with `every approved config is pulled`. The champion stays schedulable. A streak that is unlikely at that config's baseline win rate flags a regression, and if a distinct previous champion exists the live worker plays that one. A challenger is pulled only when its own streak crosses that same baseline threshold (or its ladder rating drops), then returns after a 30 minute cooldown. Local games and ladder games keep separate counters in `circuits.json`, so a local loss cannot add to the ladder streak. `npm run ops -- sentinel` raises P1 when live reports that skip or when every approved config in a scope is pulled. The check does not read `/proc`.
@@ -44,6 +56,10 @@ Showdown's opening clock is 150 seconds. A game that ends before any `|inactive|
 ## Live losses reach the factory
 
 A ladder loss used to write a hypothesis and then stop. Per-battle logs have no `>start` input log, so position mining returned nothing and no factory job was enqueued. The same generic fallback text for every loss never became a self-play variant. Each reviewed loss now queues a challenger for that mechanism or eval term, or a mined position when the log can be reconstructed, or a line in `state/ops/dispositions.jsonl` saying why it was skipped. The factory claims open hypotheses, including `state/meta/hypotheses.json` rows, and plays them against max-damage. `npm run ops -- status` prints the cycle counts. The sentinel check `improvement-stall` is a P1 when losses were reviewed and nothing was queued for 15 minutes.
+
+## Exact 1-ply uses Tera, skips immune locks, and fills a hidden foe
+
+Archinder's public gen9randombattle replays (62 games on 2026-10-05) were 21-41. The account never Terastallized. It also clicked immunities, including a Choice lock, and set up into KOs the revealed board did not show. The champion constant `EXACT_1PLY` is unchanged. Those three fixes live on `EXACT_1PLY_QW` (`configs/exact-1ply-qw.yaml`, search id `exact-1ply-qw`): search `move N terastallize`, demote an immune or Choice-locked attack and a status move that dies before it acts, and give an incomplete foe one randbats set. Shared helpers take that path only when the caller asks for it. An info-honest 200-game screen against `EXACT_1PLY` (hidden ladder view, seed 1, sides swapped) was 115-85, Wilson 95% CI [50.6%, 64.1%], with 0 invalid moves. The taxonomy is in `docs/ladder-loss-taxonomy.md`.
 
 ## Live opponent beliefs
 
@@ -129,7 +145,6 @@ Each live turn now records what the search assumed and, once the protocol catche
 The per-battle JSONL `turn` row gains `prediction` (`jev.turn-forecast.v1`): the foe's modal reply, both actions as move ids or `switch:<species>`, HP fractions before and after, damage dealt and taken, whether each active was expected to faint, and who was expected to move first. Damage and KOs are the mean of that reply across the search's sample count, capped at eight draws (eight for the champion, one draw for max-damage). That rollout happens after `/choose`.
 
 When the next request or the battle result arrives, a `prediction_error` row (`jev.prediction-error.v1`) records the actual action, damage, KOs, and speed order, plus match flags and absolute damage error. The finished game's `jev.ladder-game.v1` row gains `calibration` when at least one turn was compared: foe-action accuracy, damage MAE both ways, KO misses, and speed-order misses. The dashboard shows those totals as a Sim calibration panel. `npm run calibration -- --log-dir logs/ladder` prints the same report from the JSONL, and fills a missing error row from `prediction` plus the replay log when the two still line up.
-
 ## Rating and GXE stay null when the server omits them
 
 The ladder rating parser now reads GXE from the HTML popup `(GXE: …)` and from a `|rating|elo|gxe` line. If that number is not there, `gxe` is null. A missing rating stays null. The client does not fill in 1000 or 50. Each parsed update is a `rating` event in the per-battle JSONL, and the game `result` copies Elo before/after, GXE, and `gxeSource`. `ops live` writes the same nulls on its live-game row and does not feed a stand-in Elo into the circuit breaker.

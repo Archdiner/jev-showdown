@@ -574,13 +574,15 @@ The scorecard names its files. It drops phantom games (`phantom: true`, or a 0-t
 
 ## Contributing
 
-This is a research project. Contributions welcome:
+See [CONTRIBUTING.md](CONTRIBUTING.md). One feature per pull request, rebase on `main`, and keep the required checks green: unit tests, typecheck, soak, the data guard, the schema check, and the network guard. Every bug fix names its root cause, adds a regression test that fails before the fix, and updates an invariant or check.
 
-- **Heuristics**: Improve evaluation function
-- **Search**: Better move ordering, RAVE, PUCT
-- **Beliefs**: Damage roll inference, Scarf detection
-- **Data**: Monthly set/stat refreshes
-- **Ladder**: Measured Elo reports
+## Development constraints
+
+`npm test` points `JEV_DATA_DIR` at a temp directory and fails the run if `data/` changes. The loader refuses fewer than 500 species unless `JEV_ALLOW_SMALL_DATA=1`, which is test-only. Benchmarks and self-play print `data species=N hash=H` and store `species` and `dataHash` on the results file.
+
+`npm run test:soak` plays the real ladder client against the ops local server. `npm run test:soak -- --ci` is the short CI form. `npm run live:preflight` is what `./run-live.sh` runs before login: clean commit on `origin/main`, species floor, account lock, and a 2-game canary.
+
+Unit tests do not call the network. Provider keys are cleared and `fetch` throws. A recorded attempt fails the test.
 
 ## Ladder game records
 

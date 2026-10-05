@@ -1,9 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Dex } from '@pkmn/sim';
-
-const DATA_DIR = path.join(process.cwd(), 'data');
-const METADATA_FILE = path.join(DATA_DIR, 'metadata.json');
+import { dataDir } from './paths.js';
 
 interface DataMetadata {
   lastChecked: string;
@@ -23,15 +21,19 @@ interface FreshnessResult {
 
 export class FreshnessChecker {
   private static readonly CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-  
+  private currentDir = '';
+
   /**
    * Check if data is fresh. Auto-refresh if stale or changed.
    * Returns whether refresh occurred and what changed.
+   * Writes go to `sources.dir` or `JEV_DATA_DIR`, never a hard-coded path.
    */
   async checkAndRefresh(sources: {
     setsUrl: string;
     statsUrl?: string;
+    dir?: string;
   }): Promise<FreshnessResult> {
+    this.currentDir = sources.dir ?? dataDir();
     const changes: string[] = [];
     const warnings: string[] = [];
     
@@ -113,7 +115,7 @@ export class FreshnessChecker {
     metadata: DataMetadata
   ): Promise<{ changed: boolean; changes: string[]; newMetadata: DataMetadata }> {
     const changes: string[] = [];
-    const localPath = path.join(DATA_DIR, 'gen9-sets.json');
+    const localPath = this.file('gen9-sets.json');
     
     // Fetch remote
     const response = await fetch(url);
@@ -173,7 +175,7 @@ export class FreshnessChecker {
     metadata: DataMetadata
   ): Promise<{ changed: boolean; changes: string[]; newMetadata: DataMetadata }> {
     const changes: string[] = [];
-    const localPath = path.join(DATA_DIR, 'gen9-stats.json');
+    const localPath = this.file('gen9-stats.json');
     
     // Fetch remote
     const response = await fetch(url);
@@ -208,7 +210,7 @@ export class FreshnessChecker {
   
   private async loadMetadata(): Promise<DataMetadata> {
     try {
-      const data = await fs.readFile(METADATA_FILE, 'utf-8');
+      const data = await fs.readFile(this.file('metadata.json'), 'utf-8');
       return JSON.parse(data);
     } catch {
       // Create default metadata
@@ -224,8 +226,8 @@ export class FreshnessChecker {
   }
   
   private async saveMetadata(metadata: DataMetadata): Promise<void> {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(METADATA_FILE, JSON.stringify(metadata, null, 2));
+    await fs.mkdir(this.currentDir || dataDir(), { recursive: true });
+    await fs.writeFile(this.file('metadata.json'), JSON.stringify(metadata, null, 2));
   }
   
   private async loadJSON(path: string): Promise<any> {
@@ -240,6 +242,10 @@ export class FreshnessChecker {
     return `${str.length}:${keys}`;
   }
   
+  private file(name: string): string {
+    return path.join(this.currentDir || dataDir(), name);
+  }
+
   private getSimVersion(): string {
     return (Dex as any).modVersion || 'unknown';
   }
