@@ -47,6 +47,8 @@ export class LiveMetrics {
     readonly filePath: string,
     private readonly context: {
       runId: string;
+      batchLabel?: string | null;
+      hostname?: string;
       engine: string;
       concurrency: number;
       configId?: string | null;
@@ -178,6 +180,8 @@ export class LiveMetrics {
       v: LIVE_METRICS_VERSION,
       ts: Date.now(),
       runId: this.context.runId,
+      batchLabel: this.context.batchLabel ?? null,
+      hostname: this.context.hostname ?? null,
       engine: this.context.engine,
       ...(configId ? { configId } : {}),
       ...(configHash ? { configHash } : {}),

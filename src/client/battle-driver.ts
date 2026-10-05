@@ -115,6 +115,9 @@ export interface BattleDriverOptions {
   gitSha?: string | null;
   configPath?: string | null;
   concurrency?: number;
+  runId?: string;
+  batchLabel?: string | null;
+  hostname?: string;
   localServer?: boolean;
   /** Delay between choice-delivery retries. Tests use a few milliseconds. */
   deliveryRetryMs?: number;
@@ -1111,6 +1114,9 @@ export class BattleDriver extends EventEmitter {
       configId: room.assignment?.configId ?? this.options.configId ?? null,
       configHash: room.assignment?.configHash ?? this.options.configHash ?? null,
       gitSha: this.options.gitSha ?? null,
+      runId: this.options.runId,
+      batchLabel: this.options.batchLabel,
+      hostname: this.options.hostname,
       configPath: room.assignment?.configPath ?? this.options.configPath ?? undefined,
       role: room.assignment?.role,
       share: room.assignment?.share,

@@ -207,7 +207,7 @@ Each run also appends `logs/ladder/metrics.jsonl` (one JSON object per line) nex
 
 ### Live metrics JSONL
 
-`v` is the schema version (`1`). Every line also has `ts` (unix ms), `runId`, and `engine`. A decision or game line stamps the `configId`, `configHash`, `role` (`champion` or `challenger`), and `share` of the config that played that battle. The `run` line lists every arm in `ab`. `gitSha` is the process commit.
+`v` is the schema version (`1`). Every line also has `ts` (unix ms), `runId` (the same id printed at startup), `batchLabel`, `hostname`, and `engine`. A decision or game line stamps the `configId`, `configHash`, `role` (`champion` or `challenger`), and `share` of the config that played that battle. The `run` line lists every arm in `ab`. `gitSha` is the process commit.
 
 Percentiles are nearest-rank: sort the samples and take index `ceil(p/100 * n) - 1`. An empty sample list is `null`.
 
@@ -621,6 +621,9 @@ Other fields:
 | `localReplayPath` | raw protocol log on disk |
 | `logPath` | per-battle JSONL |
 | `ts`, `startedAt` | epoch ms. `pid` is the process id. |
+| `runId` | Ladder run id printed at startup (`[ladder] pid=… run=…`). The same id is on every `metrics.jsonl` line for that process. `ops live` prints its own. Required on new rows. |
+| `batchLabel` | `LIVE_BATCH_LABEL`, or the file name (without `.log` / `.txt` / `.jsonl`) when stdout is redirected. Null when neither is set. |
+| `hostname` | `os.hostname()` of the machine that wrote the row. |
 | `calibration` | present when at least one turn was compared with the protocol. Foe-action accuracy, damage MAE, KO misses, and speed-order misses. See Sim calibration below. |
 
 Per-turn rows in the battle file (not copied into `games.jsonl`):

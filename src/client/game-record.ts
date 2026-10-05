@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { currentHostname, readBatchLabel } from './run-stamp.js';
 import { configIdOf } from '../config/hash.js';
 import { toID } from './ids.js';
 import { ourClockUpdate } from './inactive-clock.js';
@@ -39,6 +40,11 @@ export interface LadderGameRecord {
   /** Stable id for the ops analyst. `{battleId}-{ts}` when the caller omits it. */
   id: string;
   pid: number;
+  /** Ladder run id printed at startup (`[ladder] pid=… run=…`). */
+  runId: string;
+  /** `LIVE_BATCH_LABEL`, or the log file name when stdout is a `.log`. Null when neither is set. */
+  batchLabel: string | null;
+  hostname: string;
   ts: number;
   startedAt: number;
   battleId: string;
@@ -305,6 +311,9 @@ export interface LadderGameInput {
   logPath: string;
   ourSide?: 'p1' | 'p2' | null;
   pid?: number;
+  runId?: string;
+  batchLabel?: string | null;
+  hostname?: string;
   id?: string;
   source?: 'ladder' | 'ops';
   configPath?: string;
@@ -339,6 +348,9 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     source: input.source ?? 'ladder',
     id: input.id ?? `${input.battleId}-${ts}`,
     pid: input.pid ?? process.pid,
+    runId: input.runId?.trim() || `pid-${process.pid}`,
+    batchLabel: input.batchLabel !== undefined ? input.batchLabel : readBatchLabel(),
+    hostname: input.hostname?.trim() || currentHostname(),
     ts,
     startedAt: input.startedAt,
     battleId: input.battleId,
@@ -389,6 +401,60 @@ export function gamesJsonlPath(dir: string): string {
 export function appendGameRecord(dir: string, record: LadderGameRecord): void {
   fs.mkdirSync(dir, { recursive: true });
   fs.appendFileSync(gamesJsonlPath(dir), `${JSON.stringify(record)}\n`);
+}
+
+/** New `jev.ladder-game.v1` rows must name their run. Older rows with no schema are left alone. */
+export function assertNewGameRow(row: object): void {
+  const record = row as { schema?: unknown; runId?: unknown };
+  if (record.schema !== LADDER_GAME_SCHEMA) return;
+  if (typeof record.runId !== 'string' || record.runId.trim() === '') {
+    throw new Error('new ladder game rows require runId');
+  }
+}
+
+export interface RunGroup {
+  runId: string;
+  batchLabel: string | null;
+  hostname: string | null;
+  wins: number;
+  losses: number;
+  ties: number;
+  games: number;
+}
+
+/** One tally per run, in first-seen order. Rows with no runId share `unknown`. */
+export function groupByRunId(games: Array<{
+  runId?: string | null;
+  batchLabel?: string | null;
+  hostname?: string | null;
+  outcome: 'win' | 'loss' | 'tie';
+}>): RunGroup[] {
+  const order: string[] = [];
+  const groups = new Map<string, RunGroup>();
+  for (const game of games) {
+    const runId = game.runId?.trim() || 'unknown';
+    let group = groups.get(runId);
+    if (!group) {
+      group = {
+        runId,
+        batchLabel: game.batchLabel ?? null,
+        hostname: game.hostname ?? null,
+        wins: 0,
+        losses: 0,
+        ties: 0,
+        games: 0,
+      };
+      groups.set(runId, group);
+      order.push(runId);
+    }
+    if (!group.batchLabel && game.batchLabel) group.batchLabel = game.batchLabel;
+    if (!group.hostname && game.hostname) group.hostname = game.hostname;
+    group.games += 1;
+    if (game.outcome === 'win') group.wins += 1;
+    else if (game.outcome === 'loss') group.losses += 1;
+    else group.ties += 1;
+  }
+  return order.map(id => groups.get(id)!);
 }
 
 /** Shape of PR #5 `live-games.jsonl`, with nulls left null. */
