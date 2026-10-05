@@ -156,6 +156,33 @@ async function requestPlan(
   return { plan: parsePlan(result.text, ourSpecies), costUsd: result.costUsd, timeout: false };
 }
 
+async function withBudget<T extends { ok: boolean }>(pending: Promise<T>, budgetMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>(resolve => {
+    timer = setTimeout(() => {
+      resolve({
+        ok: false,
+        error: 'timeout',
+        data: '',
+        metrics: {
+          model: '',
+          latencyMs: budgetMs,
+          tokensInput: 0,
+          tokensOutput: 0,
+          costUsd: 0,
+          status: 'error',
+          attempts: 1,
+        },
+      } as unknown as T);
+    }, budgetMs);
+  });
+  try {
+    return await Promise.race([pending, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function complete(
   client: GatewayClient,
   model: string,
@@ -165,7 +192,7 @@ async function complete(
   cerebras: boolean,
 ): Promise<{ ok: boolean; text: string; costUsd: number; timeout: boolean }> {
   if (budgetMs < 400) return { ok: false, text: '', costUsd: 0, timeout: true };
-  const result = await client.chat({
+  const result = await withBudget(client.chat({
     model,
     messages: [
       { role: 'system', content: 'You are a singles random-battle planner. Reply with JSON only.' },
@@ -175,7 +202,7 @@ async function complete(
     reasoningEffort: effort,
     omitTemperature: true,
     ...(cerebras ? { providerOptions: CEREBRAS } : {}),
-  });
+  }), budgetMs);
   if (!result.ok) {
     const timeout = /timeout|aborted|latency_budget/i.test(result.error);
     return { ok: false, text: '', costUsd: result.metrics.costUsd, timeout };
