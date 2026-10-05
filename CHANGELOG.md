@@ -1,5 +1,9 @@
 # Changelog
 
+## Situation brief
+
+`renderContextBrief` writes the turn context a later strategist will read: both sides that are allowed to be named, our bench and the opponent's revealed bench, a damage matrix of our moves and their likely moves into the active and every switch-in, a public speed index, field conditions, set inference from revealed moves or the random-battle movepool, and the fitted high-Elo switch probability. Unrevealed opponent species are a count, not a list. The function does not call a model. A missing `VERCEL_AI_GATEWAY_KEY` does not change it.
+
 ## Exact 1-ply search promoted
 
 The old 3-ply search was not looking at the live battle. It built a fresh one. After a knockout the live request is a switch, and the copy still asked both players for a move. The switch was rejected. Every rejection was scored as a loss, so the search was grading crashes instead of HP. Cloning the live battle and scoring HP fraction plus faints fixes that.
