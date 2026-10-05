@@ -464,6 +464,37 @@ Yes, with modifications:
 
 See `ROADMAP.md` for details.
 
+## Ops dashboard
+
+`npm run dashboard` starts a local feed of finished games. It prints a URL on `127.0.0.1:8787` (override with `--port` and `--host`). The page lists each game and splits timer, disconnect, and crash results away from strategy results. Filters are end reason and opponent rating band. The same numbers are on `GET /api/status`, `/api/runs`, `/api/games`, `/api/metrics`, `/api/agents`, `/api/snapshot`, and `GET /api/events` (SSE).
+
+```bash
+npm run dashboard
+npm run dashboard -- --fixture src/dashboard/fixtures --port 8787
+```
+
+On a Mac with live logs, the defaults are `state/ops`, `logs/ladder`, and `~/jev-search/live-runs`. Copy `dashboard.config.example.json` to `dashboard.config.json` or set `DASHBOARD_HOST`, `DASHBOARD_PORT`, `DASHBOARD_CONFIG`, `OPS_DIR`, `LADDER_LOG_DIR`, `SEARCH_LOG_DIR`, `JEV_SEARCH_DIR`. `JEV_SEARCH_DIR` is joined with `live-runs` unless the path already ends there. Missing files stay empty and show up under gaps in `/api/status`.
+
+A per-game JSONL record is one object per finished game (`type` or `kind` of `game`, `result`, or `live-game`):
+
+```json
+{"type":"game","ts":1710000000000,"id":"battle-1","replayUrl":"https://replay.pokemonshowdown.com/gen9randombattle-1","outcome":"loss","opponent":"ace","opponentRating":1410,"ratingBefore":1200,"ratingAfter":1184,"endReason":"timer loss (ours)","durationMs":240000,"turns":30,"latency":{"p50":180,"p95":900,"max":1500},"minTimerSeconds":1,"engine":"search","configId":"champion","configHash":"abc","gitSha":"87b268f","concurrency":2}
+```
+
+Accepted aliases: `opponentName`, `opponentElo`, `eloBefore` / `ourRatingBefore`, `eloAfter` / `rating` / `elo`, `replay` or `replayId` (bare ids become a replay.pokemonshowdown.com link), `end_reason`, `duration` (milliseconds) or `durationSec`, `latencyP50` / `latencyP95` / `latencyMax`, `config_hash`, `git` / `commit`. `endReason` becomes `ko`, `opponent-forfeit`, `our-forfeit`, `timer-ours`, `timer-theirs`, `disconnect`, or `crash`. A bare `timer` on a win is `timer-theirs`; on a loss it is `timer-ours`.
+
+Opponent bands are `unknown`, `under-1200`, `1200-1399`, `1400-1599`, and `1600-plus`. Query `endReason` and `band` on `/api/games` and `/api/metrics` (`any` clears a filter). `endReason=strategy` is KO and forfeit. `endReason=timer-disconnect` is both timer sides plus disconnect. Strategy win rate drops timer, disconnect, and crash games. `[ladder]` lines have no end reason, so they stay in the strategy rate and a loss there is also counted as unclassified.
+
+Without that JSONL, the feed falls back to ladder lines:
+
+```
+[ladder] 2/30 win vs X turns=21 invalid=0 crashes=0 fallbacks=0 elo=1073
+```
+
+`2/30` is finished games over the requested count, not concurrency. Ops heartbeats are `state/ops/heartbeats.jsonl` (`facility`, `pid`, `ts`, `status`, `detail`). Ops live games are `state/ops/live-games.jsonl` (`kind` `live-game`, `id`, `winner`, `rating`, `gxe`, `configId`). A beat older than 60s is stale.
+
+Later slices, not read yet: runner latency (`type` `turn-latency`), the run queue (`state/run-queue.jsonl`), and cloud agents (`state/cloud-agents.json` with `version`, `updatedAt`, and `agents[]` of `id`, `name`, `status`, `branch`, `pr`, `prUrl`).
+
 ## Contributing
 
 This is a research project. Contributions welcome:
