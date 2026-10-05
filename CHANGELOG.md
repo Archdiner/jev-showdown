@@ -6,6 +6,16 @@ Local self-play, the factory, and the gatekeeper used to search the real battle,
 
 `information: full` on a game, `--information=full` on `npx tsx src/bench/cli.ts`, or `JEV_INFORMATION=full` keeps the old omniscient sim for comparison. The default is hidden.
 
+Same seeds, 20 pairs, sides swapped, 40 games. `exact` is `EXACT_1PLY` (8 samples). Invalid choices 0, crashes 0, view misses 0.
+
+| Matchup | Full information | Hidden information |
+| --- | --- | --- |
+| exact vs max-damage | 80.0% (32W-8L-0T), 95% CI 65.2–89.5% | 60.0% (24W-16L-0T), 95% CI 44.6–73.7% |
+| exact vs random | 100% (40W-0L-0T), 95% CI 91.2–100% | 100% (40W-0L-0T), 95% CI 91.2–100% |
+| max-damage vs random | 100% (40W-0L-0T) | 100% (40W-0L-0T) |
+
+Exact's voluntary switch rate vs max-damage fell from 35.5% (425/1196) with full information to 14.9% (137/921) with hidden information. The published gate (300 games, full information) was 78% vs max-damage and 98% vs random. Hidden information is where that lead shrinks.
+
 ## The analyst reads ladder games and the foe's real seat
 
 `npm run ops -- analyst` tails `state/ops/live-games.jsonl` and the JSONL under `logs/ladder` and `live-runs` (per-battle files, `games.jsonl`, and copies dropped in a live-runs directory). A ladder loss becomes the same hypothesis and factory job as an ops-live loss. The protocol text comes from the row's `log` or from `localReplayPath`. `metrics.jsonl` is not a game log.
