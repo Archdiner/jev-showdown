@@ -1,4 +1,11 @@
 import { Battle, BattleStreams } from '@pkmn/sim';
+import {
+  formatChoice,
+  isTeamPreview,
+  isWaitRequest,
+  strictLegalActions,
+  teamPreviewChoice,
+} from '../client/choice.js';
 import type { SideId } from '../engine/exact/battle-utils.js';
 import type { AttributedDecision, LiveBattleBridge } from './interfaces.js';
 import type { BuiltBot } from './bot.js';
@@ -46,7 +53,40 @@ export const inputLogBridge: LiveBattleBridge = {
   },
 };
 
-/** Ladder / local-server session. Choices come only from buildBot. */
+export interface DeliveredChoice {
+  choice: string | null;
+  fallback: boolean;
+}
+
+/**
+ * A legal choice taken from the raw request. Wait requests send nothing.
+ * Team preview uses the natural team order. Otherwise the first legal move,
+ * then the first legal switch, then the server's own default.
+ */
+export function fallbackChoice(request: unknown): string | null {
+  if (isWaitRequest(request)) return null;
+  const preview = teamPreviewChoice(request);
+  if (preview) return preview;
+  const rqid = typeof (request as { rqid?: unknown })?.rqid === 'number'
+    ? (request as { rqid: number }).rqid
+    : undefined;
+  const legal = strictLegalActions(request);
+  const move = legal.find(action => action.type === 'move') ?? legal[0];
+  if (!move) return 'default';
+  return formatChoice(move, rqid);
+}
+
+function requestAllows(choice: string, request: unknown): boolean {
+  if (isWaitRequest(request)) return false;
+  const bare = choice.split('|')[0];
+  if (isTeamPreview(request)) {
+    const preview = teamPreviewChoice(request);
+    return Boolean(preview) && bare === preview!.split('|')[0];
+  }
+  return strictLegalActions(request).some(action => formatChoice(action) === bare);
+}
+
+/** Ladder / local-server session. A missing sim still yields a legal choice. */
 export class LadderSession {
   private attached = new Map<string, { battle: Battle; side: SideId }>();
 
@@ -60,20 +100,23 @@ export class LadderSession {
     this.attached.set(room, { battle, side });
   }
 
-  async onRequest(room: string, request: unknown, log: string, side: SideId): Promise<string> {
-    const known = this.attached.get(room);
-    const battle = known?.battle ?? this.bridge.reconstruct({ room, log, request, side });
-    if (!battle) {
-      throw new Error(
-        `No sim battle for ${room}. cursor/live-client must implement LiveBattleBridge or call attach().`
-      );
+  async onRequest(room: string, request: unknown, log: string, side: SideId): Promise<DeliveredChoice> {
+    if (isWaitRequest(request)) return { choice: null, fallback: false };
+    const fallback = fallbackChoice(request);
+    try {
+      const known = this.attached.get(room);
+      const battle = known?.battle ?? this.bridge.reconstruct({ room, log, request, side });
+      if (!battle) return { choice: fallback, fallback: true };
+      const decision = await this.bot.decide({
+        battle,
+        side: known?.side ?? side,
+        gameId: room,
+        variantId: this.variantId,
+      });
+      if (!requestAllows(decision.choice, request)) return { choice: fallback, fallback: true };
+      return { choice: decision.choice, fallback: false };
+    } catch {
+      return { choice: fallback, fallback: true };
     }
-    const decision = await this.bot.decide({
-      battle,
-      side: known?.side ?? side,
-      gameId: room,
-      variantId: this.variantId,
-    });
-    return decision.choice;
   }
 }

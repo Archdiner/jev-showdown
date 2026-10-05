@@ -72,6 +72,38 @@ describe('ladder concurrency', () => {
     }
   });
 
+  it('does not count a rejected search as a battle', () => {
+    jest.useFakeTimers({ now: 10_000 });
+    try {
+      let searches = 0;
+      const client = {
+        isReady: () => true,
+        isBlocked: () => false,
+        search: () => {
+          searches += 1;
+          return false;
+        },
+        cancelSearch: () => true,
+      } as unknown as ShowdownClient;
+      const queue = new LadderQueue(client, 'gen9randombattle', 1, () => {}, true);
+      queue.fill();
+      expect(searches).toBe(1);
+      expect(queue.activeBattles).toBe(0);
+      jest.advanceTimersByTime(500);
+      expect(searches).toBeGreaterThan(1);
+      expect(queue.activeBattles).toBe(0);
+      queue.notePopup('Due to high load, you are limited to 5 games at the same time.');
+      expect(queue.activeBattles).toBe(0);
+      queue.noteBattle('battle-gen9randombattle-1');
+      expect(queue.activeBattles).toBe(1);
+      queue.noteEnd('battle-gen9randombattle-1');
+      expect(queue.activeBattles).toBe(0);
+      queue.stop();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('cancels the search on drain and leaves the active game running', () => {
     jest.useFakeTimers({ now: 10_000 });
     try {
