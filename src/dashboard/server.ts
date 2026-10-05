@@ -20,6 +20,8 @@ function slices(snapshot: Snapshot, query: URLSearchParams) {
     '/api/games': { ...base, games: gamesPayload(snapshot, query) },
     '/api/metrics': { ...base, metrics: { ...snapshot.metrics, variants: snapshot.metrics.variants, configs: configPanels(filterGames(snapshot.games.recent, { endReason: query.get('endReason'), band: query.get('band') })), report: reportGames(filterGames(snapshot.games.recent, { endReason: query.get('endReason'), band: query.get('band') })) } },
     '/api/agents': { ...base, agents: snapshot.agents },
+    '/api/incidents': { ...base, incidents: snapshot.reliability.incidents },
+    '/api/scorecard': { ...base, scorecard: snapshot.reliability.scorecard },
   };
 }
 

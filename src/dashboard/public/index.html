@@ -17,6 +17,11 @@
     .card.strategy { border-color: var(--strategy); }
     .card.timer { border-color: var(--timer); }
     .card.crash { border-color: var(--crash); }
+    h2 { margin: 12px 0 4px; font-size: 16px; }
+    .sev-P0 { color: var(--crash); }
+    .sev-P1 { color: var(--timer); }
+    .sev-P2 { color: var(--link); }
+    .sev-P3 { color: var(--muted); }
     form { display: flex; gap: 16px; flex-wrap: wrap; align-items: end; }
     label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); }
     select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
@@ -38,6 +43,20 @@
     <p id="meta">Loading…</p>
   </header>
   <pre id="ops">Loading ops status…</pre>
+  <section>
+    <h2>Incidents</h2>
+    <p id="incidents-meta">Loading incidents…</p>
+    <div class="wrap">
+      <table>
+        <thead>
+          <tr><th>Severity</th><th>Status</th><th>Count</th><th>Incident</th><th>Detail</th></tr>
+        </thead>
+        <tbody id="incidents"></tbody>
+      </table>
+    </div>
+    <h2>Scorecard</h2>
+    <pre id="scorecard">Loading scorecard…</pre>
+  </section>
   <section class="rates" id="rates"></section>
   <section>
     <h2>Sim calibration</h2>

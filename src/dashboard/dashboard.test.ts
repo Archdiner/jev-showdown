@@ -286,6 +286,8 @@ describe('game feed parsers', () => {
       expect(page.body).toContain('End reason');
       expect(page.body).toContain('Sim calibration');
       expect(page.body).toContain('Per config');
+      expect(page.body).toContain('Incidents');
+      expect(page.body).toContain('Scorecard');
       const games = await get(`${server.url}/api/games?endReason=timer-ours&band=1400-1599`);
       expect(games.status).toBe(200);
       const payload = JSON.parse(games.body);
@@ -300,6 +302,10 @@ describe('game feed parsers', () => {
       expect((await get(`${server.url}/api/runs`)).status).toBe(200);
       expect((await get(`${server.url}/api/agents`)).status).toBe(200);
       expect((await get(`${server.url}/api/snapshot`)).status).toBe(200);
+      expect((await get(`${server.url}/api/incidents`)).status).toBe(200);
+      const scorecard = await get(`${server.url}/api/scorecard`);
+      expect(scorecard.status).toBe(200);
+      expect(JSON.parse(scorecard.body).scorecard).toContain('jev scorecard');
     } finally {
       await server.close();
     }
