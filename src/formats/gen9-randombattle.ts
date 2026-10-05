@@ -314,6 +314,9 @@ export class Gen9RandomBattle implements Format {
           const hasNoPP = move.pp !== undefined && move.pp <= 0;
           if (!hasDisabled && !hasNoPP) {
             actions.push({ type: 'move', moveIndex: i + 1 });
+            if (active.canTerastallize) {
+              actions.push({ type: 'move', moveIndex: i + 1, terastallize: true });
+            }
           }
         }
       }

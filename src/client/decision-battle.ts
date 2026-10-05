@@ -56,7 +56,13 @@ const STATS = ['atk', 'def', 'spa', 'spd', 'spe'] as const;
 
 export function actionFromChoice(choice: string): Action | null {
   const move = /^move (\d+)/.exec(choice);
-  if (move) return { type: 'move', moveIndex: Number(move[1]) };
+  if (move) {
+    return {
+      type: 'move',
+      moveIndex: Number(move[1]),
+      terastallize: choice.includes('terastallize'),
+    };
+  }
   const swapped = /^switch (\d+)/.exec(choice);
   if (swapped) return { type: 'switch', switchIndex: Number(swapped[1]) };
   return null;
@@ -79,13 +85,20 @@ function named(kind: 'abilities' | 'items' | 'moves' | 'species', raw: string | 
   return entry?.exists ? entry.name : '';
 }
 
-function toSet(species: string, moves: string[], level: number, ability?: string, item?: string): PokemonSet | null {
+function toSet(
+  species: string,
+  moves: string[],
+  level: number,
+  ability?: string,
+  item?: string,
+  teraType?: string,
+): PokemonSet | null {
   const speciesName = named('species', species);
   if (!speciesName) return null;
   const moveNames = moves.map(move => named('moves', move)).filter(Boolean).slice(0, 4);
   if (moveNames.length === 0) moveNames.push('Tackle');
   const dexSpecies = Dex.species.get(speciesName);
-  return {
+  const set: PokemonSet = {
     species: speciesName,
     moves: moveNames,
     ability: named('abilities', ability) || dexSpecies.abilities?.['0'] || 'Pressure',
@@ -94,6 +107,9 @@ function toSet(species: string, moves: string[], level: number, ability?: string
     evs: { hp: 85, atk: 85, def: 85, spa: 85, spd: 85, spe: 85 },
     level: level || 80,
   } as PokemonSet;
+  const teraName = teraType ? Dex.types.get(teraType).name : '';
+  if (teraName && Dex.types.get(teraName).exists) set.teraType = teraName;
+  return set;
 }
 
 function isForceSwitch(request: any): boolean {
@@ -141,12 +157,14 @@ function ourSets(request: any): PokemonSet[] | null {
       ? activeMoves.map((move: any) => move.id || move.move)
       : [];
     const moves = fromActive.length ? fromActive : (slot.moves || []);
+    const teraType = slot.teraType || (i === 0 ? request?.active?.[0]?.canTerastallize : undefined);
     const set = toSet(
       speciesOf(slot.details, slot.ident),
       moves,
       levelOf(slot.details, slot.level || 80),
       slot.ability || slot.baseAbility,
       slot.item,
+      typeof teraType === 'string' ? teraType : undefined,
     );
     // Dropping a slot would renumber `switch N`. Fail the build instead.
     if (!set) return null;
@@ -210,7 +228,12 @@ export function buildDecisionBattle(position: LivePosition): Battle | null {
       if (hp) applyFraction(mon, Number(hp[1]), Number(hp[2]), fainted);
       else if (fainted) applyFraction(mon, 0, 1, true);
       applyStatus(mon, condition, undefined);
+      const already = slots[i]?.terastallized;
+      if (typeof already === 'string' && already) mon.terastallized = already;
     });
+    if (slots.some(slot => typeof slot?.terastallized === 'string' && slot.terastallized)) {
+      for (const mon of battle.p1.pokemon) mon.canTerastallize = null;
+    }
 
     battle.p2.pokemon.forEach((mon, i) => {
       const info = foe.kept[i];
@@ -242,6 +265,15 @@ export function buildDecisionBattle(position: LivePosition): Battle | null {
       } catch {
         // Weather is a modifier. A failed set still leaves a legal request.
       }
+    }
+
+    // The fresh sim offers Tera whenever the set has a type. The live request
+    // is the rule: once this side has terastallized, canTerastallize is gone.
+    const liveCanTera = request.active?.[0]?.canTerastallize;
+    if (typeof liveCanTera === 'string' && liveCanTera) {
+      if (!active.terastallized) active.canTerastallize = liveCanTera;
+    } else {
+      for (const mon of battle.p1.pokemon) mon.canTerastallize = null;
     }
 
     const force = isForceSwitch(request) || !!active.fainted;

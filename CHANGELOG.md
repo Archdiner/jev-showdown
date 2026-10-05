@@ -1,5 +1,9 @@
 # Changelog
 
+## Exact 1-ply uses Tera, skips immune locks, and fills a hidden foe
+
+Archinder's public gen9randombattle replays (62 games on 2026-10-05) were 21-41. The account never Terastallized. It also clicked immunities, including a Choice lock, and set up into KOs the revealed board did not show. `EXACT_1PLY` now searches `move N terastallize`, demotes an immune or Choice-locked attack and a status move that dies before it acts, and gives an incomplete foe one randbats set. The decision battle copies Tera only while the live request still allows it. The previous policy is `EXACT_1PLY_PREVIOUS`. An info-honest 200-game screen (hidden ladder view, seed 1, sides swapped) was 115-85, Wilson 95% CI [50.6%, 64.1%], with 0 invalid moves. The taxonomy is in `docs/ladder-loss-taxonomy.md`.
+
 ## Live A/B routing on one ladder login
 
 `--ab <config>:<share>` (repeatable) splits new battles across the champion and one or more challenger configs. The config is a yaml path, a config id under `configs/`, or an engine profile. A hash of the battle id picks the arm. Concurrency, the turn timer, and the choice watchdog stay shared. The process takes one login and takes the account lock once for every arm. Each finished game, metrics line, and the dashboard stamp `configId`, `role`, and `share`. The dashboard has a per-config W/L, Elo change, invalid-move panel, and a scorecard per config. A challenger is pulled to champion-only after an invalid move, a timer loss, a crash, or 4 losses in a row. Each pull is an incident in `incidents.jsonl`. `--check` prints a preflight canary for every arm. A ghost room (`phantom`) does not pull a challenger.
@@ -64,7 +68,6 @@ Each live turn now records what the search assumed and, once the protocol catche
 The per-battle JSONL `turn` row gains `prediction` (`jev.turn-forecast.v1`): the foe's modal reply, both actions as move ids or `switch:<species>`, HP fractions before and after, damage dealt and taken, whether each active was expected to faint, and who was expected to move first. Damage and KOs are the mean of that reply across the search's sample count, capped at eight draws (eight for the champion, one draw for max-damage). That rollout happens after `/choose`.
 
 When the next request or the battle result arrives, a `prediction_error` row (`jev.prediction-error.v1`) records the actual action, damage, KOs, and speed order, plus match flags and absolute damage error. The finished game's `jev.ladder-game.v1` row gains `calibration` when at least one turn was compared: foe-action accuracy, damage MAE both ways, KO misses, and speed-order misses. The dashboard shows those totals as a Sim calibration panel. `npm run calibration -- --log-dir logs/ladder` prints the same report from the JSONL, and fills a missing error row from `prediction` plus the replay log when the two still line up.
-
 ## Rating and GXE stay null when the server omits them
 
 The ladder rating parser now reads GXE from the HTML popup `(GXE: …)` and from a `|rating|elo|gxe` line. If that number is not there, `gxe` is null. A missing rating stays null. The client does not fill in 1000 or 50. Each parsed update is a `rating` event in the per-battle JSONL, and the game `result` copies Elo before/after, GXE, and `gxeSource`. `ops live` writes the same nulls on its live-game row and does not feed a stand-in Elo into the circuit breaker.
