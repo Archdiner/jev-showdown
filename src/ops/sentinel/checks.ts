@@ -96,6 +96,13 @@ export const CHECKS: InvariantCheck[] = [
     detect: workersDuplicate,
   },
   {
+    id: 'ops-worker-hung',
+    severity: 'P0',
+    title: 'An ops worker process is alive but its heartbeat is stale',
+    suggestedFix: 'The process is spinning without beating (INC-043 gatekeeper re-record hang). Kill the stuck pid and restart supervise. Process listing uses ps on macOS when /proc is missing.',
+    detect: workersHung,
+  },
+  {
     id: 'improvement-stall',
     severity: 'P1',
     title: 'Losses were reviewed and nothing was queued for 15 minutes',
@@ -714,6 +721,30 @@ function workersDuplicate(ctx: SentinelContext): CheckHit[] {
       key: name,
       detail: `${name} has ${pids.size} live pids`,
       evidence: evidence.slice(0, 8),
+    });
+  }
+  return hits;
+}
+
+/**
+ * Alive pid + stale heartbeat. `ops-worker-missing` skips when any matching
+ * process exists, so a spinning gatekeeper (INC-043) stayed invisible. Uses the
+ * same `ctx.processes` list as other checks (`ps` on macOS, `/proc` on Linux).
+ */
+function workersHung(ctx: SentinelContext): CheckHit[] {
+  if (!ctx.processesScanned) return [];
+  const hits: CheckHit[] = [];
+  for (const name of OPS_FACILITIES) {
+    const procs = ctx.processes.filter(proc => facilityOf(proc) === name);
+    if (procs.length === 0) continue;
+    if (freshPids(ctx, name).size > 0) continue;
+    hits.push({
+      key: name,
+      detail: `${name} pid ${procs.map(proc => proc.pid).join(',')} is alive but has no heartbeat newer than ${Math.round(ctx.staleMs / 1000)}s`,
+      evidence: procs.slice(0, 4).map(proc => ({
+        file: 'process',
+        detail: `pid ${proc.pid} ${proc.cmd}`,
+      })),
     });
   }
   return hits;

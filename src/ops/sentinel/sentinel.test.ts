@@ -304,6 +304,38 @@ describe('runner exit without a drain', () => {
     expect(completed.hits.map(hit => hit.id)).not.toContain('runner-exit-undrained');
   });
 
+
+  test('an alive gatekeeper with a stale heartbeat is ops-worker-hung (macOS ps path)', () => {
+    const { layout } = emptyRoot();
+    const now = Date.now();
+    fs.mkdirSync(layout.opsDir, { recursive: true });
+    // Last beat is older than staleMs (60s). Process list still shows the worker.
+    fs.writeFileSync(path.join(layout.opsDir, 'heartbeats.jsonl'), `${JSON.stringify({
+      facility: 'gatekeeper',
+      pid: 4242,
+      ts: now - 120_000,
+      status: 'ok',
+      detail: 'recorded screen 115-85-0 accepted for live A/B',
+    })}\n${JSON.stringify({
+      facility: 'factory',
+      pid: 4243,
+      ts: now - 1_000,
+      status: 'ok',
+      detail: 'idle',
+    })}\n`);
+    const processes = [
+      { pid: 4242, cmd: 'node /Users/me/jev/src/ops/cli.ts gatekeeper' },
+      { pid: 4243, cmd: 'node /Users/me/jev/src/ops/cli.ts factory' },
+    ];
+    const result = scanOnce(layout, { now, processes, git: quietGit });
+    expect(result.hits.map(hit => hit.id)).toContain('ops-worker-hung');
+    const hung = result.hits.find(hit => hit.id === 'ops-worker-hung');
+    expect(hung?.detail).toContain('gatekeeper');
+    expect(hung?.detail).toContain('4242');
+    // Missing would have fired if we ignored the alive pid; hung is the right signal.
+    expect(result.hits.filter(hit => hit.id === 'ops-worker-missing' && hit.detail?.includes('gatekeeper'))).toHaveLength(0);
+  });
+
   test('a missing /proc lists ladder processes from ps and a failed listing does not scan', () => {
     const table = [
       '  10 /usr/bin/sshd',

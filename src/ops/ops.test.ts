@@ -18,7 +18,7 @@ import { countsFromLiveGames, loadVariantPool, thompsonDraw } from './variants.j
 import { runAnalyst } from './analyst.js';
 import { openDb } from './db.js';
 import { runFactory } from './factory.js';
-import { bootstrapChampion, diagnosticsForConfig, exactDiagnosticsConfig, ingestRecordedEvidence, judge, reviewHandoffs, reviewProposals, sprt } from './gatekeeper.js';
+import { bootstrapChampion, diagnosticsForConfig, exactDiagnosticsConfig, ingestRecordedEvidence, judge, reviewHandoffs, reviewProposals, runGatekeeper, sprt } from './gatekeeper.js';
 import type { GameResult } from '../bench/game.js';
 import { loadConfig } from '../config/load.js';
 import { liveProposalAllowed, tallySide } from './sprt.js';
@@ -632,7 +632,60 @@ describe('recorded screens', () => {
     expect(verdict[0].reason).toContain('evaluator');
     expect(labelsOf(paths)).toHaveLength(0);
   });
+  test('already-recorded screens skip diagnostics and use a short reason', () => {
+    const paths = tempPaths();
+    const dir = path.join(paths.root, 'recorded');
+    writeScreen(dir);
+    let calls = 0;
+    const diagnostics = () => {
+      calls += 1;
+      return { passed: 22, failed: 0, total: 22 };
+    };
+    expect(ingestRecordedEvidence(paths, { dir, diagnostics })[0].labeled).toBe(true);
+    expect(calls).toBe(1);
+    const second = ingestRecordedEvidence(paths, { dir, diagnostics });
+    expect(second[0].labeled).toBe(true);
+    expect(second[0].reason).toBe('already-recorded configs/exact-1ply-qw.yaml');
+    expect(calls).toBe(1);
+  });
+
+  test('runGatekeeper ingests recorded screens once across many ticks', async () => {
+    const paths = tempPaths();
+    const dir = path.join(paths.root, 'recorded');
+    writeScreen(dir);
+    fs.writeFileSync(path.join(dir, 'fitted-1ply.json'), JSON.stringify({
+      ...screen,
+      policyId: 'fitted-1ply',
+      searchId: 'greedy-1ply',
+      evaluatorId: 'fitted-team',
+      configPath: 'configs/fitted-1ply.yaml',
+      wins: 119,
+      losses: 81,
+      wilson95: [0.526, 0.661],
+    }));
+    let calls = 0;
+    const started = Date.now();
+    await runGatekeeper(paths, {
+      diagnostics: () => {
+        calls += 1;
+        return { passed: 22, failed: 0, total: 22 };
+      },
+      intervalMs: 0,
+      maxTicks: 25,
+    });
+    const elapsed = Date.now() - started;
+    expect(calls).toBe(2); // one diagnose per screen, not per tick
+    expect(elapsed).toBeLessThan(5_000);
+    const beats = fs.readFileSync(paths.heartbeats, 'utf8').trim().split('\n').filter(Boolean);
+    const details = beats.map(line => JSON.parse(line).detail as string);
+    const rerecord = details.filter(detail => /recorded screen 115-85/.test(detail));
+    expect(rerecord.length).toBeLessThanOrEqual(1);
+    expect(details.filter(detail => detail === 'idle').length).toBeGreaterThan(0);
+  });
+
+
 });
+
 
 describe('factory proposals', () => {
   test('four games cannot propose a live label, and a tie is half', () => {

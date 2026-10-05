@@ -559,6 +559,7 @@ P0 is losing games or corrupting data now. P1 is the loop or visibility broken. 
 | runner-exit-undrained | P1 | The runner logged `Timed out after N/M games` without a drain, or a batch `endReason` is `stalled` or `timeout`. A requested drain is not this |
 | ops-worker-missing | P1 | factory, gatekeeper, live, or analyst has no fresh heartbeat while another worker is up |
 | ops-worker-duplicate | P1 | Two fresh pids for one of those workers |
+| ops-worker-hung | P0 | An ops worker process is alive (ps on macOS, /proc on Linux) but its heartbeat is stale |
 | improvement-stall | P1 | Losses reviewed and nothing queued for 15 minutes |
 | degenerate-loop | P1 | Three passes queue nothing, every mine fails, every loss is one variant, or every challenger result is the same |
 | analyst-log-dir | P1 | Analyst process has no `LADDER_LOG_DIR` and its default dirs have no game JSONL while the ladder log dir does |

@@ -305,18 +305,24 @@ export function recordedEvidenceDir(cwd = process.cwd()): string {
   return path.join(cwd, 'state', 'ops', 'recorded');
 }
 
+/** Recorded screens live under the ops root (`OPS_DIR/recorded`), not a fixed cwd path. */
+export function recordedDirFor(paths: OpsPaths): string {
+  return path.join(paths.root, 'recorded');
+}
+
 /**
  * Reads `state/ops/recorded/*.json` and writes a Result, a finished Experiment
  * (proposal plus decisionId, so reviewProposals does not replay it), a Decision,
  * and a live-approved label. SPRT is stored as computed. A recorded screen may
  * be labeled for A/B while SPRT is still `continue`. It never writes champion.
- * A decision that already exists is not diagnosed again.
+ * A decision that already exists is not diagnosed again. `runGatekeeper` calls
+ * this once per process so heartbeats do not re-record the same screens.
  */
 export function ingestRecordedEvidence(
   paths: OpsPaths,
   opts: { dir?: string; diagnostics?: (loaded: LoadedConfig) => DiagnosticReport } = {},
 ): Verdict[] {
-  const dir = opts.dir ?? recordedEvidenceDir();
+  const dir = opts.dir ?? recordedDirFor(paths);
   if (!fs.existsSync(dir)) return [];
   const diagnostics = opts.diagnostics ?? diagnosticsForConfig;
   const verdicts: Verdict[] = [];
@@ -340,10 +346,13 @@ function recordScreen(
     const existing = db.getNode(decisionId);
     if (existing?.type === 'Decision') {
       const labeled = existing.status === 'done' && existing.decision === 'live-approved';
+      // Do not re-diagnose or re-emit the full screen score line. Heartbeats that
+      // repeated "recorded screen 115-85…" every 2s looked like a re-record loop
+      // (INC-043) and kept the hot path on the graph DB needlessly.
       if (labeled && !hasLiveApproval(db, screen.configPath)) writeLiveApproved(db, screen.configPath);
       return {
         labeled,
-        reason: existing.description || '',
+        reason: `already-recorded ${screen.configPath}`,
         decisionId,
         sprt: storedSprt(existing.metadata),
       };
@@ -565,18 +574,36 @@ function readRecordedScreen(file: string): RecordedScreen | null {
 
 export async function runGatekeeper(
   paths: OpsPaths,
-  opts: { once?: boolean; pairs?: number; bootstrap?: boolean; diagnostics?: () => DiagnosticReport } = {}
+  opts: {
+    once?: boolean;
+    pairs?: number;
+    bootstrap?: boolean;
+    diagnostics?: () => DiagnosticReport;
+    /** Test seam: tick sleep. Production keeps 2000ms. */
+    intervalMs?: number;
+    /** Test seam: stop after N ticks when not `--once`. */
+    maxTicks?: number;
+  } = {}
 ): Promise<void> {
   beat(paths, 'gatekeeper', 'ok', 'up');
   const recordedDiagnostics = opts.diagnostics
     ? () => opts.diagnostics!()
     : undefined;
+  // Recorded screens are owner-accepted evidence. Ingest once per process.
+  // Re-reading them every 2s re-opened the graph, re-scanned labels, and when a
+  // Decision was missing re-ran Diagnostics — the INC-043 hang pattern.
+  let recordedIngested = false;
+  let ticks = 0;
   do {
+    ticks += 1;
     if (opts.bootstrap) {
       const verdict = bootstrapChampion(paths, 'configs/champion.yaml', opts.diagnostics);
       beat(paths, 'gatekeeper', 'ok', verdict.reason);
     }
-    const recorded = ingestRecordedEvidence(paths, recordedDiagnostics ? { diagnostics: recordedDiagnostics } : {});
+    const recorded = recordedIngested
+      ? []
+      : ingestRecordedEvidence(paths, recordedDiagnostics ? { diagnostics: recordedDiagnostics } : {});
+    recordedIngested = true;
     const handed = reviewHandoffs(paths, { diagnostics: opts.diagnostics });
     const verdicts = [
       ...recorded,
@@ -585,8 +612,9 @@ export async function runGatekeeper(
     ];
     beat(paths, 'gatekeeper', 'ok', verdicts.length ? verdicts.map(item => item.reason).join('; ') : 'idle');
     if (opts.once) break;
-    await new Promise(resolve => setTimeout(resolve, 2000));
-  } while (!opts.once);
+    if (opts.maxTicks != null && ticks >= opts.maxTicks) break;
+    await new Promise(resolve => setTimeout(resolve, opts.intervalMs ?? 2000));
+  } while (true);
   beat(paths, 'gatekeeper', 'stopped', 'exit');
 }
 
