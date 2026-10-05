@@ -1,0 +1,26 @@
+{
+  "features": [
+    "bias",
+    "foeThreat",
+    "ourThreat",
+    "outspeed",
+    "benchMargin",
+    "hazard",
+    "ourHp",
+    "foeHp"
+  ],
+  "weights": [
+    -2.8067611482456014,
+    -0.4811757462611576,
+    0.5965655250305663,
+    -0.30839721576843054,
+    0.35528058175292193,
+    -0.8957793847597127,
+    -0.018581751141259015,
+    1.8185607200924008
+  ],
+  "lambda": 1,
+  "epochs": 4000,
+  "penalty": "lambda per example, bias unpenalized",
+  "optimizer": "backtracking"
+}

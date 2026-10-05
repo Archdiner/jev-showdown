@@ -1,0 +1,22 @@
+{
+  "id": "llm-jev-prior",
+  "title": "Jev advisor as a search prior",
+  "champion": {
+    "useLLMPrior": false,
+    "blendMode": "off"
+  },
+  "challenger": {
+    "useLLMPrior": true,
+    "blendMode": "prior",
+    "priorWeight": 0.15,
+    "tieEpsilon": 0.05,
+    "topK": 8,
+    "model": "typesafe-ai/jev",
+    "degradeToPureSearch": true
+  },
+  "gate": {
+    "experimentId": "experiment-llm-jev-prior",
+    "hypothesisId": "hypothesis-jev-search-prior",
+    "note": "Challenger only. The champion keeps the advisor off. A missing key or a timeout degrades to pure search."
+  }
+}

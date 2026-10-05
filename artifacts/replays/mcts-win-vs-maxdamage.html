@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MCTS vs MAXDAMAGE - gen9randombattle</title>
+  
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Verdana, sans-serif;
+      background: #f0f0f0;
+    }
+    
+    .replay-wrapper {
+      max-width: 1200px;
+      margin: 20px auto;
+      background: white;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    
+    .replay-header {
+      background: #6688cc;
+      color: white;
+      padding: 15px 20px;
+    }
+    
+    .replay-header h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+    
+    .replay-meta {
+      font-size: 12px;
+      opacity: 0.9;
+      margin-top: 5px;
+    }
+    
+    .ps-replay {
+      min-height: 500px;
+    }
+  </style>
+</head>
+<body>
+  <div class="replay-wrapper">
+    <div class="replay-header">
+      <h1>MCTS vs MAXDAMAGE - gen9randombattle</h1>
+      <div class="replay-meta">
+        Result: mcts wins | 
+        2026-10-04T21:30:16.786Z
+      </div>
+    </div>
+    
+    <div class="ps-replay">
+      <div class="battle"></div>
+      <div class="battle-log"></div>
+      
+      <script class="battle-log-data" type="text/plain">
+|t:|1791149416
+|gametype|singles
+|player|p1|Bot1||
+|player|p2|Bot2||
+|gen|9
+|tier|[Gen 9] Random Battle
+|rule|Species Clause: Limit one of each Pokémon
+|rule|HP Percentage Mod: HP is shown in percentages
+|rule|Sleep Clause Mod: Limit one foe put to sleep
+|rule|Illusion Level Mod: Illusion disguises the Pokémon's true level
+|
+|t:|1791149416
+|teamsize|p1|6
+|teamsize|p2|6
+|start
+|switch|p1a: Iron Moth|Iron Moth, L78|253/253
+|switch|p2a: Snorlax|Snorlax, L82, F|397/397
+|turn|1|
+|t:|1791149416
+|move|p1a: Iron Moth|Fire Blast|p2a: Snorlax
+|-damage|p2a: Snorlax|342/397
+|move|p2a: Snorlax|Earthquake|p1a: Iron Moth
+|-supereffective|p1a: Iron Moth
+|-damage|p1a: Iron Moth|0 fnt
+|faint|p1a: Iron Moth
+|-end|p1a: Iron Moth|Quark Drive|[silent]
+|
+|-heal|p2a: Snorlax|366/397|[from] item: Leftovers
+|upkeep|
+|t:|1791149416
+|switch|p1a: Blastoise|Blastoise, L80, F|258/258
+|turn|2|
+|t:|1791149416
+|move|p1a: Blastoise|Hydro Pump|p2a: Snorlax
+|-damage|p2a: Snorlax|275/397
+|move|p2a: Snorlax|Earthquake|p1a: Blastoise
+|-damage|p1a: Blastoise|184/258
+|
+|-heal|p2a: Snorlax|299/397|[from] item: Leftovers
+|upkeep
+|turn|3|
+|t:|1791149416
+|move|p1a: Blastoise|Hydro Pump|p2a: Snorlax
+|-damage|p2a: Snorlax|208/397
+|move|p2a: Snorlax|Earthquake|p1a: Blastoise
+|-damage|p1a: Blastoise|107/258
+|
+|-heal|p2a: Snorlax|232/397|[from] item: Leftovers
+|upkeep
+|turn|4|
+|t:|1791149416
+|move|p1a: Blastoise|Hydro Pump|p2a: Snorlax
+|-damage|p2a: Snorlax|144/397
+|move|p2a: Snorlax|Earthquake|p1a: Blastoise
+|-damage|p1a: Blastoise|32/258
+|
+|-heal|p2a: Snorlax|168/397|[from] item: Leftovers
+|upkeep
+|turn|5|
+|t:|1791149416
+|move|p1a: Blastoise|Hydro Pump|p2a: Snorlax
+|-damage|p2a: Snorlax|48/397
+|move|p2a: Snorlax|Earthquake|p1a: Blastoise
+|-damage|p1a: Blastoise|0 fnt
+|faint|p1a: Blastoise
+|
+|-heal|p2a: Snorlax|72/397|[from] item: Leftovers
+|upkeep|
+|t:|1791149416
+|switch|p1a: Mudsdale|Mudsdale, L83, M|302/302
+|turn|6|
+|t:|1791149416
+|move|p1a: Mudsdale|Earthquake|p2a: Snorlax
+|-damage|p2a: Snorlax|0 fnt
+|faint|p2a: Snorlax
+|
+|upkeep|
+|t:|1791149416
+|switch|p2a: Glimmora|Glimmora, L75, M|248/248
+|turn|7|
+|t:|1791149416
+|move|p2a: Glimmora|Earth Power|p1a: Mudsdale
+|-damage|p1a: Mudsdale|233/302
+|-ability|p1a: Mudsdale|Stamina|boost
+|-boost|p1a: Mudsdale|def|1
+|move|p1a: Mudsdale|Earthquake|p2a: Glimmora
+|-supereffective|p2a: Glimmora
+|-damage|p2a: Glimmora|0 fnt
+|-activate|p2a: Glimmora|ability: Toxic Debris
+|-sidestart|p1: Bot1|move: Toxic Spikes
+|faint|p2a: Glimmora
+|
+|-heal|p1a: Mudsdale|251/302|[from] item: Leftovers
+|upkeep|
+|t:|1791149416
+|switch|p2a: Qwilfish|Qwilfish, L86, M|252/252
+|-ability|p2a: Qwilfish|Intimidate|boost
+|-unboost|p1a: Mudsdale|atk|1
+|turn|8|
+|t:|1791149416
+|move|p2a: Qwilfish|Gunk Shot|p1a: Mudsdale
+|-resisted|p1a: Mudsdale
+|-damage|p1a: Mudsdale|213/302
+|-ability|p1a: Mudsdale|Stamina|boost
+|-boost|p1a: Mudsdale|def|1
+|move|p1a: Mudsdale|Earthquake|p2a: Qwilfish
+|-supereffective|p2a: Qwilfish
+|-damage|p2a: Qwilfish|76/252
+|
+|-heal|p2a: Qwilfish|91/252|[from] item: Leftovers
+|-heal|p1a: Mudsdale|231/302|[from] item: Leftovers
+|upkeep
+|turn|9|
+|t:|1791149416
+|move|p2a: Qwilfish|Gunk Shot|p1a: Mudsdale|[miss]
+|-miss|p2a: Qwilfish|p1a: Mudsdale
+|move|p1a: Mudsdale|Earthquake|p2a: Qwilfish
+|-supereffective|p2a: Qwilfish
+|-damage|p2a: Qwilfish|0 fnt
+|faint|p2a: Qwilfish
+|
+|-heal|p1a: Mudsdale|249/302|[from] item: Leftovers
+|upkeep|
+|t:|1791149416
+|switch|p2a: Mudsdale|Mudsdale, L83, M|302/302
+|turn|10|
+|t:|1791149416
+|move|p2a: Mudsdale|Earthquake|p1a: Mudsdale
+|-damage|p1a: Mudsdale|185/302
+|-ability|p1a: Mudsdale|Stamina|boost
+|-boost|p1a: Mudsdale|def|1
+|move|p1a: Mudsdale|Earthquake|p2a: Mudsdale
+|-damage|p2a: Mudsdale|220/302
+|-ability|p2a: Mudsdale|Stamina|boost
+|-boost|p2a: Mudsdale|def|1
+|
+|-heal|p1a: Mudsdale|203/302|[from] item: Leftovers
+|-heal|p2a: Mudsdale|238/302|[from] item: Leftovers
+|upkeep
+|turn|11|
+|t:|1791149416
+|move|p1a: Mudsdale|Earthquake|p2a: Mudsdale
+|-damage|p2a: Mudsdale|186/302
+|-ability|p2a: Mudsdale|Stamina|boost
+|-boost|p2a: Mudsdale|def|1
+|move|p2a: Mudsdale|Earthquake|p1a: Mudsdale
+|-damage|p1a: Mudsdale|160/302
+|-ability|p1a: Mudsdale|Stamina|boost
+|-boost|p1a: Mudsdale|def|1
+|
+|-heal|p2a: Mudsdale|204/302|[from] item: Leftovers
+|-heal|p1a: Mudsdale|178/302|[from] item: Leftovers
+|upkeep
+|turn|12|
+|t:|1791149416
+|move|p1a: Mudsdale|Earthquake|p2a: Mudsdale
+|-damage|p2a: Mudsdale|165/302
+|-ability|p2a: Mudsdale|Stamina|boost
+|-boost|p2a: Mudsdale|def|1
+|move|p2a: Mudsdale|Earthquake|p1a: Mudsdale
+|-damage|p1a: Mudsdale|138/302
+|-ability|p1a: Mudsdale|Stamina|boost
+|-boost|p1a: Mudsdale|def|1
+|
+|-heal|p2a: Mudsdale|183/302|[from] item: Leftovers
+|-heal|p1a: Mudsdale|156/302|[from] item: Leftovers
+|upkeep
+|turn|13|
+|t:|1791149416
+|move|p1a: Mudsdale|Earthquake|p2a: Mudsdale
+|-damage|p2a: Mudsdale|149/302
+|-ability|p2a: Mudsdale|Stamina|boost
+|-boost|p2a: Mudsdale|def|1
+|move|p2a: Mudsdale|Earthquake|p1a: Mudsdale
+|-damage|p1a: Mudsdale|122/302
+|-ability|p1a: Mudsdale|Stamina|boost
+|-boost|p1a: Mudsdale|def|1
+|
+|-heal|p1a: Mudsdale|140/302|[from] item: Leftovers
+|-heal|p2a: Mudsdale|167/302|[from] item: Leftovers
+|upkeep
+|turn|14|
+|t:|1791149416
+|move|p2a: Mudsdale|Earthquake|p1a: Mudsdale
+|-damage|p1a: Mudsdale|110/302
+|move|p1a: Mudsdale|Earthquake|p2a: Mudsdale
+|-damage|p2a: Mudsdale|139/302
+|-ability|p2a: Mudsdale|Stamina|boost
+|-boost|p2a: Mudsdale|def|1
+|
+|-heal|p2a: Mudsdale|157/302|[from] item: Leftovers
+|-heal|p1a: Mudsdale|128/302|[from] item: Leftovers
+|upkeep
+|turn|15|
+|t:|1791149416
+|move|p1a: Mudsdale|Earthquake|p2a: Mudsdale
+|-damage|p2a: Mudsdale|136/302
+|-ability|p2a: Mudsdale|Stamina|boost
+|-boost|p2a: Mudsdale|def|1
+|move|p2a: Mudsdale|Earthquake|p1a: Mudsdale
+|-damage|p1a: Mudsdale|98/302
+|
+|-heal|p2a: Mudsdale|154/302|[from] item: Leftovers
+|-heal|p1a: Mudsdale|116/302|[from] item: Leftovers
+|upkeep
+|turn|16|
+|t:|1791149416
+|move|p1a: Mudsdale|Earthquake|p2a: Mudsdale
+|-damage|p2a: Mudsdale|132/302
+|move|p2a: Mudsdale|Earthquake|p1a: Mudsdale
+|-damage|p1a: Mudsdale|88/302
+|
+|-heal|p1a: Mudsdale|106/302|[from] item: Leftovers
+|-heal|p2a: Mudsdale|150/302|[from] item: Leftovers
+|upkeep
+|turn|17|
+|t:|1791149416
+|move|p2a: Mudsdale|Earthquake|p1a: Mudsdale
+|-damage|p1a: Mudsdale|76/302
+|move|p1a: Mudsdale|Earthquake|p2a: Mudsdale
+|-damage|p2a: Mudsdale|131/302
+|
+|-heal|p2a: Mudsdale|149/302|[from] item: Leftovers
+|-heal|p1a: Mudsdale|94/302|[from] item: Leftovers
+|upkeep
+|turn|18|
+|t:|1791149416
+|move|p2a: Mudsdale|Earthquake|p1a: Mudsdale
+|-damage|p1a: Mudsdale|66/302
+|move|p1a: Mudsdale|Earthquake|p2a: Mudsdale
+|-damage|p2a: Mudsdale|130/302
+|
+|-heal|p1a: Mudsdale|84/302|[from] item: Leftovers
+|-heal|p2a: Mudsdale|148/302|[from] item: Leftovers
+|upkeep
+|turn|19|
+|t:|1791149416
+|move|p1a: Mudsdale|Earthquake|p2a: Mudsdale
+|-damage|p2a: Mudsdale|129/302
+|move|p2a: Mudsdale|Earthquake|p1a: Mudsdale
+|-damage|p1a: Mudsdale|51/302
+|
+|-heal|p1a: Mudsdale|69/302|[from] item: Leftovers
+|-heal|p2a: Mudsdale|147/302|[from] item: Leftovers
+|upkeep
+|turn|20|
+|t:|1791149416
+|move|p1a: Mudsdale|Earthquake|p2a: Mudsdale
+|-crit|p2a: Mudsdale
+|-damage|p2a: Mudsdale|0 fnt
+|faint|p2a: Mudsdale
+|
+|-heal|p1a: Mudsdale|87/302|[from] item: Leftovers
+|upkeep|
+|t:|1791149416
+|switch|p2a: Weavile|Weavile, L79, M|240/240
+|turn|21|
+|t:|1791149416
+|move|p2a: Weavile|Knock Off|p1a: Mudsdale
+|-damage|p1a: Mudsdale|59/302
+|-enditem|p1a: Mudsdale|Leftovers|[from] move: Knock Off|[of] p2a: Weavile
+|move|p1a: Mudsdale|Earthquake|p2a: Weavile
+|-damage|p2a: Weavile|120/240
+|
+|upkeep
+|turn|22|
+|t:|1791149416
+|move|p2a: Weavile|Knock Off|p1a: Mudsdale
+|-damage|p1a: Mudsdale|41/302
+|move|p1a: Mudsdale|Heavy Slam|p2a: Weavile
+|-supereffective|p2a: Weavile
+|-damage|p2a: Weavile|0 fnt
+|faint|p2a: Weavile
+|
+|upkeep|
+|t:|1791149416
+|switch|p2a: Arcanine|Arcanine, L84, F|288/288
+|-ability|p2a: Arcanine|Intimidate|boost
+|-unboost|p1a: Mudsdale|atk|1
+|turn|23|
+|t:|1791149416
+|move|p2a: Arcanine|Close Combat|p1a: Mudsdale
+|-damage|p1a: Mudsdale|18/302
+|-unboost|p2a: Arcanine|def|1
+|-unboost|p2a: Arcanine|spd|1
+|move|p1a: Mudsdale|Heavy Slam|p2a: Arcanine
+|-resisted|p2a: Arcanine
+|-damage|p2a: Arcanine|245/288
+|
+|upkeep
+|turn|24|
+|t:|1791149416
+|move|p2a: Arcanine|Close Combat|p1a: Mudsdale
+|-damage|p1a: Mudsdale|0 fnt
+|-unboost|p2a: Arcanine|def|1
+|-unboost|p2a: Arcanine|spd|1
+|faint|p1a: Mudsdale
+|
+|upkeep|
+|t:|1791149416
+|switch|p1a: Zebstrika|Zebstrika, L87, M|272/272
+|-status|p1a: Zebstrika|psn
+|turn|25|
+|t:|1791149416
+|move|p1a: Zebstrika|High Horsepower|p2a: Arcanine
+|-supereffective|p2a: Arcanine
+|-damage|p2a: Arcanine|0 fnt
+|faint|p2a: Arcanine
+|-damage|p1a: Zebstrika|245/272 psn|[from] item: Life Orb
+|
+|win|Bot1
+      </script>
+    </div>
+  </div>
+  
+  <script src="https://play.pokemonshowdown.com/js/replay-embed.js"></script>
+</body>
+</html>

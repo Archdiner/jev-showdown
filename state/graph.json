@@ -1,0 +1,1029 @@
+{
+  "version": "1.0",
+  "exported_at": 1791160488073,
+  "nodes": [
+    {
+      "id": "goal-ladder-1",
+      "type": "Goal",
+      "status": "open",
+      "title": "#1 on gen9randombattle ladder",
+      "description": "Achieve top ranking through exact mechanics and strategic play",
+      "created_at": 1791152884349,
+      "updated_at": 1791152884349,
+      "metadata": {
+        "target_metric": "ladder_elo",
+        "target_value": 1900
+      }
+    },
+    {
+      "id": "decision-typescript-pkmn",
+      "type": "Decision",
+      "status": "done",
+      "title": "TypeScript with @pkmn ecosystem",
+      "description": "Need accurate Pokemon mechanics. Options: build from scratch, unofficial sims, or @pkmn packages.",
+      "commit": "f209c86",
+      "created_at": 1791138484349,
+      "updated_at": 1791152884349,
+      "context": "Need accurate Pokemon mechanics. Options: build from scratch, unofficial sims, or @pkmn packages.",
+      "decision": "Use TypeScript with @pkmn/sim, @pkmn/dex, @pkmn/randoms for all mechanics.",
+      "alternatives": [
+        "Python + unofficial sim",
+        "Custom simulator",
+        "JavaScript without types"
+      ],
+      "consequences": "Exact official mechanics, MIT licensed, tied to @pkmn update cycle"
+    },
+    {
+      "id": "decision-mit-only",
+      "type": "Decision",
+      "status": "done",
+      "title": "MIT-only licensing",
+      "description": "Open source project needs clear licensing.",
+      "commit": "f209c86",
+      "created_at": 1791142084349,
+      "updated_at": 1791152884349,
+      "context": "Open source project needs clear licensing.",
+      "decision": "All dependencies must be MIT, Apache-2.0, BSD, or equivalent. No GPL/AGPL.",
+      "alternatives": [
+        "Allow GPL",
+        "Proprietary code"
+      ],
+      "consequences": "Permissive reuse, excludes some ML libraries"
+    },
+    {
+      "id": "decision-search-first",
+      "type": "Decision",
+      "status": "done",
+      "title": "Search-first over LLM-first",
+      "description": "Two approaches: LLM generates moves, or traditional search.",
+      "commit": "f209c86",
+      "created_at": 1791145684349,
+      "updated_at": 1791152884349,
+      "context": "Two approaches: LLM generates moves, or traditional search.",
+      "decision": "Core uses game-tree search (expectiminimax). LLMs optional for priors only.",
+      "alternatives": [
+        "LLM-only",
+        "Pure rule-based"
+      ],
+      "consequences": "Explainable, fast, improves with eval not just data"
+    },
+    {
+      "id": "decision-exact-sim",
+      "type": "Decision",
+      "status": "done",
+      "title": "Exact sim in search, not fallback",
+      "description": "Original had 100% fallback to hand-written damage calc.",
+      "commit": "f209c86",
+      "created_at": 1791149284349,
+      "updated_at": 1791152884349,
+      "context": "Original had 100% fallback to hand-written damage calc.",
+      "decision": "Fixed Battle creation to achieve 0% fallback. Search MUST use Battle.makeChoices().",
+      "alternatives": [
+        "Accept fallback",
+        "Improve fallback approximation"
+      ],
+      "consequences": "Accurate predictions, more complex code, must keep GameState synced"
+    },
+    {
+      "id": "source-smogon-sets",
+      "type": "DataSource",
+      "status": "active",
+      "title": "Smogon Gen9 Random Battle Sets",
+      "created_at": 1791152884349,
+      "updated_at": 1791152884349,
+      "url": "https://raw.githubusercontent.com/smogon/pokemon-showdown/master/data/random-battles/gen9/sets.json",
+      "refresh_cadence": "daily",
+      "reliability": "trusted"
+    },
+    {
+      "id": "source-pkmn-stats",
+      "type": "DataSource",
+      "status": "active",
+      "title": "pkmn Randbats Statistics",
+      "created_at": 1791152884349,
+      "updated_at": 1791152884349,
+      "url": "https://pkmn.github.io/randbats/data/gen9randombattle.json",
+      "refresh_cadence": "weekly",
+      "reliability": "trusted"
+    },
+    {
+      "id": "task-full-benchmark",
+      "type": "Task",
+      "status": "open",
+      "title": "Run full benchmark with exact sim",
+      "description": "Measure true win rates with 0% fallback (300+ games vs random and max-damage)",
+      "created_at": 1791152884349,
+      "updated_at": 1791152884349,
+      "acceptance_criteria": [
+        "300+ games vs random",
+        "300+ games vs max-damage",
+        "Fallback rate stays 0.00%",
+        "Record metrics in champion node"
+      ],
+      "files": [
+        "src/cli/selfplay.ts"
+      ]
+    },
+    {
+      "id": "task-ladder-client",
+      "type": "Task",
+      "status": "in_progress",
+      "title": "Make ladder client production-ready",
+      "description": "Live ladder games with reconnection, timer-safe moves, logging",
+      "created_at": 1791152884349,
+      "updated_at": 1791152906119,
+      "acceptance_criteria": [
+        "Verify full games vs local showdown server",
+        "npm run ladder --games N --format gen9randombattle",
+        "Timer-safe submission with hard per-turn deadline",
+        "Reconnect/resume on disconnect",
+        "Log every game and decision to data store",
+        "Tag source=ladder with opponent name/rating"
+      ],
+      "files": [
+        "src/client/showdown-client.ts",
+        "src/cli/ladder.ts"
+      ]
+    },
+    {
+      "id": "learning-set-info-narrowing",
+      "type": "Learning",
+      "status": "active",
+      "title": "Strict role narrowing from reveals",
+      "description": "Enumerate opponent possible roles and narrow strictly from revealed moves, ability, item, Tera. Roles exclude certain moves/items (match Showdex set tab).",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "source": "expert",
+        "expert_credentials": "top-5 ladder, circuit grand finalist"
+      },
+      "insight": "Enumerate opponent possible roles and narrow strictly from revealed moves, ability, item, Tera. Roles exclude certain moves/items (match Showdex set tab).",
+      "evidence": "Expert: top-5 ladder, circuit grand finalist",
+      "confidence": "high"
+    },
+    {
+      "id": "learning-hazards-huge",
+      "type": "Learning",
+      "status": "active",
+      "title": "Hazards are huge in randbats",
+      "description": "Boots and removal are rare. Toxic Spikes wins games vs teams with few Poison types. Get setter in safely, never risk it. Don't set rocks while threat sets up. Don't sacrifice team for useless layers. If opponent has hazards and we don't, play faster.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "source": "expert",
+        "expert_credentials": "top-5 ladder, circuit grand finalist"
+      },
+      "insight": "Boots and removal are rare. Toxic Spikes wins games vs teams with few Poison types. Get setter in safely, never risk it. Don't set rocks while threat sets up. Don't sacrifice team for useless layers. If opponent has hazards and we don't, play faster.",
+      "evidence": "Expert: hazards dominate due to rare removal",
+      "confidence": "high"
+    },
+    {
+      "id": "learning-preserve-resources",
+      "type": "Learning",
+      "status": "active",
+      "title": "Preserve resources and information advantage",
+      "description": "No team preview means info is advantage. Don't throw mons away to unknown threats. Don't speedrun unless matchup good or opponent hazards force it. Use Tera second. Exception: sacrificing slow, low-HP hazard setter for momentum is fine.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "source": "expert",
+        "expert_credentials": "top-5 ladder, circuit grand finalist"
+      },
+      "insight": "No team preview means info is advantage. Don't throw mons away to unknown threats. Don't speedrun unless matchup good or opponent hazards force it. Use Tera second. Exception: sacrificing slow, low-HP hazard setter for momentum is fine.",
+      "evidence": "Expert: resource preservation wins games",
+      "confidence": "high"
+    },
+    {
+      "id": "learning-speed-option",
+      "type": "Learning",
+      "status": "active",
+      "title": "Identify and preserve speed option",
+      "description": "Keep fastest mon, priority, Choice Scarf, or speed booster healthy and hidden. Endgames are chip-heavy. Use wallbreakers early.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "source": "expert",
+        "expert_credentials": "top-5 ladder, circuit grand finalist"
+      },
+      "insight": "Keep fastest mon, priority, Choice Scarf, or speed booster healthy and hidden. Endgames are chip-heavy. Use wallbreakers early.",
+      "evidence": "Expert: speed control critical in endgame",
+      "confidence": "high"
+    },
+    {
+      "id": "learning-team-gen-rules",
+      "type": "Learning",
+      "status": "active",
+      "title": "Team-generation rules are information",
+      "description": "Constraints: max 2 mons per type, max 3 weak to one type, no shared 4x weakness, only 1 Tera Blast role per team (Gen 9).",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "source": "expert",
+        "expert_credentials": "top-5 ladder, circuit grand finalist"
+      },
+      "insight": "Constraints: max 2 mons per type, max 3 weak to one type, no shared 4x weakness, only 1 Tera Blast role per team (Gen 9).",
+      "evidence": "Expert + verifiable in data/random-battles/gen9/teams.ts",
+      "confidence": "high"
+    },
+    {
+      "id": "hyp-hazard-differential",
+      "type": "Hypothesis",
+      "status": "open",
+      "title": "Hazard differential weighted by boots/removal",
+      "description": "Expert says hazards dominate randbats due to rare boots/removal. Should weight hazard advantage higher than current eval.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "kill_condition": "No improvement after 200 games, or regression vs any panel member",
+        "derived_from": "learning-hazards-huge",
+        "files": [
+          "src/engine/evaluator.ts"
+        ]
+      },
+      "rationale": "Expert says hazards dominate randbats due to rare boots/removal. Should weight hazard advantage higher than current eval.",
+      "expected_effect": "+3-5% win rate by valuing hazard advantage appropriately",
+      "test_plan": "Weight hazards by: (a) count boots on our team, (b) count removal on our team, (c) same for opponent belief, (d) increase hazard value by 2-3x if opponent lacks boots/removal"
+    },
+    {
+      "id": "hyp-protect-hazard-setter",
+      "type": "Hypothesis",
+      "status": "open",
+      "title": "Protect hazard setter (never risk it)",
+      "description": "Expert: get setter in safely, never risk it. Current eval doesn't distinguish setter from other mons.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "kill_condition": "No improvement after 200 games",
+        "derived_from": "learning-hazards-huge",
+        "files": [
+          "src/engine/evaluator.ts",
+          "src/types/index.ts"
+        ]
+      },
+      "rationale": "Expert: get setter in safely, never risk it. Current eval doesn't distinguish setter from other mons.",
+      "expected_effect": "+2-4% win rate by preserving setter and getting hazards up consistently",
+      "test_plan": "Tag hazard setters in belief. Add penalty (-300) if setter at risk (low HP, bad matchup). Add bonus (+200) if setter switched in safely. Don't sacrifice setter unless slow + low HP."
+    },
+    {
+      "id": "hyp-resource-preservation",
+      "type": "Hypothesis",
+      "status": "open",
+      "title": "Resource preservation (don't throw mons away)",
+      "description": "Expert: don't throw mons to unknown threats. No team preview means info is advantage.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "kill_condition": "No improvement after 200 games, or increases avg game length >20%",
+        "derived_from": "learning-preserve-resources",
+        "files": [
+          "src/engine/evaluator.ts"
+        ]
+      },
+      "rationale": "Expert: don't throw mons to unknown threats. No team preview means info is advantage.",
+      "expected_effect": "+2-3% win rate by avoiding bad sacrifices",
+      "test_plan": "Penalize moves that risk KO when opponent has 4+ unknown mons. Add info value: bonus for knowing opponent team, penalty for letting ours die before seeing theirs. Track \"deaths to unknown threats\" metric."
+    },
+    {
+      "id": "hyp-tera-second",
+      "type": "Hypothesis",
+      "status": "open",
+      "title": "Tera-second prior (opponent Teras first)",
+      "description": "Expert: use Tera second. Preserves our options and forces opponent to commit first.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "kill_condition": "No improvement after 200 games",
+        "derived_from": "learning-preserve-resources",
+        "files": [
+          "src/engine/evaluator.ts"
+        ]
+      },
+      "rationale": "Expert: use Tera second. Preserves our options and forces opponent to commit first.",
+      "expected_effect": "+1-2% win rate by waiting for opponent Tera",
+      "test_plan": "Add Tera timing heuristic: if opponent hasn't Tera'd and we haven't, penalize our Tera moves (-150). Once opponent Teras, remove penalty."
+    },
+    {
+      "id": "hyp-speed-option-preservation",
+      "type": "Hypothesis",
+      "status": "open",
+      "title": "Speed option preservation",
+      "description": "Expert: identify and preserve fastest mon / priority / Scarf. Endgames are chip-heavy.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "kill_condition": "No improvement after 200 games",
+        "derived_from": "learning-speed-option",
+        "files": [
+          "src/engine/evaluator.ts",
+          "src/types/index.ts"
+        ]
+      },
+      "rationale": "Expert: identify and preserve fastest mon / priority / Scarf. Endgames are chip-heavy.",
+      "expected_effect": "+2-4% win rate by keeping speed control for endgame",
+      "test_plan": "Identify speed option (fastest, priority moves, Choice Scarf, speed booster). Add bonus (+150) if healthy. Add penalty (-200) if at risk of fainting. Track \"speed option survived to endgame\" metric."
+    },
+    {
+      "id": "hyp-tempo-switch-hazard-disadvantage",
+      "type": "Hypothesis",
+      "status": "open",
+      "title": "Play faster when opponent has hazard advantage",
+      "description": "Expert: if opponent has hazards and we don't, play faster. Don't switch as much.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153124953,
+      "metadata": {
+        "kill_condition": "No improvement after 200 games",
+        "derived_from": "learning-hazards-huge",
+        "files": [
+          "src/engine/evaluator.ts"
+        ]
+      },
+      "rationale": "Expert: if opponent has hazards and we don't, play faster. Don't switch as much.",
+      "expected_effect": "+1-2% win rate by adapting tempo to hazard state",
+      "test_plan": "Add tempo adjustment: if opponent has hazards and we don't, reduce switch penalty and increase attack bonus. Measure \"avg turns per game\" and \"switch rate\" vs hazard differential."
+    },
+    {
+      "id": "task-team-gen-constraints",
+      "type": "Task",
+      "status": "open",
+      "title": "Implement team-generation constraints",
+      "description": "Verify and enforce: max 2 mons per type, max 3 weak to one type, no shared 4x weakness, only 1 Tera Blast per team",
+      "created_at": 1791153124953,
+      "updated_at": 1791153381269,
+      "metadata": {
+        "priority": "high",
+        "category": "correctness"
+      },
+      "acceptance_criteria": [
+        "Verify constraints in data/random-battles/gen9/teams.ts",
+        "Implement in opponent world sampler (Format.sampleOpponentSet)",
+        "Test: sample 1000 opponent teams, all satisfy constraints",
+        "Document any discrepancies found"
+      ],
+      "files": [
+        "src/formats/gen9-randombattle.ts",
+        "src/engine/world-builder.ts"
+      ]
+    },
+    {
+      "id": "task-strict-role-narrowing",
+      "type": "Task",
+      "status": "open",
+      "title": "Implement strict role narrowing from reveals",
+      "description": "Narrow opponent set possibilities strictly: each role excludes certain moves/items. Match Showdex behavior.",
+      "created_at": 1791153124953,
+      "updated_at": 1791153388168,
+      "metadata": {
+        "priority": "high",
+        "category": "correctness"
+      },
+      "acceptance_criteria": [
+        "Parse role definitions from sets.json (each role has specific moves/items)",
+        "When move/item/ability revealed, eliminate incompatible roles",
+        "Test: if Earthquake revealed, eliminate special-only roles",
+        "Verify: belief entropy decreases monotonically with reveals"
+      ],
+      "files": [
+        "src/formats/gen9-randombattle.ts",
+        "src/engine/belief-tracker.ts"
+      ]
+    },
+    {
+      "id": "result-challenger-exact-1ply-1791160362753",
+      "type": "Result",
+      "status": "done",
+      "title": "Gate: promoted",
+      "description": "+448.0 avg Elo vs panel (2/2 improved). held-out forced-win 0/0, deep agreement 37.8% vs max-damage 21.2% (17 replay positions)",
+      "created_at": 1791160362753,
+      "updated_at": 1791160362753,
+      "metrics": {
+        "verdict": "promoted",
+        "games": 600,
+        "panel_results": [
+          {
+            "opponent": "random-v1",
+            "challenger_elo": 2176.0784320114053,
+            "champion_elo": 1500,
+            "elo_diff": 676.0784320114053,
+            "win_rate": 0.98,
+            "ci_lower": 0.9570598132699448,
+            "ci_upper": 0.9908024939322289,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          },
+          {
+            "opponent": "maxdamage-v1",
+            "challenger_elo": 1719.8687687473098,
+            "champion_elo": 1500,
+            "elo_diff": 219.8687687473098,
+            "win_rate": 0.78,
+            "ci_lower": 0.7297464012422271,
+            "ci_upper": 0.8231732779590409,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          }
+        ],
+        "guardrails": {
+          "passed": true,
+          "invalid_choices": 0,
+          "crashes": 0,
+          "timeouts": 0,
+          "p99_turn_time_ms": 190,
+          "fallback_rate": 0,
+          "state_mismatches": 0
+        },
+        "held_out": {
+          "ok": true,
+          "reason": "held-out forced-win 0/0, deep agreement 37.8% vs max-damage 21.2% (17 replay positions)",
+          "positions": 217,
+          "replay_positions": 17,
+          "forced_win_hit": 0,
+          "forced_win_total": 0,
+          "deep_hit": 82,
+          "deep_total": 217,
+          "max_damage_deep_hit": 46,
+          "max_damage_deep_total": 217
+        }
+      }
+    },
+    {
+      "id": "champion-v0",
+      "type": "Champion",
+      "status": "superseded",
+      "title": "Champion v0: Exact Sim",
+      "description": "3-ply expectiminimax with 0% fallback, exact @pkmn/sim mechanics",
+      "commit": "f209c86",
+      "created_at": 1791152884349,
+      "updated_at": 1791160362780,
+      "metrics": {
+        "win_rate_vs_random": 1,
+        "invalid_choices": 0,
+        "crashes": 0,
+        "timeouts": 0,
+        "p99_turn_time_ms": 1500,
+        "fallback_rate": 0,
+        "state_mismatches": 0
+      },
+      "version": "v0",
+      "config_path": "src/bot/bot.ts",
+      "promoted_at": 1791152884349
+    },
+    {
+      "id": "datasource-vercel-ai-gateway-models",
+      "type": "DataSource",
+      "status": "active",
+      "title": "Vercel AI Gateway model catalog",
+      "description": "GET https://ai-gateway.vercel.sh/v1/models on 2026-10-04. Reviewer default chosen from this list.",
+      "created_at": 1791156182746,
+      "updated_at": 1791156182746,
+      "url": "https://ai-gateway.vercel.sh/v1/models",
+      "refresh_cadence": "when the reviewer default is reconsidered",
+      "reliability": "trusted"
+    },
+    {
+      "id": "task-llm-layer",
+      "type": "Task",
+      "status": "done",
+      "title": "LLM advisor and loss reviewer",
+      "description": "Vercel AI Gateway client, Jev advisor blend (off by default), and Grok 4.7 loss reviewer that writes hypotheses. Search engine and live client were not modified.",
+      "commit": "debf11ff1e825cc0ae115ba8abf7b9a0053ba163",
+      "created_at": 1791156182746,
+      "updated_at": 1791156205384,
+      "metrics": {
+        "smoke": "skipped",
+        "smoke_reason": "missing_VERCEL_AI_GATEWAY_KEY",
+        "reviewer_model": "spacexai/grok-4.7"
+      },
+      "acceptance_criteria": [
+        "Gateway client times out, retries, logs cost and latency, and enforces a per-turn budget without logging the key",
+        "Jev returns per-action scores and probabilities and degrades to pure search",
+        "Blend is off by default and available as a gate challenger",
+        "Loss reviewer writes a hypothesis and does not change code",
+        "Unit tests mock HTTP; live smoke runs only when VERCEL_AI_GATEWAY_KEY is set"
+      ],
+      "files": [
+        "src/llm/gateway-client.ts",
+        "src/llm/jev-advisor.ts",
+        "src/llm/blend.ts",
+        "src/llm/loss-reviewer.ts",
+        "experiments/llm-jev-prior/config.json"
+      ]
+    },
+    {
+      "id": "decision-loss-reviewer-grok-4-7",
+      "type": "Decision",
+      "status": "done",
+      "title": "Loss reviewer defaults to Grok 4.7",
+      "description": "Do not default the post-game reviewer to anthropic/claude-opus-4.5. Prefer the newest xAI Grok frontier model on the gateway.",
+      "commit": "debf11ff1e825cc0ae115ba8abf7b9a0053ba163",
+      "created_at": 1791156182746,
+      "updated_at": 1791156205390,
+      "metrics": {
+        "reviewer_model": "spacexai/grok-4.7",
+        "input_usd_per_token": "0.000002",
+        "output_usd_per_token": "0.000006",
+        "input_cache_read_usd_per_token": "0.0000005",
+        "input_usd_per_million": 2,
+        "output_usd_per_million": 6,
+        "jev_model": "typesafe-ai/jev",
+        "jev_input_usd_per_token": "0.000000042",
+        "jev_output_usd_per_token": "0",
+        "jev_input_usd_per_million": 0.042,
+        "catalog_checked_at": "2026-10-04"
+      },
+      "metadata": {
+        "catalogUrl": "https://ai-gateway.vercel.sh/v1/models",
+        "alternatives": [
+          {
+            "id": "anthropic/claude-opus-5.5",
+            "released": "2026-09-22",
+            "input": "0.000004",
+            "output": "0.00002"
+          },
+          {
+            "id": "openai/gpt-6.1-sol",
+            "released": "2026-09-29",
+            "input": "0.000002",
+            "output": "0.00001"
+          }
+        ]
+      },
+      "context": "Queried GET https://ai-gateway.vercel.sh/v1/models on 2026-10-04. Newest Grok language model is spacexai/grok-4.7 (released 2026-09-21). Newer language models exist (openai/gpt-6.1-sol 2026-09-29, anthropic/claude-opus-5.5 2026-09-22) and are recorded as alternatives. Claude Opus 4.5 is outdated and is not the default.",
+      "decision": "Default LOSS_REVIEWER_MODEL is spacexai/grok-4.7. Input $0.000002/token ($2/1M), output $0.000006/token ($6/1M), cached input $0.0000005/token. Long context above 200001 tokens is input $0.000004 and output $0.000012. Override with the LOSS_REVIEWER_MODEL env var.",
+      "alternatives": [
+        "anthropic/claude-opus-5.5 at input $0.000004/token ($4/1M) and output $0.00002/token ($20/1M), released 2026-09-22",
+        "openai/gpt-6.1-sol at input $0.000002/token ($2/1M) and output $0.00001/token ($10/1M), released 2026-09-29",
+        "anthropic/claude-opus-4.5 rejected as outdated"
+      ],
+      "consequences": "Reviewer findings are hypotheses only and are not applied to code. Jev stays the in-search advisor at typesafe-ai/jev, input $0.000000042/token ($0.042/1M) and output $0."
+    },
+    {
+      "id": "experiment-llm-jev-prior",
+      "type": "Experiment",
+      "status": "open",
+      "title": "Challenger: Jev search prior",
+      "description": "Gate challenger only. Champion blend mode stays off. Degrades to pure search when the gateway key is missing or the call exceeds the turn latency budget.",
+      "commit": "debf11ff1e825cc0ae115ba8abf7b9a0053ba163",
+      "created_at": 1791156182746,
+      "updated_at": 1791156205393,
+      "config_path": "experiments/llm-jev-prior/config.json",
+      "hypothesis_id": "hypothesis-jev-search-prior",
+      "predicted_effect": "+10 Elo vs the frozen panel if the prior helps, otherwise reject.",
+      "kill_condition": "Reject on any guardrail violation or if SPRT accepts H0 (no Elo gain)."
+    },
+    {
+      "id": "hypothesis-jev-search-prior",
+      "type": "Hypothesis",
+      "status": "open",
+      "title": "Jev prior on top-K search actions",
+      "description": "Off by default. A gate challenger may blend Jev scores into search. Missing key or timeout degrades to pure search. Not applied to the champion.",
+      "commit": "debf11ff1e825cc0ae115ba8abf7b9a0053ba163",
+      "created_at": 1791156182746,
+      "updated_at": 1791156205395,
+      "metadata": {
+        "autoApplied": false,
+        "killCondition": "Reject if any hard guardrail fails, including timeouts or p99 >= 2s, or if SPRT accepts no difference.",
+        "model": "typesafe-ai/jev"
+      },
+      "rationale": "Random-battle search scores are often close. A fast evaluation model can score the same top-K actions and either nudge the ranking (prior) or break ties, without replacing search.",
+      "expected_effect": "Challenger Elo vs the frozen panel rises by about +10 if the prior corrects systematic mistakes, with p99 turn time still under 2s.",
+      "test_plan": "Submit experiment-llm-jev-prior against the champion through the gate. Challenger config is experiments/llm-jev-prior/config.json (blend mode prior, weight 0.15, topK 8). Champion stays useLLMPrior false. Paired games, SPRT elo0=0 elo1=+10 alpha=beta=0.05."
+    },
+    {
+      "id": "task-live-ladder",
+      "type": "Task",
+      "status": "done",
+      "title": "Live ladder client",
+      "description": "Websocket ladder client with login, per-room state, legal choices, JSONL logs, replay save, --engine, and --concurrency.",
+      "commit": "6e9948c",
+      "created_at": 1791158863402,
+      "updated_at": 1791158863402,
+      "acceptance_criteria": [
+        "Official action.php login",
+        "One engine instance and JSONL file per battle room",
+        "--concurrency 4 plays at least 12 local games with 0 invalid choices and 0 crashes",
+        "--engine max-damage or search"
+      ],
+      "files": [
+        "src/cli/ladder.ts",
+        "src/client/showdown-client.ts",
+        "src/client/battle-driver.ts",
+        "src/client/decision-client.ts",
+        "src/client/ladder-queue.ts"
+      ]
+    },
+    {
+      "id": "result-live-ladder-c4",
+      "type": "Result",
+      "status": "done",
+      "title": "Concurrency 4 local verification",
+      "description": "15 gen9randombattle games on one login pair at concurrency 4, engine max-damage. invalid=0 crashes=0 fallbacks=0 mismatches=0. Peak of 4 simultaneous battles. Earlier head-to-head: max-damage 12, search 1.",
+      "commit": "6e9948c",
+      "created_at": 1791158863402,
+      "updated_at": 1791158863402,
+      "metrics": {
+        "invalid_choices": 0,
+        "crashes": 0,
+        "fallbacks": 0,
+        "mismatches": 0,
+        "concurrency": 4,
+        "games": 15
+      },
+      "game_count": 15
+    },
+    {
+      "id": "challenger-exact-1ply",
+      "type": "Experiment",
+      "status": "done",
+      "title": "Exact 1-ply HP search",
+      "description": "Clone the live battle with toJSON/fromJSON. Opponent line is the @smogon/calc max-damage move. Eval is HP fraction plus faint counts. Terminal win is +1000.",
+      "commit": "fcd9c92",
+      "created_at": 1791157782966,
+      "updated_at": 1791160457504,
+      "config_path": "src/engine/exact/search.ts",
+      "hypothesis_id": "hyp-rebuild-scored-as-loss",
+      "predicted_effect": ">=90% vs random and >=70% vs max-damage over 300 paired games, 21/21 diagnostics, 0 invalid.",
+      "kill_condition": "Under 90% vs random or under 70% vs max-damage, or any invalid choice, crash, or turn over 2s."
+    },
+    {
+      "id": "hyp-rebuild-scored-as-loss",
+      "type": "Hypothesis",
+      "status": "done",
+      "title": "Rebuilt battles scored as losses",
+      "description": "The 3-ply search is weak because it rebuilds a battle and scores a rejected choice as a loss, not because HP eval is too small.",
+      "commit": "64c946b",
+      "created_at": 1791157782966,
+      "updated_at": 1791160457508,
+      "rationale": "After a KO the live request is a single switch. BattleStateBuilder starts a new battle, copies HP, and leaves a two-player move request. makeChoices throws Not all choices done. simulateTurn returns terminated with no winner. RobustSearch scores that -10000. A toJSON clone of the same battle accepts the switch.",
+      "expected_effect": "1-ply search on a real battle clone with HP-fraction eval beats random by a wide margin and beats max-damage. Adding depth, a uniform opponent, or the full evaluator does not create the old loss.",
+      "test_plan": "Diagnostics on 21 obvious positions. Paired games, swapped sides, seed 1. Baseline exact:1,max-damage,hp over 150 pairs vs random and vs max-damage. Then uniform, depth 2, depth 3, and full eval on the same seeds. Kill the clone engine if it is under 90% vs random or under 70% vs max-damage."
+    },
+    {
+      "id": "champion-exact-1ply",
+      "type": "Champion",
+      "status": "active",
+      "title": "Champion: exact 1-ply HP search",
+      "description": "1-ply exact @pkmn/sim battle clone. Opponent line is the accuracy-weighted max-damage move. Eight RNG draws are averaged. Eval is HP fraction plus faint counts.",
+      "created_at": 1791160362784,
+      "updated_at": 1791160457509,
+      "metrics": {
+        "win_rate_vs_random": 0.98,
+        "win_rate_vs_maxdamage": 0.78,
+        "invalid_choices": 0,
+        "crashes": 0,
+        "timeouts": 0,
+        "p99_turn_time_ms": 190,
+        "fallback_rate": 0,
+        "state_mismatches": 0
+      },
+      "version": "exact-1ply",
+      "config_path": "src/engine/exact/search.ts",
+      "promoted_at": 1791160362784
+    },
+    {
+      "id": "result-ablation-exact-search",
+      "type": "Result",
+      "status": "done",
+      "title": "Ablation of exact battle-clone search",
+      "description": "Same seed start 1. Champion row is 150 pairs. Other rows are smaller samples of the same harness. Full eval before the 0 HP fix is the row that collapses.",
+      "commit": "fcd9c92",
+      "created_at": 1791160457504,
+      "updated_at": 1791160457504,
+      "metrics": {
+        "rows": [
+          {
+            "name": "1-ply max-damage HP, 8 samples",
+            "vs_random": "98.0% (294-5-1/300)",
+            "vs_max": "78.0% (234-66-0/300)",
+            "p99_ms": 190
+          },
+          {
+            "name": "1-ply max-damage HP, 1 sample",
+            "vs_random": "98.8% (79-0-1/80)",
+            "vs_max": "82.5% (66-14-0/80)",
+            "p99_ms": 60
+          },
+          {
+            "name": "1-ply uniform HP, 1 sample",
+            "vs_random": "97.5% (78-1-1/80)",
+            "vs_max": "67.5% (54-26-0/80)",
+            "p99_ms": 198
+          },
+          {
+            "name": "2-ply max-damage HP, 1 sample",
+            "vs_random": "96.7% (29-1-0/30)",
+            "vs_max": "80.0% (24-6-0/30)",
+            "p99_ms": 333
+          },
+          {
+            "name": "3-ply max-damage HP, 1 sample",
+            "vs_random": "100% (8-0-0/8)",
+            "vs_max": "not run",
+            "p99_ms": 2400
+          },
+          {
+            "name": "1-ply full eval before 0 HP fix",
+            "vs_random": "72.5% (29-11-0/40)",
+            "vs_max": "5.0% (2-38-0/40)",
+            "p99_ms": 50
+          },
+          {
+            "name": "1-ply full eval after 0 HP fix",
+            "vs_random": "100% (40-0-0/40)",
+            "vs_max": "77.5% (31-9-0/40)",
+            "p99_ms": 98
+          }
+        ]
+      },
+      "win_rate": 0.98,
+      "game_count": 300
+    },
+    {
+      "id": "hyp-fainted-hp-scored-full",
+      "type": "Hypothesis",
+      "status": "done",
+      "title": "0 HP was scored as a full health bar",
+      "description": "The full evaluator treated a falsy currentHp as unknown and assumed 100% HP.",
+      "commit": "fcd9c92",
+      "created_at": 1791160457504,
+      "updated_at": 1791160457504,
+      "rationale": "Full-eval 1-ply lost to max-damage 2-38 over 40 games while HP-fraction eval won. Fainted Pokemon have currentHp 0.",
+      "expected_effect": "Counting 0 HP as fainted restores full-eval win rate to the same range as the HP eval.",
+      "test_plan": "Replay 20 paired seeds against random and against max-damage before and after the truthiness fix."
+    },
+    {
+      "id": "learning-fainted-hp",
+      "type": "Learning",
+      "status": "active",
+      "title": "0 HP is a faint",
+      "description": "Do not use a truthiness check on current HP.",
+      "commit": "fcd9c92",
+      "created_at": 1791160463725,
+      "updated_at": 1791160463725,
+      "insight": "A fainted Pokemon at 0 HP was scored as full health, so the full evaluator avoided knockouts.",
+      "evidence": "Before: 5.0% vs max-damage (2W-38L/40) and 72.5% vs random (29W-11L/40). After: 77.5% (31W-9L/40) and 100% (40W-0L/40). Seed 1. Commit fcd9c92.",
+      "confidence": "high"
+    },
+    {
+      "id": "learning-rebuild-scored-as-loss",
+      "type": "Learning",
+      "status": "active",
+      "title": "Search the live battle clone",
+      "description": "A rebuilt battle that rejects the live choice is not a loss.",
+      "commit": "fcd9c92",
+      "created_at": 1791160463725,
+      "updated_at": 1791160463725,
+      "insight": "The old search rebuilt a battle that still had a move request after a KO, rejected the legal switch, and scored that rejection as a loss.",
+      "evidence": "src/engine/exact/legacy-repro.ts. The clone search is 98.0% vs random and 78.0% vs max-damage over 300 paired games, gate promoted, commit fcd9c92.",
+      "confidence": "high"
+    }
+  ],
+  "edges": [
+    {
+      "id": "challenger-exact-1ply-tests-hyp-rebuild-scored-as-loss",
+      "from_node": "challenger-exact-1ply",
+      "to_node": "hyp-rebuild-scored-as-loss",
+      "type": "tests",
+      "created_at": 1791157782966
+    },
+    {
+      "id": "challenger-exact-1ply-produced-result-challenger-exact-1ply-1791160362753",
+      "from_node": "challenger-exact-1ply",
+      "to_node": "result-challenger-exact-1ply-1791160362753",
+      "type": "produced",
+      "created_at": 1791160362764
+    },
+    {
+      "id": "champion-exact-1ply-supersedes-champion-v0",
+      "from_node": "champion-exact-1ply",
+      "to_node": "champion-v0",
+      "type": "supersedes",
+      "created_at": 1791160362792
+    },
+    {
+      "id": "challenger-exact-1ply-supersedes-champion-v0",
+      "from_node": "challenger-exact-1ply",
+      "to_node": "champion-v0",
+      "type": "supersedes",
+      "created_at": 1791160362794
+    },
+    {
+      "id": "decision-typescript-pkmn-supports-goal-ladder-1",
+      "from_node": "decision-typescript-pkmn",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791152884349
+    },
+    {
+      "id": "decision-mit-only-supports-goal-ladder-1",
+      "from_node": "decision-mit-only",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791152884349
+    },
+    {
+      "id": "decision-search-first-supports-goal-ladder-1",
+      "from_node": "decision-search-first",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791152884349
+    },
+    {
+      "id": "decision-exact-sim-supports-goal-ladder-1",
+      "from_node": "decision-exact-sim",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791152884349
+    },
+    {
+      "id": "task-full-benchmark-tests-champion-v0",
+      "from_node": "task-full-benchmark",
+      "to_node": "champion-v0",
+      "type": "tests",
+      "created_at": 1791152884349
+    },
+    {
+      "id": "learning-set-info-narrowing-supports-goal-ladder-1",
+      "from_node": "learning-set-info-narrowing",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "learning-hazards-huge-supports-goal-ladder-1",
+      "from_node": "learning-hazards-huge",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "learning-preserve-resources-supports-goal-ladder-1",
+      "from_node": "learning-preserve-resources",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "learning-speed-option-supports-goal-ladder-1",
+      "from_node": "learning-speed-option",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "learning-team-gen-rules-supports-goal-ladder-1",
+      "from_node": "learning-team-gen-rules",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "hyp-hazard-differential-derived-from-learning-hazards-huge",
+      "from_node": "hyp-hazard-differential",
+      "to_node": "learning-hazards-huge",
+      "type": "derived_from",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "hyp-protect-hazard-setter-derived-from-learning-hazards-huge",
+      "from_node": "hyp-protect-hazard-setter",
+      "to_node": "learning-hazards-huge",
+      "type": "derived_from",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "hyp-resource-preservation-derived-from-learning-preserve-resources",
+      "from_node": "hyp-resource-preservation",
+      "to_node": "learning-preserve-resources",
+      "type": "derived_from",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "hyp-tera-second-derived-from-learning-preserve-resources",
+      "from_node": "hyp-tera-second",
+      "to_node": "learning-preserve-resources",
+      "type": "derived_from",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "hyp-speed-option-preservation-derived-from-learning-speed-option",
+      "from_node": "hyp-speed-option-preservation",
+      "to_node": "learning-speed-option",
+      "type": "derived_from",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "hyp-tempo-switch-hazard-disadvantage-derived-from-learning-hazards-huge",
+      "from_node": "hyp-tempo-switch-hazard-disadvantage",
+      "to_node": "learning-hazards-huge",
+      "type": "derived_from",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "task-team-gen-constraints-tests-learning-team-gen-rules",
+      "from_node": "task-team-gen-constraints",
+      "to_node": "learning-team-gen-rules",
+      "type": "tests",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "task-strict-role-narrowing-tests-learning-set-info-narrowing",
+      "from_node": "task-strict-role-narrowing",
+      "to_node": "learning-set-info-narrowing",
+      "type": "tests",
+      "created_at": 1791153124953
+    },
+    {
+      "id": "decision-loss-reviewer-grok-4-7-derived_from-datasource-vercel-ai-gateway-models",
+      "from_node": "decision-loss-reviewer-grok-4-7",
+      "to_node": "datasource-vercel-ai-gateway-models",
+      "type": "derived_from",
+      "created_at": 1791156182746
+    },
+    {
+      "id": "decision-loss-reviewer-grok-4-7-supports-goal-ladder-1",
+      "from_node": "decision-loss-reviewer-grok-4-7",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791156182746
+    },
+    {
+      "id": "hypothesis-jev-search-prior-supports-goal-ladder-1",
+      "from_node": "hypothesis-jev-search-prior",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791156182746
+    },
+    {
+      "id": "experiment-llm-jev-prior-tests-hypothesis-jev-search-prior",
+      "from_node": "experiment-llm-jev-prior",
+      "to_node": "hypothesis-jev-search-prior",
+      "type": "tests",
+      "created_at": 1791156182746
+    },
+    {
+      "id": "task-llm-layer-produced-experiment-llm-jev-prior",
+      "from_node": "task-llm-layer",
+      "to_node": "experiment-llm-jev-prior",
+      "type": "produced",
+      "created_at": 1791156182746
+    },
+    {
+      "id": "task-llm-layer-supports-decision-loss-reviewer-grok-4-7",
+      "from_node": "task-llm-layer",
+      "to_node": "decision-loss-reviewer-grok-4-7",
+      "type": "supports",
+      "created_at": 1791156182746
+    },
+    {
+      "id": "task-live-ladder-produced-result-live-ladder-c4",
+      "from_node": "task-live-ladder",
+      "to_node": "result-live-ladder-c4",
+      "type": "produced",
+      "created_at": 1791158863402
+    },
+    {
+      "id": "task-live-ladder-supports-goal-ladder-1",
+      "from_node": "task-live-ladder",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791158863402
+    },
+    {
+      "id": "challenger-exact-1ply-produced-result-ablation-exact-search",
+      "from_node": "challenger-exact-1ply",
+      "to_node": "result-ablation-exact-search",
+      "type": "produced",
+      "created_at": 1791160457504
+    },
+    {
+      "id": "hyp-fainted-hp-scored-full-derived-from-learning-fainted-hp",
+      "from_node": "hyp-fainted-hp-scored-full",
+      "to_node": "learning-fainted-hp",
+      "type": "derived_from",
+      "created_at": 1791160463725
+    },
+    {
+      "id": "learning-fainted-hp-supports-goal-ladder-1",
+      "from_node": "learning-fainted-hp",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791160463725
+    },
+    {
+      "id": "learning-rebuild-scored-as-loss-supports-goal-ladder-1",
+      "from_node": "learning-rebuild-scored-as-loss",
+      "to_node": "goal-ladder-1",
+      "type": "supports",
+      "created_at": 1791160463725
+    },
+    {
+      "id": "hyp-rebuild-scored-as-loss-derived-from-learning-rebuild",
+      "from_node": "hyp-rebuild-scored-as-loss",
+      "to_node": "learning-rebuild-scored-as-loss",
+      "type": "derived_from",
+      "created_at": 1791160463725
+    }
+  ]
+}

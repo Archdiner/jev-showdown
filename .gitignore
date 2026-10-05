@@ -1,0 +1,14 @@
+node_modules/
+logs/
+data/replays/
+dist/
+*.log
+.env
+.DS_Store
+data/*.json
+battles.db
+*.db
+*.db-journal
+coverage/
+.vscode/
+.idea/

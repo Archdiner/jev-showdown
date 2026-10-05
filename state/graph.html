@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Development Graph</title>
+  <style>
+    body { font-family: system-ui; margin: 20px; }
+    .node { border: 1px solid #ccc; padding: 10px; margin: 10px 0; border-radius: 5px; }
+    .node.Champion { background: #d4edda; }
+    .node.Goal { background: #cce5ff; }
+    .node.done { opacity: 0.6; }
+    .edges { margin-top: 10px; font-size: 0.9em; color: #666; }
+  </style>
+</head>
+<body>
+  <h1>Development Graph</h1>
+  <p>Exported: 2026-10-05T00:34:48.073Z</p>
+  
+  <h2>Nodes (38)</h2>
+  
+    <div class="node Goal open">
+      <strong>Goal: #1 on gen9randombattle ladder</strong>
+      <div>Status: open</div>
+      <div>Achieve top ranking through exact mechanics and strategic play</div>
+      
+      
+    </div>
+  
+    <div class="node Decision done">
+      <strong>Decision: TypeScript with @pkmn ecosystem</strong>
+      <div>Status: done</div>
+      <div>Need accurate Pokemon mechanics. Options: build from scratch, unofficial sims, or @pkmn packages.</div>
+      <div>Commit: <code>f209c86</code></div>
+      
+    </div>
+  
+    <div class="node Decision done">
+      <strong>Decision: MIT-only licensing</strong>
+      <div>Status: done</div>
+      <div>Open source project needs clear licensing.</div>
+      <div>Commit: <code>f209c86</code></div>
+      
+    </div>
+  
+    <div class="node Decision done">
+      <strong>Decision: Search-first over LLM-first</strong>
+      <div>Status: done</div>
+      <div>Two approaches: LLM generates moves, or traditional search.</div>
+      <div>Commit: <code>f209c86</code></div>
+      
+    </div>
+  
+    <div class="node Decision done">
+      <strong>Decision: Exact sim in search, not fallback</strong>
+      <div>Status: done</div>
+      <div>Original had 100% fallback to hand-written damage calc.</div>
+      <div>Commit: <code>f209c86</code></div>
+      
+    </div>
+  
+    <div class="node DataSource active">
+      <strong>DataSource: Smogon Gen9 Random Battle Sets</strong>
+      <div>Status: active</div>
+      
+      
+      
+    </div>
+  
+    <div class="node DataSource active">
+      <strong>DataSource: pkmn Randbats Statistics</strong>
+      <div>Status: active</div>
+      
+      
+      
+    </div>
+  
+    <div class="node Task open">
+      <strong>Task: Run full benchmark with exact sim</strong>
+      <div>Status: open</div>
+      <div>Measure true win rates with 0% fallback (300+ games vs random and max-damage)</div>
+      
+      
+    </div>
+  
+    <div class="node Task in_progress">
+      <strong>Task: Make ladder client production-ready</strong>
+      <div>Status: in_progress</div>
+      <div>Live ladder games with reconnection, timer-safe moves, logging</div>
+      
+      
+    </div>
+  
+    <div class="node Learning active">
+      <strong>Learning: Strict role narrowing from reveals</strong>
+      <div>Status: active</div>
+      <div>Enumerate opponent possible roles and narrow strictly from revealed moves, ability, item, Tera. Roles exclude certain moves/items (match Showdex set tab).</div>
+      
+      
+    </div>
+  
+    <div class="node Learning active">
+      <strong>Learning: Hazards are huge in randbats</strong>
+      <div>Status: active</div>
+      <div>Boots and removal are rare. Toxic Spikes wins games vs teams with few Poison types. Get setter in safely, never risk it. Don't set rocks while threat sets up. Don't sacrifice team for useless layers. If opponent has hazards and we don't, play faster.</div>
+      
+      
+    </div>
+  
+    <div class="node Learning active">
+      <strong>Learning: Preserve resources and information advantage</strong>
+      <div>Status: active</div>
+      <div>No team preview means info is advantage. Don't throw mons away to unknown threats. Don't speedrun unless matchup good or opponent hazards force it. Use Tera second. Exception: sacrificing slow, low-HP hazard setter for momentum is fine.</div>
+      
+      
+    </div>
+  
+    <div class="node Learning active">
+      <strong>Learning: Identify and preserve speed option</strong>
+      <div>Status: active</div>
+      <div>Keep fastest mon, priority, Choice Scarf, or speed booster healthy and hidden. Endgames are chip-heavy. Use wallbreakers early.</div>
+      
+      
+    </div>
+  
+    <div class="node Learning active">
+      <strong>Learning: Team-generation rules are information</strong>
+      <div>Status: active</div>
+      <div>Constraints: max 2 mons per type, max 3 weak to one type, no shared 4x weakness, only 1 Tera Blast role per team (Gen 9).</div>
+      
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Hazard differential weighted by boots/removal</strong>
+      <div>Status: open</div>
+      <div>Expert says hazards dominate randbats due to rare boots/removal. Should weight hazard advantage higher than current eval.</div>
+      
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Protect hazard setter (never risk it)</strong>
+      <div>Status: open</div>
+      <div>Expert: get setter in safely, never risk it. Current eval doesn't distinguish setter from other mons.</div>
+      
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Resource preservation (don't throw mons away)</strong>
+      <div>Status: open</div>
+      <div>Expert: don't throw mons to unknown threats. No team preview means info is advantage.</div>
+      
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Tera-second prior (opponent Teras first)</strong>
+      <div>Status: open</div>
+      <div>Expert: use Tera second. Preserves our options and forces opponent to commit first.</div>
+      
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Speed option preservation</strong>
+      <div>Status: open</div>
+      <div>Expert: identify and preserve fastest mon / priority / Scarf. Endgames are chip-heavy.</div>
+      
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Play faster when opponent has hazard advantage</strong>
+      <div>Status: open</div>
+      <div>Expert: if opponent has hazards and we don't, play faster. Don't switch as much.</div>
+      
+      
+    </div>
+  
+    <div class="node Task open">
+      <strong>Task: Implement team-generation constraints</strong>
+      <div>Status: open</div>
+      <div>Verify and enforce: max 2 mons per type, max 3 weak to one type, no shared 4x weakness, only 1 Tera Blast per team</div>
+      
+      
+    </div>
+  
+    <div class="node Task open">
+      <strong>Task: Implement strict role narrowing from reveals</strong>
+      <div>Status: open</div>
+      <div>Narrow opponent set possibilities strictly: each role excludes certain moves/items. Match Showdex behavior.</div>
+      
+      
+    </div>
+  
+    <div class="node Result done">
+      <strong>Result: Gate: promoted</strong>
+      <div>Status: done</div>
+      <div>+448.0 avg Elo vs panel (2/2 improved). held-out forced-win 0/0, deep agreement 37.8% vs max-damage 21.2% (17 replay positions)</div>
+      
+      <div>Metrics: {"verdict":"promoted","games":600,"panel_results":[{"opponent":"random-v1","challenger_elo":2176.0784320114053,"champion_elo":1500,"elo_diff":676.0784320114053,"win_rate":0.98,"ci_lower":0.9570598132699448,"ci_upper":0.9908024939322289,"games":300,"significant_improvement":true,"significant_regression":false},{"opponent":"maxdamage-v1","challenger_elo":1719.8687687473098,"champion_elo":1500,"elo_diff":219.8687687473098,"win_rate":0.78,"ci_lower":0.7297464012422271,"ci_upper":0.8231732779590409,"games":300,"significant_improvement":true,"significant_regression":false}],"guardrails":{"passed":true,"invalid_choices":0,"crashes":0,"timeouts":0,"p99_turn_time_ms":190,"fallback_rate":0,"state_mismatches":0},"held_out":{"ok":true,"reason":"held-out forced-win 0/0, deep agreement 37.8% vs max-damage 21.2% (17 replay positions)","positions":217,"replay_positions":17,"forced_win_hit":0,"forced_win_total":0,"deep_hit":82,"deep_total":217,"max_damage_deep_hit":46,"max_damage_deep_total":217}}</div>
+    </div>
+  
+    <div class="node Champion superseded">
+      <strong>Champion: Champion v0: Exact Sim</strong>
+      <div>Status: superseded</div>
+      <div>3-ply expectiminimax with 0% fallback, exact @pkmn/sim mechanics</div>
+      <div>Commit: <code>f209c86</code></div>
+      <div>Metrics: {"win_rate_vs_random":1,"invalid_choices":0,"crashes":0,"timeouts":0,"p99_turn_time_ms":1500,"fallback_rate":0,"state_mismatches":0}</div>
+    </div>
+  
+    <div class="node DataSource active">
+      <strong>DataSource: Vercel AI Gateway model catalog</strong>
+      <div>Status: active</div>
+      <div>GET https://ai-gateway.vercel.sh/v1/models on 2026-10-04. Reviewer default chosen from this list.</div>
+      
+      
+    </div>
+  
+    <div class="node Task done">
+      <strong>Task: LLM advisor and loss reviewer</strong>
+      <div>Status: done</div>
+      <div>Vercel AI Gateway client, Jev advisor blend (off by default), and Grok 4.7 loss reviewer that writes hypotheses. Search engine and live client were not modified.</div>
+      <div>Commit: <code>debf11ff1e825cc0ae115ba8abf7b9a0053ba163</code></div>
+      <div>Metrics: {"smoke":"skipped","smoke_reason":"missing_VERCEL_AI_GATEWAY_KEY","reviewer_model":"spacexai/grok-4.7"}</div>
+    </div>
+  
+    <div class="node Decision done">
+      <strong>Decision: Loss reviewer defaults to Grok 4.7</strong>
+      <div>Status: done</div>
+      <div>Do not default the post-game reviewer to anthropic/claude-opus-4.5. Prefer the newest xAI Grok frontier model on the gateway.</div>
+      <div>Commit: <code>debf11ff1e825cc0ae115ba8abf7b9a0053ba163</code></div>
+      <div>Metrics: {"reviewer_model":"spacexai/grok-4.7","input_usd_per_token":"0.000002","output_usd_per_token":"0.000006","input_cache_read_usd_per_token":"0.0000005","input_usd_per_million":2,"output_usd_per_million":6,"jev_model":"typesafe-ai/jev","jev_input_usd_per_token":"0.000000042","jev_output_usd_per_token":"0","jev_input_usd_per_million":0.042,"catalog_checked_at":"2026-10-04"}</div>
+    </div>
+  
+    <div class="node Experiment open">
+      <strong>Experiment: Challenger: Jev search prior</strong>
+      <div>Status: open</div>
+      <div>Gate challenger only. Champion blend mode stays off. Degrades to pure search when the gateway key is missing or the call exceeds the turn latency budget.</div>
+      <div>Commit: <code>debf11ff1e825cc0ae115ba8abf7b9a0053ba163</code></div>
+      
+    </div>
+  
+    <div class="node Hypothesis open">
+      <strong>Hypothesis: Jev prior on top-K search actions</strong>
+      <div>Status: open</div>
+      <div>Off by default. A gate challenger may blend Jev scores into search. Missing key or timeout degrades to pure search. Not applied to the champion.</div>
+      <div>Commit: <code>debf11ff1e825cc0ae115ba8abf7b9a0053ba163</code></div>
+      
+    </div>
+  
+    <div class="node Task done">
+      <strong>Task: Live ladder client</strong>
+      <div>Status: done</div>
+      <div>Websocket ladder client with login, per-room state, legal choices, JSONL logs, replay save, --engine, and --concurrency.</div>
+      <div>Commit: <code>6e9948c</code></div>
+      
+    </div>
+  
+    <div class="node Result done">
+      <strong>Result: Concurrency 4 local verification</strong>
+      <div>Status: done</div>
+      <div>15 gen9randombattle games on one login pair at concurrency 4, engine max-damage. invalid=0 crashes=0 fallbacks=0 mismatches=0. Peak of 4 simultaneous battles. Earlier head-to-head: max-damage 12, search 1.</div>
+      <div>Commit: <code>6e9948c</code></div>
+      <div>Metrics: {"invalid_choices":0,"crashes":0,"fallbacks":0,"mismatches":0,"concurrency":4,"games":15}</div>
+    </div>
+  
+    <div class="node Experiment done">
+      <strong>Experiment: Exact 1-ply HP search</strong>
+      <div>Status: done</div>
+      <div>Clone the live battle with toJSON/fromJSON. Opponent line is the @smogon/calc max-damage move. Eval is HP fraction plus faint counts. Terminal win is +1000.</div>
+      <div>Commit: <code>fcd9c92</code></div>
+      
+    </div>
+  
+    <div class="node Hypothesis done">
+      <strong>Hypothesis: Rebuilt battles scored as losses</strong>
+      <div>Status: done</div>
+      <div>The 3-ply search is weak because it rebuilds a battle and scores a rejected choice as a loss, not because HP eval is too small.</div>
+      <div>Commit: <code>64c946b</code></div>
+      
+    </div>
+  
+    <div class="node Champion active">
+      <strong>Champion: Champion: exact 1-ply HP search</strong>
+      <div>Status: active</div>
+      <div>1-ply exact @pkmn/sim battle clone. Opponent line is the accuracy-weighted max-damage move. Eight RNG draws are averaged. Eval is HP fraction plus faint counts.</div>
+      
+      <div>Metrics: {"win_rate_vs_random":0.98,"win_rate_vs_maxdamage":0.78,"invalid_choices":0,"crashes":0,"timeouts":0,"p99_turn_time_ms":190,"fallback_rate":0,"state_mismatches":0}</div>
+    </div>
+  
+    <div class="node Result done">
+      <strong>Result: Ablation of exact battle-clone search</strong>
+      <div>Status: done</div>
+      <div>Same seed start 1. Champion row is 150 pairs. Other rows are smaller samples of the same harness. Full eval before the 0 HP fix is the row that collapses.</div>
+      <div>Commit: <code>fcd9c92</code></div>
+      <div>Metrics: {"rows":[{"name":"1-ply max-damage HP, 8 samples","vs_random":"98.0% (294-5-1/300)","vs_max":"78.0% (234-66-0/300)","p99_ms":190},{"name":"1-ply max-damage HP, 1 sample","vs_random":"98.8% (79-0-1/80)","vs_max":"82.5% (66-14-0/80)","p99_ms":60},{"name":"1-ply uniform HP, 1 sample","vs_random":"97.5% (78-1-1/80)","vs_max":"67.5% (54-26-0/80)","p99_ms":198},{"name":"2-ply max-damage HP, 1 sample","vs_random":"96.7% (29-1-0/30)","vs_max":"80.0% (24-6-0/30)","p99_ms":333},{"name":"3-ply max-damage HP, 1 sample","vs_random":"100% (8-0-0/8)","vs_max":"not run","p99_ms":2400},{"name":"1-ply full eval before 0 HP fix","vs_random":"72.5% (29-11-0/40)","vs_max":"5.0% (2-38-0/40)","p99_ms":50},{"name":"1-ply full eval after 0 HP fix","vs_random":"100% (40-0-0/40)","vs_max":"77.5% (31-9-0/40)","p99_ms":98}]}</div>
+    </div>
+  
+    <div class="node Hypothesis done">
+      <strong>Hypothesis: 0 HP was scored as a full health bar</strong>
+      <div>Status: done</div>
+      <div>The full evaluator treated a falsy currentHp as unknown and assumed 100% HP.</div>
+      <div>Commit: <code>fcd9c92</code></div>
+      
+    </div>
+  
+    <div class="node Learning active">
+      <strong>Learning: 0 HP is a faint</strong>
+      <div>Status: active</div>
+      <div>Do not use a truthiness check on current HP.</div>
+      <div>Commit: <code>fcd9c92</code></div>
+      
+    </div>
+  
+    <div class="node Learning active">
+      <strong>Learning: Search the live battle clone</strong>
+      <div>Status: active</div>
+      <div>A rebuilt battle that rejects the live choice is not a loss.</div>
+      <div>Commit: <code>fcd9c92</code></div>
+      
+    </div>
+  
+  
+  <h2>Edges (35)</h2>
+  <ul>
+  
+    <li>challenger-exact-1ply --[tests]--> hyp-rebuild-scored-as-loss</li>
+  
+    <li>challenger-exact-1ply --[produced]--> result-challenger-exact-1ply-1791160362753</li>
+  
+    <li>champion-exact-1ply --[supersedes]--> champion-v0</li>
+  
+    <li>challenger-exact-1ply --[supersedes]--> champion-v0</li>
+  
+    <li>decision-typescript-pkmn --[supports]--> goal-ladder-1</li>
+  
+    <li>decision-mit-only --[supports]--> goal-ladder-1</li>
+  
+    <li>decision-search-first --[supports]--> goal-ladder-1</li>
+  
+    <li>decision-exact-sim --[supports]--> goal-ladder-1</li>
+  
+    <li>task-full-benchmark --[tests]--> champion-v0</li>
+  
+    <li>learning-set-info-narrowing --[supports]--> goal-ladder-1</li>
+  
+    <li>learning-hazards-huge --[supports]--> goal-ladder-1</li>
+  
+    <li>learning-preserve-resources --[supports]--> goal-ladder-1</li>
+  
+    <li>learning-speed-option --[supports]--> goal-ladder-1</li>
+  
+    <li>learning-team-gen-rules --[supports]--> goal-ladder-1</li>
+  
+    <li>hyp-hazard-differential --[derived_from]--> learning-hazards-huge</li>
+  
+    <li>hyp-protect-hazard-setter --[derived_from]--> learning-hazards-huge</li>
+  
+    <li>hyp-resource-preservation --[derived_from]--> learning-preserve-resources</li>
+  
+    <li>hyp-tera-second --[derived_from]--> learning-preserve-resources</li>
+  
+    <li>hyp-speed-option-preservation --[derived_from]--> learning-speed-option</li>
+  
+    <li>hyp-tempo-switch-hazard-disadvantage --[derived_from]--> learning-hazards-huge</li>
+  
+    <li>task-team-gen-constraints --[tests]--> learning-team-gen-rules</li>
+  
+    <li>task-strict-role-narrowing --[tests]--> learning-set-info-narrowing</li>
+  
+    <li>decision-loss-reviewer-grok-4-7 --[derived_from]--> datasource-vercel-ai-gateway-models</li>
+  
+    <li>decision-loss-reviewer-grok-4-7 --[supports]--> goal-ladder-1</li>
+  
+    <li>hypothesis-jev-search-prior --[supports]--> goal-ladder-1</li>
+  
+    <li>experiment-llm-jev-prior --[tests]--> hypothesis-jev-search-prior</li>
+  
+    <li>task-llm-layer --[produced]--> experiment-llm-jev-prior</li>
+  
+    <li>task-llm-layer --[supports]--> decision-loss-reviewer-grok-4-7</li>
+  
+    <li>task-live-ladder --[produced]--> result-live-ladder-c4</li>
+  
+    <li>task-live-ladder --[supports]--> goal-ladder-1</li>
+  
+    <li>challenger-exact-1ply --[produced]--> result-ablation-exact-search</li>
+  
+    <li>hyp-fainted-hp-scored-full --[derived_from]--> learning-fainted-hp</li>
+  
+    <li>learning-fainted-hp --[supports]--> goal-ladder-1</li>
+  
+    <li>learning-rebuild-scored-as-loss --[supports]--> goal-ladder-1</li>
+  
+    <li>hyp-rebuild-scored-as-loss --[derived_from]--> learning-rebuild-scored-as-loss</li>
+  
+  </ul>
+</body>
+</html>

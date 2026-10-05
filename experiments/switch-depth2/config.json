@@ -1,0 +1,11 @@
+{
+  "id": "switch-depth2",
+  "depth": 2,
+  "opponentModel": "switch",
+  "evalMode": "team",
+  "errorAsLoss": false,
+  "samples": 1,
+  "maxReplies": 2,
+  "minReplyProb": 0.05,
+  "deeperChoices": 6
+}
