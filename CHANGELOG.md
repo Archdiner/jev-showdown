@@ -6,7 +6,7 @@ Local self-play, the factory, and the gatekeeper used to search the real battle,
 
 `information: full` on a game, `--information=full` on `npx tsx src/bench/cli.ts`, or `JEV_INFORMATION=full` keeps the old omniscient sim for comparison. The default is hidden.
 
-Same seeds, 20 pairs, sides swapped, 40 games. `exact` is `EXACT_1PLY` (8 samples). Invalid choices 0, crashes 0, view misses 0.
+Same seeds, 20 pairs, sides swapped, 40 games, after `npm run data:refresh` (509 randbats species in `gen9-stats.json`). `exact` is `EXACT_1PLY` (8 samples). Invalid choices 0, crashes 0, view misses 0.
 
 | Matchup | Full information | Hidden information |
 | --- | --- | --- |
