@@ -20,6 +20,7 @@ import {
   noteOutcome,
   parseCircuitBook,
   releaseChampionPulls,
+  releaseLossStreakPulls,
   selectionPool,
   type Allocatable,
   type CircuitBook,
@@ -180,7 +181,10 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   };
   const book = readCircuitBook(paths);
   const scope: CircuitScope = local ? 'local' : 'ladder';
-  if (releaseChampionPulls(book[scope], approved)) writeCircuitBook(paths, book);
+  let circuitsChanged = false;
+  if (scope === 'ladder') circuitsChanged = releaseLossStreakPulls(book.ladder);
+  if (releaseChampionPulls(book[scope], approved)) circuitsChanged = true;
+  if (circuitsChanged) writeCircuitBook(paths, book);
   const knownGood = knownGoodChampions(paths);
   const variantPool = loadVariantPool(paths);
   const variantCounts: Record<string, ArmCount> = countsFromLiveGames(
@@ -235,7 +239,9 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   const timeoutMs = opts.timeoutMs ?? 120_000;
   const bounded = opts.once === true || (typeof opts.games === 'number' && Number.isFinite(opts.games));
   let queue!: LadderQueue;
-  const pool = () => selectionPool(approved, book[scope], knownGood, Date.now());
+  const pool = () => selectionPool(approved, book[scope], knownGood, Date.now(), {
+    ignoreLossStreakPulls: scope === 'ladder',
+  });
   const hasOpenConfig = () => approved.length > 0 && allocate(pool(), () => 0, exploreRate) !== null;
   queue = new LadderQueue(
     client,
@@ -426,6 +432,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
               role,
               baselineWinRate: baselineFromGames(scopedOutcomes(paths, current.config.configId, scope)),
               now: Date.now(),
+              pullOnLossStreak: scope === 'local',
             },
           );
           book.ladder = updated.ladder;

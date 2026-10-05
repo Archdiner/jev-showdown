@@ -52,6 +52,8 @@ import {
 } from '../client/ladder-identity.js';
 import {
   AbSession,
+  parseAbHealth,
+  type AbHealthLimits,
   appendAbIncident,
   formatAbCanary,
   formatAbPlan,
@@ -89,6 +91,8 @@ interface LadderOptions {
   idleMs: number;
   /** Repeatable `--ab <config>:<share>`. Share is a fraction of battles. */
   ab: string[];
+  /** Health thresholds for benching an A/B arm. Loss streaks are not a threshold. */
+  abHealth: Partial<AbHealthLimits>;
   check: boolean;
   help: boolean;
 }
@@ -122,6 +126,7 @@ function parseArgs(argv: string[]): LadderOptions {
     rollback: false,
     idleMs: DEFAULT_SERIES_IDLE_MS,
     ab: [],
+    abHealth: {},
     check: false,
     help: false,
   };
@@ -164,6 +169,7 @@ function parseArgs(argv: string[]): LadderOptions {
     else if (arg === '--rollback') opts.rollback = true;
     else if (arg === '--idle-ms') opts.idleMs = Number(next());
     else if (arg === '--ab') opts.ab.push(next());
+    else if (arg === '--ab-health') opts.abHealth = parseAbHealth(next());
     else if (arg === '--check') opts.check = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -223,7 +229,7 @@ A missing label, a file whose hash no longer matches the label, or two active ch
 The config is chosen once, before the first search. A promotion during the batch does not change it. Drain and start again to pick up a new champion.
 Each finished game records configId, configHash, role (champion or challenger), share, and the commit. The startup line is: config live source=... id=... hash=... commit=...
 --ab <config>:<share> is repeatable. <config> is a yaml/json path, a config id under configs/, or an engine profile (search, exact, max-damage). <share> is that config's fraction of new battles, in (0, 1]. The shares must sum to at most 1. The rest play the champion (--engine, or --labeled-champion). A battle keeps the arm chosen from a hash of its room id. Concurrency, the turn timer, and the choice watchdog stay shared. The account lock below is taken once, before login, for this whole process. Every arm shares that one lock.
-A challenger is pulled to champion-only after an invalid move, a timer loss, a crash, or 4 losses in a row. Each pull is one line in incidents.jsonl.
+A challenger keeps its configured share for the whole batch. A loss streak is logged as a regression and does not change the share. The arm is benched only for health failures: invalid choices, crashes, a timer loss or a decision timeout, or a choice-fallback flood. Defaults are 1 invalid choice, 1 crash, 1 timer or decision timeout, and 5 choice fallbacks. --ab-health invalid=1,crashes=1,timer=1,fallbacks=5 overrides those. Each bench is one line in incidents.jsonl. The batch summary logs each arm's realized share next to its configured share.
   npm run ladder -- --games 40 --format gen9randombattle --engine search --concurrency 3 --ab configs/panel/maxdamage.yaml:0.2
 --concurrency K keeps up to K battles on one login (default 1, absolute max ${MAX_LADDER_CONCURRENCY}).
 --use-engine-profile reads configs/live/concurrency.json (search 3, max-damage 4, grok 1).
@@ -606,14 +612,9 @@ function report(
     configSource: identity.source,
     configPath: identity.configPath,
     configReason: identity.reason,
-    ab: route.plan.arms.map(arm => ({
-      configId: arm.configId,
-      role: arm.role,
-      share: arm.share,
-      engine: arm.engine,
-      configPath: arm.configPath,
-    })),
+    ab: route.shareReport(played),
     pulled: route.pulledIds(),
+    regressions: route.regressionIds(),
     incidents: route.incidents.length,
     local: opts.local,
     endReason,
@@ -634,6 +635,14 @@ function report(
   const out = path.join(opts.logDir, 'summary.json');
   fs.writeFileSync(out, JSON.stringify(reportBody, null, 2));
   console.log(`[ladder] games=${played.length} invalid=${invalidChoices} crashes=${crashes} fallbacks=${fallbacks} mismatches=${mismatches}`);
+  for (const arm of route.shareReport(played)) {
+    const realized = arm.realizedShare.toFixed(3);
+    const configured = arm.configuredShare.toFixed(3);
+    console.log(
+      `[ladder] ab ${arm.role} ${arm.configId} configured=${configured} realized=${realized} games=${arm.games}/${played.length}` +
+      `${arm.benched ? ' benched' : ''}${arm.regression ? ` regression streak=${arm.lossStreak}` : ''}`,
+    );
+  }
   console.log(`[ladder] run=${stamp.runId} batch=${stamp.batchLabel ?? 'n/a'} host=${stamp.hostname}`);
   console.log(`[ladder] endReason=${endReason} games=${played.length}/${opts.games}`);
   console.log(`[ladder] summary ${out}`);
@@ -876,8 +885,13 @@ function openAbRoute(opts: LadderOptions, identity: LadderIdentity): AbSession {
   return new AbSession(plan, incident => {
     appendAbIncident(opts.logDir, incident);
     console.error(
-      `[ladder] incident pull config=${incident.configId} reason=${incident.reason} battle=${incident.battleId} ${incident.detail}`,
+      `[ladder] incident bench config=${incident.configId} reason=${incident.reason} battle=${incident.battleId} ${incident.detail}`,
     );
+  }, {
+    health: opts.abHealth,
+    onRegression: note => {
+      console.log(`[ladder] ab regression config=${note.configId} streak=${note.streak} scheduling=unchanged battle=${note.battleId}`);
+    },
   });
 }
 

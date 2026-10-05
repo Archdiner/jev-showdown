@@ -1,10 +1,28 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { battleRowChoice, isDuplicateDisconnect } from '../../client/game-integrity.js';
+import { sprt, wilson } from '../../dashboard/stats.js';
 import { GraphDB } from '../../graph/db.js';
 import { degenerateAlert } from '../cycle.js';
 import { compareIncidents, openP0 } from './incidents.js';
 import { actionable, type Incident, type IncidentEvent, type ObservedGame, type SentinelContext } from './types.js';
+
+/** A per-arm verdict is marked only after this many games. SPRT state is still shown before that. */
+export const AB_VERDICT_MIN_GAMES = 40;
+
+export interface ArmJudgement {
+  configId: string;
+  wins: number;
+  losses: number;
+  ties: number;
+  games: number;
+  wilsonRate: number | null;
+  wilsonLow: number | null;
+  wilsonHigh: number | null;
+  sprt: 'promote' | 'reject' | 'continue';
+  /** Null until the arm has AB_VERDICT_MIN_GAMES. Then it is the SPRT state. */
+  verdict: 'promote' | 'reject' | 'continue' | null;
+}
 
 export interface Scorecard {
   sinceMs: number;
@@ -41,6 +59,8 @@ export interface Scorecard {
     winTarget: number;
     batches: Array<{ id: string; wins: number; losses: number; ties: number; games: number; winRate: number | null }>;
     variants: Array<{ id: string; wins: number; losses: number; ties: number; games: number; winRate: number | null }>;
+    /** Cumulative across loaded ladder games, keyed by configId. Not reset per batch. */
+    arms: ArmJudgement[];
     loopCycles: number | null;
     loopDetail: string;
     loopHealth: string;
@@ -91,11 +111,13 @@ export function buildScorecard(ctx: SentinelContext, incidents: Incident[], _eve
   const graph = readGraph(ctx, since);
   const batches = batchRows(ctx, countable(uniqueLadderGames(ctx, gamesBetween(ctx.games, since, ctx.now + 60_000, true))));
   const variants = variantRows(counted);
+  const arms = judgeArms(countable(ctx.games));
   const tally = tallyOf(counted);
   const notes = [
     `Phantom games excluded: ${phantoms.length}. Rule: ${PHANTOM_RULE}.`,
     `Local games excluded from Elo and win rate: ${local.length}.`,
     `Duplicate disconnect ties excluded: ${duplicateTies}. A mid-game disconnect tie next to one decisive result for the same battle is not counted.`,
+    `Arm records are cumulative across loaded ladder games, keyed by configId. A verdict is marked at ${AB_VERDICT_MIN_GAMES} games.`,
   ];
   if (!ctx.processesScanned) notes.push('Process list was not scanned. Runner pid checks are in npm run ops -- sentinel.');
   if (ctx.git.behind === null) notes.push(`Git: ${ctx.git.detail}`);
@@ -138,6 +160,7 @@ export function buildScorecard(ctx: SentinelContext, incidents: Incident[], _eve
       winTarget: ctx.winTarget,
       batches,
       variants,
+      arms,
       loopCycles: graph.cycles,
       loopDetail: graph.detail,
       loopHealth: loopHealth(ctx, since),
@@ -208,6 +231,15 @@ export function formatScorecard(card: Scorecard, style: 'text' | 'md' = 'text'):
   if (card.progress.variants.length === 0) lines.push('    none');
   for (const variant of card.progress.variants) {
     lines.push(`    ${variant.id}  ${variant.wins}-${variant.losses}-${variant.ties}  ${variant.winRate === null ? 'n/a' : pct(variant.winRate)}  n=${variant.games}`);
+  }
+  lines.push('  arms');
+  if (card.progress.arms.length === 0) lines.push('    none');
+  for (const arm of card.progress.arms) {
+    const interval = arm.wilsonLow === null || arm.wilsonHigh === null || arm.wilsonRate === null
+      ? 'n/a'
+      : `${pct(arm.wilsonRate)} [${pct(arm.wilsonLow)}, ${pct(arm.wilsonHigh)}]`;
+    const verdict = arm.verdict ?? 'pending';
+    lines.push(`    ${arm.configId}  ${arm.wins}-${arm.losses}-${arm.ties}  n=${arm.games}  Wilson ${interval}  sprt=${arm.sprt}  verdict=${verdict}`);
   }
   const cycles = card.progress.loopCycles === null ? 'unknown' : String(card.progress.loopCycles);
   lines.push(`  loop       ${cycles} cycles  ${card.progress.loopDetail}`);
@@ -480,6 +512,35 @@ function batchRows(ctx: SentinelContext, games: ObservedGame[]): Scorecard['prog
     groups.set(id, list);
   }
   return [...groups.entries()].map(([id, rows]) => ({ id, ...tallyOf(rows) }));
+}
+
+/** Cumulative W-L, Wilson interval, and SPRT for each configId. Verdict stays unset under 40 games. */
+export function judgeArms(games: readonly ObservedGame[]): ArmJudgement[] {
+  const groups = new Map<string, ObservedGame[]>();
+  for (const game of games) {
+    if (!game.configId || game.phantom || game.local || !game.outcome) continue;
+    const list = groups.get(game.configId) ?? [];
+    list.push(game);
+    groups.set(game.configId, list);
+  }
+  return [...groups.entries()].map(([configId, rows]) => {
+    const tally = tallyOf(rows);
+    const decisive = tally.wins + tally.losses;
+    const interval = wilson(tally.wins, decisive);
+    const state = sprt(tally.wins, tally.losses);
+    return {
+      configId,
+      wins: tally.wins,
+      losses: tally.losses,
+      ties: tally.ties,
+      games: tally.games,
+      wilsonRate: interval.rate,
+      wilsonLow: interval.low,
+      wilsonHigh: interval.high,
+      sprt: state,
+      verdict: tally.games >= AB_VERDICT_MIN_GAMES ? state : null,
+    };
+  }).sort((a, b) => b.games - a.games || a.configId.localeCompare(b.configId));
 }
 
 function variantRows(games: ObservedGame[]): Scorecard['progress']['variants'] {

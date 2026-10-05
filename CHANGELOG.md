@@ -1,5 +1,9 @@
 # Changelog
 
+## Live A/B arms keep their share
+
+A challenger at a fixed `--ab` share was benched after four losses. In one batch, exact-1ply-qw was configured at 0.5 and played 5 of 33 games, so the comparison never reached a stable win rate. A loss streak is now a regression flag. It does not change the share. An arm is benched only for health failures: invalid choices, crashes, a timer loss or a decision timeout, or a choice-fallback flood. The defaults are 1, 1, 1, and 5, and `--ab-health` overrides them. The ladder breaker records the same streak without pulling; the local breaker still can, and that bucket does not schedule ladder games. Each batch summary logs realized share against configured share. The sentinel raises P2 `ab-share-deviation` when that gap is outside binomial noise after 15 games. The scorecard shows cumulative W-L, a Wilson interval, and SPRT for each configId, and marks a verdict only after 40 games.
+
 ## Sentinel scans stay bounded
 
 `npm run ops -- sentinel` died once a single JSONL log passed about 123,000 lines. `collectRows` did `rows.push(...readLogFile(file))`, and that spread throws `RangeError: Maximum call stack size exceeded` (measured on Node 22.14.0: 123,120 lines load, 123,121 throws, at `load.ts:348`). Each scan also parsed every ops JSONL from the start, including the sentinel's own `incidents.jsonl`.

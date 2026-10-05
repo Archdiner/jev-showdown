@@ -1,13 +1,16 @@
 import { loadConfig } from '../config/load.js';
 import {
+  AB_REGRESSION_STREAK,
   AbSession,
   assignArm,
   battleBucket,
   buildPlan,
-  CHALLENGER_LOSS_STREAK,
+  DEFAULT_AB_HEALTH,
+  parseAbHealth,
   parseAbSpec,
   preflightCanaries,
   resolveAbPlan,
+  shareBeyondBinomialNoise,
   shareUnits,
 } from './ab-route.js';
 import { ladderConfigId, ladderPolicy, policyHash } from './ladder-engine.js';
@@ -91,7 +94,7 @@ describe('ab routing', () => {
     expect(assignArm(championId, arms, pulled).redirected).toBe(false);
   });
 
-  it('pulls a challenger on an invalid move, a timer loss, a crash, or four losses', () => {
+  it('benches a challenger on an invalid move, a timer loss, a decision timeout, or a crash', () => {
     const session = new AbSession(plan());
     const id = firstId(session, 'challenger');
     expect(session.noteFault(id, 'invalid-move')?.reason).toBe('invalid-move');
@@ -105,18 +108,59 @@ describe('ab routing', () => {
     const timerId = firstId(timer, 'challenger');
     expect(timer.noteGame(fact(timerId, { endReason: 'our-timer', outcome: 'loss' }))?.reason).toBe('timer-loss');
 
+    const timedOut = new AbSession(plan());
+    const timeoutId = firstId(timedOut, 'challenger');
+    expect(timedOut.noteGame(fact(timeoutId, { decisionTimeouts: 1, outcome: 'loss', endReason: 'ko' }))?.reason).toBe('decision-timeout');
+
     const crash = new AbSession(plan());
     const crashId = firstId(crash, 'challenger');
     expect(crash.noteGame(fact(crashId, { crashes: 1, outcome: 'loss', endReason: 'ko' }))?.reason).toBe('crash');
+  });
 
-    const streak = new AbSession(plan());
-    for (let i = 0; i < CHALLENGER_LOSS_STREAK - 1; i++) {
-      const battleId = nextFresh(streak, 'challenger');
-      expect(streak.noteGame(fact(battleId, { outcome: 'loss', endReason: 'ko' }))).toBeNull();
+  it('keeps a challenger share through six losses and flags the streak without benching', () => {
+    const session = new AbSession(plan(0.5));
+    const played: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const battleId = nextFresh(session, 'challenger');
+      played.push(battleId);
+      expect(session.noteGame(fact(battleId, { outcome: 'loss', endReason: 'ko' }))).toBeNull();
+      expect(session.assign(battleId).role).toBe('challenger');
     }
-    const fourth = nextFresh(streak, 'challenger');
-    expect(streak.noteGame(fact(fourth, { outcome: 'loss', endReason: 'ko' }))?.reason).toBe('loss-streak');
-    expect(streak.incidents).toHaveLength(1);
+    expect(session.isPulled('depth-2')).toBe(false);
+    expect(session.lossStreak('depth-2')).toBe(6);
+    expect(session.isRegression('depth-2')).toBe(true);
+    expect(session.incidents).toEqual([]);
+    const again = nextFresh(session, 'challenger');
+    expect(session.assign(again).role).toBe('challenger');
+    expect(session.assign(again).redirected).toBe(false);
+    expect(session.assign(again).share).toBe(0.5);
+    const report = session.shareReport(played.map(battleId => ({ configId: 'depth-2', battleId })));
+    expect(report.find(arm => arm.role === 'challenger')).toMatchObject({
+      configuredShare: 0.5,
+      games: 6,
+      realizedShare: 1,
+      benched: false,
+      lossStreak: 6,
+      regression: true,
+    });
+    expect(AB_REGRESSION_STREAK).toBe(4);
+  });
+
+  it('benches on a choice-fallback flood and honors a higher threshold', () => {
+    const flood = new AbSession(plan());
+    const below = firstId(flood, 'challenger');
+    expect(flood.noteGame(fact(below, { fallbacks: DEFAULT_AB_HEALTH.fallbackFlood - 1 }))).toBeNull();
+    expect(flood.isPulled('depth-2')).toBe(false);
+    const over = nextFresh(flood, 'challenger');
+    expect(flood.noteGame(fact(over, { fallbacks: 1 }))?.reason).toBe('fallback-flood');
+    expect(flood.assign(nextFresh(flood, 'challenger')).role).toBe('champion');
+
+    const roomy = new AbSession(plan(), undefined, { health: { fallbackFlood: 8 } });
+    const held = firstId(roomy, 'challenger');
+    expect(roomy.noteGame(fact(held, { fallbacks: 5 }))).toBeNull();
+    expect(roomy.isPulled('depth-2')).toBe(false);
+    expect(parseAbHealth('invalid=2,fallbacks=8')).toEqual({ invalidChoices: 2, fallbackFlood: 8 });
+    expect(() => parseAbHealth('streak=4')).toThrow(/unknown key/);
   });
 
   it('resets the loss streak on a win and does not pull the champion', () => {
@@ -125,6 +169,8 @@ describe('ab routing', () => {
       session.noteGame(fact(nextFresh(session, 'challenger'), { outcome: 'loss', endReason: 'ko' }));
     }
     session.noteGame(fact(nextFresh(session, 'challenger'), { outcome: 'win', endReason: 'ko' }));
+    expect(session.lossStreak('depth-2')).toBe(0);
+    expect(session.isRegression('depth-2')).toBe(false);
     for (let i = 0; i < 3; i++) {
       expect(session.noteGame(fact(nextFresh(session, 'challenger'), { outcome: 'loss', endReason: 'ko' }))).toBeNull();
     }
@@ -170,6 +216,13 @@ describe('ab routing', () => {
     expect(canaries).toHaveLength(3);
     expect(canaries.map(canary => canary.configId)).toEqual(resolved.arms.map(arm => arm.configId));
   });
+
+  it('flags a realized share outside binomial noise only after 15 games', () => {
+    expect(shareBeyondBinomialNoise(0.5, 5, 33)).toBe(true);
+    expect(shareBeyondBinomialNoise(0.5, 16, 33)).toBe(false);
+    expect(shareBeyondBinomialNoise(0.5, 0, 14)).toBe(false);
+    expect(shareBeyondBinomialNoise(0.5, 28, 33)).toBe(true);
+  });
 });
 
 function firstId(session: AbSession, role: 'champion' | 'challenger'): string {
@@ -193,6 +246,8 @@ function fact(battleId: string, extra: Partial<{
   endReason: string;
   invalidChoices: number;
   crashes: number;
+  fallbacks: number;
+  decisionTimeouts: number;
   role: 'champion' | 'challenger';
   configId: string;
   phantom: boolean;
@@ -204,6 +259,8 @@ function fact(battleId: string, extra: Partial<{
   endReason: string;
   invalidChoices: number;
   crashes: number;
+  fallbacks?: number;
+  decisionTimeouts?: number;
   phantom?: boolean;
 } {
   return {
@@ -214,6 +271,8 @@ function fact(battleId: string, extra: Partial<{
     endReason: extra.endReason ?? 'ko',
     invalidChoices: extra.invalidChoices ?? 0,
     crashes: extra.crashes ?? 0,
+    fallbacks: extra.fallbacks,
+    decisionTimeouts: extra.decisionTimeouts,
     phantom: extra.phantom,
   };
 }

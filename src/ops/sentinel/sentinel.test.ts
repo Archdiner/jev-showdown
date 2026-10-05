@@ -6,7 +6,8 @@ import { GraphDB } from '../../graph/db.js';
 import { CHECKS } from './checks.js';
 import { writeTonightFixture } from './fixtures.js';
 import { acknowledge, incidentStore, linkIncident, loadIncidents, markFixing, openP0, resolveMatching } from './incidents.js';
-import { buildScorecard, formatScorecard, parseSince } from './scorecard.js';
+import { AB_VERDICT_MIN_GAMES, buildScorecard, formatScorecard, judgeArms, parseSince } from './scorecard.js';
+import { sprt } from '../../dashboard/stats.js';
 import { loadContext, parseProcessTable, parsePs, scanProcesses, snapshotProcesses } from './load.js';
 import { judge } from '../gatekeeper.js';
 import { openDb } from '../db.js';
@@ -14,7 +15,7 @@ import { opsPaths } from '../paths.js';
 import { readLabels } from '../labels-read.js';
 import { readEvents } from './incidents.js';
 import { layoutFromEnv, parseBaseline, renderScorecard, runSentinel, scanOnce } from './run.js';
-import type { GitStatus, Layout, ProcessSnapshot } from './types.js';
+import type { GitStatus, Layout, ObservedGame, ProcessSnapshot } from './types.js';
 
 const quietGit: GitStatus = { behind: 0, ref: 'origin/main', detail: 'HEAD contains origin/main' };
 const behindGit: GitStatus = { behind: 4, ref: 'origin/main', detail: 'HEAD is 4 commits behind origin/main' };
@@ -339,6 +340,47 @@ describe('runner exit without a drain', () => {
   });
 });
 
+describe('ab share sentinel', () => {
+  test('a realized share outside binomial noise is P2 after 15 games', () => {
+    const { layout } = emptyRoot();
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    const summary = (games: number, challengerGames: number) => ({
+      games,
+      ab: [
+        {
+          configId: 'champ',
+          role: 'champion',
+          configuredShare: 0.5,
+          games: games - challengerGames,
+          realizedShare: (games - challengerGames) / games,
+        },
+        {
+          configId: 'exact-1ply-qw',
+          role: 'challenger',
+          configuredShare: 0.5,
+          games: challengerGames,
+          realizedShare: challengerGames / games,
+        },
+      ],
+    });
+    const file = path.join(layout.ladderLogDir, 'summary.json');
+    fs.writeFileSync(file, JSON.stringify(summary(33, 5)));
+    const fired = scanOnce(layout, { now: Date.now(), scanProcesses: false, git: quietGit });
+    const hits = fired.hits.filter(item => item.id === 'ab-share-deviation');
+    expect(hits.map(item => item.severity)).toEqual(['P2', 'P2']);
+    expect(hits.map(item => item.key).sort()).toEqual(['champ', 'exact-1ply-qw']);
+    expect(hits.find(item => item.key === 'exact-1ply-qw')?.detail).toContain('5/33');
+
+    fs.writeFileSync(file, JSON.stringify(summary(33, 16)));
+    const quiet = scanOnce(layout, { now: Date.now(), scanProcesses: false, git: quietGit });
+    expect(quiet.hits.filter(item => item.id === 'ab-share-deviation')).toEqual([]);
+
+    fs.writeFileSync(file, JSON.stringify(summary(14, 0)));
+    const short = scanOnce(layout, { now: Date.now(), scanProcesses: false, git: quietGit });
+    expect(short.hits.filter(item => item.id === 'ab-share-deviation')).toEqual([]);
+  });
+});
+
 describe('scorecard', () => {
   test('excludes phantoms and names sources', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-score-'));
@@ -476,7 +518,102 @@ describe('scorecard', () => {
     expect(markdown).toContain('1-1-0 on 2 games → 2-2-0 on 4 games');
     expect(markdown).toContain('end Elo +130 versus the previous window');
   });
+
+  test('arm verdicts stay pending under 40 games and then follow the cumulative record', () => {
+    const short = judgeArms(armGames('exact-1ply-qw', 39, 'loss'));
+    expect(short).toHaveLength(1);
+    expect(short[0]).toMatchObject({ configId: 'exact-1ply-qw', wins: 0, losses: 39, games: 39, verdict: null });
+    expect(short[0].wilsonLow).not.toBeNull();
+    expect(short[0].sprt).toBe('continue');
+
+    const ready = judgeArms([
+      ...armGames('exact-1ply-qw', 20, 'loss', 'batch-a'),
+      ...armGames('exact-1ply-qw', 20, 'win', 'batch-b'),
+    ]);
+    expect(ready[0].games).toBe(40);
+    expect(ready[0].wins).toBe(20);
+    expect(ready[0].losses).toBe(20);
+    expect(ready[0].verdict).toBe(sprt(20, 20));
+    expect(ready[0].wilsonLow).toBeLessThan(0.5);
+    expect(ready[0].wilsonHigh).toBeGreaterThan(0.5);
+
+    const decided = judgeArms(armGames('exact-1ply-qw', 120, 'loss'));
+    expect(decided[0].games).toBeGreaterThanOrEqual(AB_VERDICT_MIN_GAMES);
+    expect(decided[0].verdict).toBe('reject');
+    expect(decided[0].verdict).toBe(sprt(0, 120));
+
+    const { layout } = emptyRoot();
+    fs.mkdirSync(layout.ladderLogDir, { recursive: true });
+    const now = Date.parse('2026-10-05T12:00:00.000Z');
+    const row = (battleId: string, configId: string) => JSON.stringify({
+      schema: 'jev.ladder-game.v1',
+      kind: 'ladder-game',
+      source: 'ladder',
+      localServer: false,
+      username: 'asad',
+      format: 'gen9randombattle',
+      battleId,
+      configId,
+      ts: now - 60_000,
+      outcome: 'loss',
+      endReason: 'ko',
+      turns: 12,
+      eloAfter: 1400,
+    });
+    fs.writeFileSync(path.join(layout.ladderLogDir, 'games.jsonl'), [
+      row('g1', 'exact-1ply-qw'),
+      row('g2', 'exact-1ply-qw'),
+    ].join('\n') + '\n');
+    const text = renderScorecard(layout, {
+      now,
+      since: '1h',
+      processes: [],
+      git: quietGit,
+      scanProcesses: false,
+    });
+    expect(text).toContain('exact-1ply-qw  0-2-0  n=2');
+    expect(text).toContain('verdict=pending');
+  });
 });
+
+function armGames(configId: string, count: number, outcome: 'win' | 'loss', tag = 'batch'): ObservedGame[] {
+  const games: ObservedGame[] = [];
+  for (let index = 0; index < count; index++) {
+    games.push({
+      file: 'games.jsonl',
+      line: index + 1,
+      battleId: `${tag}-${configId}-${index}`,
+      ts: index,
+      turns: 8,
+      outcome,
+      endReason: 'ko',
+      eloBefore: null,
+      eloAfter: null,
+      invalid: 0,
+      invalidChoiceReasons: [],
+      crashes: 0,
+      fallbacks: 0,
+      minTimerMarginSec: 20,
+      replayUrl: 'https://replay.pokemonshowdown.com/gen9randombattle-1',
+      replayStatus: 'confirmed',
+      local: false,
+      ladder: true,
+      gitSha: tag,
+      runId: null,
+      batchLabel: null,
+      variantId: null,
+      configId,
+      username: 'asad',
+      format: 'gen9randombattle',
+      schema: 'jev.ladder-game.v1',
+      decisions: 4,
+      latencyP95Ms: 100,
+      phantom: false,
+      source: 'ladder',
+    });
+  }
+  return games;
+}
 
 describe('sentinel once --json', () => {
   test('prints current incidents and exits 1 when a P0 is open', () => {
