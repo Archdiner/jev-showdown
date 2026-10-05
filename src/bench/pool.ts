@@ -9,10 +9,18 @@ interface WorkerMessage {
 }
 
 /**
+ * V8 sizes each isolate from the host's total RAM. On this machine that is
+ * about 4GB per worker. Four of those heaps, replaced every game, still
+ * leave a collection pause longer than a turn. The cap is a latency budget.
+ * It does not change which move is chosen.
+ */
+const WORKER_OLD_SPACE_MB = 384;
+
+/**
  * Run games across all CPU cores. Each job is one game.
- * A worker is replaced after every game. A warm worker that plays a
- * whole panel keeps a multi-GB heap, and a garbage-collection pause
- * then shows up as a turn over the 2s guardrail.
+ * A worker is replaced after every game, and the next one starts only
+ * after the previous isolate is gone, so a panel never holds two copies
+ * of the same slot's heap.
  */
 export async function runGamesParallel(
   jobs: GameJob[],
@@ -26,7 +34,9 @@ export async function runGamesParallel(
   let finished = 0;
 
   const spawn = (): Worker => {
-    const worker = new Worker(new URL('./worker.js', import.meta.url));
+    const worker = new Worker(new URL('./worker.js', import.meta.url), {
+      resourceLimits: { maxOldGenerationSizeMb: WORKER_OLD_SPACE_MB },
+    });
     live.add(worker);
     return worker;
   };
@@ -40,14 +50,14 @@ export async function runGamesParallel(
         reject(err);
       };
 
-      const retire = (worker: Worker) => {
+      const retire = async (worker: Worker) => {
         live.delete(worker);
-        void worker.terminate();
+        await worker.terminate();
       };
 
       const assign = (worker: Worker) => {
         if (failed || cursor >= jobs.length) {
-          retire(worker);
+          void retire(worker);
           return;
         }
         const job = jobs[cursor++];
@@ -55,7 +65,7 @@ export async function runGamesParallel(
           worker.off('message', onMessage);
           if (!msg.ok || !msg.result) {
             fail(new Error(msg.error || `worker failed on game ${job.index}`));
-            retire(worker);
+            void retire(worker);
             return;
           }
           results[job.index] = msg.result;
@@ -64,10 +74,11 @@ export async function runGamesParallel(
             console.log(`  ${finished}/${jobs.length} games finished`);
           }
           const done = finished === jobs.length;
-          const next = done || failed ? null : spawn();
-          retire(worker);
-          if (done && !failed) resolve();
-          if (next) assign(next);
+          void retire(worker).then(() => {
+            if (failed) return;
+            if (done) resolve();
+            else assign(spawn());
+          }).catch(err => fail(err instanceof Error ? err : new Error(String(err))));
         };
         worker.on('message', onMessage);
         worker.on('error', err => fail(err));
