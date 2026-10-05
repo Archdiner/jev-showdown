@@ -1,0 +1,8 @@
+name: hybrid-plan
+extends: hybrid.yaml
+hybrid:
+  id: layers
+  params:
+    plan: true
+    opponent: true
+    judgment: false

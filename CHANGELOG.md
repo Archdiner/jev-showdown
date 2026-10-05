@@ -1,5 +1,13 @@
 # Changelog
 
+## Hybrid search plus an optional game plan
+
+`configs/hybrid.yaml` is a live engine (`--engine hybrid`). It samples the opponent's hidden sets from the gen9 randbats table, locks revealed moves, ability, and item, drops Assault Vest after a status move and Heavy-Duty Boots after hazard chip, and soft-reweights Choice Scarf from speed order. Each sampled world is an exact `@pkmn/sim` battle. Our actions and their replies form a small payoff matrix; regret matching mixes the replies; worlds are averaged by probability. Terastallize is a legal line only for this search. A Tera hold keeps it off early unless the KO rate or the plan says otherwise.
+
+Three blocks are separate config flags. The game plan is asynchronous (turn 1, faints, new reveals, and every few turns) and becomes a preserve bonus and a Tera timing prior. Opponent modelling reweights the sampler from the plan's style. Final judgment may pick among the top three only when their scores sit inside a margin. The default judge is `alibaba/qwen3.8-27b` on Cerebras with reasoning effort medium and no forced temperature. The planner option is `anthropic/claude-opus-5.5` at low effort. A timeout falls back to the search move. Bench profiles are `hybrid-core` (search only), `hybrid-plan` (plan and opponent model), and `hybrid` (all three). Self-play stays hidden-information for both sides, including exact-1ply. Randbats data under 500 species fails the search. The data-loader and belief-tracker tests write a temp directory.
+
+Honest-bench numbers are in the pull request.
+
 ## Live losses reach the factory
 
 A ladder loss used to write a hypothesis and then stop. Per-battle logs have no `>start` input log, so position mining returned nothing and no factory job was enqueued. The same generic fallback text for every loss never became a self-play variant. Each reviewed loss now queues a challenger for that mechanism or eval term, or a mined position when the log can be reconstructed, or a line in `state/ops/dispositions.jsonl` saying why it was skipped. The factory claims open hypotheses, including `state/meta/hypotheses.json` rows, and plays them against max-damage. `npm run ops -- status` prints the cycle counts. The sentinel check `improvement-stall` is a P1 when losses were reviewed and nothing was queued for 15 minutes.

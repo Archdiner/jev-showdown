@@ -11,7 +11,7 @@ export class DataLoader {
   private loaded = false;
   private format?: Format;
 
-  private constructor() {}
+  constructor(private readonly dataDir?: string) {}
 
   static getInstance(): DataLoader {
     if (!DataLoader.instance) {
@@ -43,12 +43,12 @@ export class DataLoader {
 
     this.format = format;
     
-    const dataDir = options?.dataDir ?? path.join(process.cwd(), 'data');
+    const dataDir = options?.dataDir ?? this.dataDir ?? path.join(process.cwd(), 'data');
     const setsPath = path.join(dataDir, 'gen9-sets.json');
     const statsPath = path.join(dataDir, 'gen9-stats.json');
 
     // Check freshness if format provided. A test directory is read as-is.
-    if (format && !options?.dataDir) {
+    if (format && !options?.dataDir && !this.dataDir) {
       try {
         const freshnessResult = await freshnessChecker.checkAndRefresh({
           setsUrl: format.dataSources.setsUrl,

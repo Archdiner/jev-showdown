@@ -6,6 +6,7 @@ import { registerMeta } from './meta.js';
 import { registerModels } from './models.js';
 import { registerOpponent } from './opponent.js';
 import { registerPolicies } from './policies.js';
+import { registerHybrid } from './hybrid.js';
 import { registerSearch } from './search.js';
 
 let ready = false;
@@ -15,6 +16,7 @@ export function ensureLayers(): void {
   ready = true;
   registerAgents();
   registerSearch();
+  registerHybrid();
   registerEvaluators();
   registerOpponent();
   registerPolicies();

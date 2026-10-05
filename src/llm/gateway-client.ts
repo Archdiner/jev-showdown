@@ -71,6 +71,12 @@ export interface ChatRequest {
   temperature?: number;
   maxTokens?: number;
   jsonSchema?: Record<string, unknown>;
+  /** Gateway `reasoning_effort`. Omit to leave the model default. */
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high' | 'xhigh';
+  /** Passed through as `providerOptions` (gateway order / only). */
+  providerOptions?: Record<string, unknown>;
+  /** Leave temperature unset so the provider default stands. */
+  omitTemperature?: boolean;
 }
 
 export type EvaluateQuestion =
@@ -172,9 +178,11 @@ export class GatewayClient {
     const body: Record<string, unknown> = {
       model: request.model,
       messages: request.messages,
-      temperature: request.temperature ?? 0,
     };
+    if (!request.omitTemperature) body.temperature = request.temperature ?? 0;
     if (request.maxTokens) body.max_tokens = request.maxTokens;
+    if (request.reasoningEffort) body.reasoning_effort = request.reasoningEffort;
+    if (request.providerOptions) body.providerOptions = request.providerOptions;
     if (request.jsonSchema) {
       body.response_format = {
         type: 'json_schema',

@@ -65,8 +65,12 @@ async function decide(message: DecideRequest): Promise<void> {
   const started = Date.now();
   const routed = playerFor(message.battleId);
   try {
-    const picked = await chooseLive(routed.engine, message.position, message.legal, routed.player);
-    const known = message.legal.some(candidate => sameAction(candidate, picked.action));
+    const picked = await chooseLive(routed.engine, message.position, message.legal, routed.player, message.searchTimeMs);
+    const plain = picked.action.type === 'move'
+      ? { type: 'move' as const, moveIndex: picked.action.moveIndex }
+      : picked.action;
+    const known = message.legal.some(candidate => sameAction(candidate, picked.action))
+      || (picked.action.type === 'move' && picked.action.terastallize && message.legal.some(candidate => sameAction(candidate, plain)));
     if (!known) {
       send({
         type: 'decision',

@@ -26,6 +26,14 @@ export interface FoeMon {
   moves: string[];
   boosts?: StatBoosts;
   fainted?: boolean;
+  /** Set only after this pokemon has Terastallized. */
+  terastallized?: string;
+  /** Public residual hazard damage, so Heavy-Duty Boots is impossible. */
+  hazardChip?: boolean;
+  /** Revealed a status move, so Assault Vest is impossible. */
+  statusMove?: boolean;
+  /** Non-priority speed order versus us. */
+  speed?: 'faster' | 'slower';
 }
 
 /**
@@ -38,6 +46,20 @@ export interface LivePosition {
   foeBench: FoeMon[];
   ourBoosts?: StatBoosts;
   weather?: string;
+  /** Real battle turn. A fresh clone starts at 1. */
+  turn?: number;
+  myHazards?: string[];
+  foeHazards?: string[];
+}
+
+const battleEvidence = new WeakMap<Battle, LivePosition>();
+
+export function attachBattleEvidence(battle: Battle, position: LivePosition): void {
+  battleEvidence.set(battle, position);
+}
+
+export function readBattleEvidence(battle: Battle): LivePosition | null {
+  return battleEvidence.get(battle) ?? null;
 }
 
 const WEATHER: Record<string, string> = {
@@ -56,7 +78,11 @@ const STATS = ['atk', 'def', 'spa', 'spd', 'spe'] as const;
 
 export function actionFromChoice(choice: string): Action | null {
   const move = /^move (\d+)/.exec(choice);
-  if (move) return { type: 'move', moveIndex: Number(move[1]) };
+  if (move) {
+    const action: Action = { type: 'move', moveIndex: Number(move[1]) };
+    if (choice.includes('terastallize')) action.terastallize = true;
+    return action;
+  }
   const swapped = /^switch (\d+)/.exec(choice);
   if (swapped) return { type: 'switch', switchIndex: Number(swapped[1]) };
   return null;
@@ -79,12 +105,20 @@ function named(kind: 'abilities' | 'items' | 'moves' | 'species', raw: string | 
   return entry?.exists ? entry.name : '';
 }
 
-function toSet(species: string, moves: string[], level: number, ability?: string, item?: string): PokemonSet | null {
+function toSet(
+  species: string,
+  moves: string[],
+  level: number,
+  ability?: string,
+  item?: string,
+  teraType?: string,
+): PokemonSet | null {
   const speciesName = named('species', species);
   if (!speciesName) return null;
   const moveNames = moves.map(move => named('moves', move)).filter(Boolean).slice(0, 4);
   if (moveNames.length === 0) moveNames.push('Tackle');
   const dexSpecies = Dex.species.get(speciesName);
+  const tera = teraType ? Dex.types.get(teraType) : undefined;
   return {
     species: speciesName,
     moves: moveNames,
@@ -93,6 +127,7 @@ function toSet(species: string, moves: string[], level: number, ability?: string
     nature: 'Hardy',
     evs: { hp: 85, atk: 85, def: 85, spa: 85, spd: 85, spe: 85 },
     level: level || 80,
+    ...(tera?.exists ? { teraType: tera.name } : {}),
   } as PokemonSet;
 }
 
@@ -123,6 +158,26 @@ function applyStatus(mon: any, condition: string | undefined, status: string | u
   }
 }
 
+function applyRevealedTera(side: Battle['p1'], used: string[]): void {
+  const index = used.findIndex(type => Boolean(type));
+  if (index < 0) return;
+  const type = Dex.types.get(used[index]);
+  const name = type?.exists ? type.name : used[index];
+  for (const mon of side.pokemon) mon.canTerastallize = null as never;
+  const mon = side.pokemon[index];
+  if (!mon || !name) return;
+  mon.teraType = name;
+  mon.terastallized = name;
+}
+
+function addHazard(side: Battle['p1'], id: string): void {
+  try {
+    side.addSideCondition(id as never);
+  } catch {
+    // A missing hazard changes damage later. It must not reject the decision.
+  }
+}
+
 function applyBoosts(mon: any, boosts: StatBoosts | undefined): void {
   if (!mon || !boosts) return;
   for (const stat of STATS) {
@@ -147,6 +202,7 @@ function ourSets(request: any): PokemonSet[] | null {
       levelOf(slot.details, slot.level || 80),
       slot.ability || slot.baseAbility,
       slot.item,
+      slot.teraType,
     );
     // Dropping a slot would renumber `switch N`. Fail the build instead.
     if (!set) return null;
@@ -164,7 +220,7 @@ function foeSets(foes: FoeMon[]): { sets: PokemonSet[]; kept: FoeMon[] } {
   const kept: FoeMon[] = [];
   for (const mon of foes) {
     if (sets.length >= 6) break;
-    const set = toSet(mon.species, mon.moves || [], mon.level || 80, mon.ability, mon.item);
+    const set = toSet(mon.species, mon.moves || [], mon.level || 80, mon.ability, mon.item, mon.terastallized);
     if (!set) continue;
     sets.push(set);
     kept.push(mon);
@@ -246,8 +302,17 @@ export function buildDecisionBattle(position: LivePosition): Battle | null {
 
     const force = isForceSwitch(request) || !!active.fainted;
     if (force) active.switchFlag = true;
+    if (!request.active?.[0]?.canTerastallize) {
+      for (const mon of battle.p1.pokemon) mon.canTerastallize = null as never;
+    }
+    for (const id of position.myHazards || []) addHazard(battle.p1, id);
+    for (const id of position.foeHazards || []) addHazard(battle.p2, id);
+    applyRevealedTera(battle.p1, slots.map(slot => String(slot?.terastallized || '')));
+    applyRevealedTera(battle.p2, foe.kept.map(mon => mon.terastallized || ''));
     battle.makeRequest(force ? 'switch' : 'move');
+    if (typeof position.turn === 'number' && Number.isFinite(position.turn)) battle.turn = position.turn;
     if (legalChoices(battle, 'p1').length === 0) return null;
+    attachBattleEvidence(battle, position);
     return battle;
   } catch {
     return null;
@@ -259,6 +324,7 @@ export interface LiveConfigPlayer {
   decide(input: {
     battle: Battle;
     side: 'p1';
+    budgetMs?: number;
   }): Promise<{ choice: string; scores?: Array<{ choice: string; score: number }> }>;
 }
 
@@ -272,17 +338,25 @@ export async function chooseLive(
   position: LivePosition | undefined,
   legal: Action[],
   player?: LiveConfigPlayer | null,
+  budgetMs?: number,
 ): Promise<{ action: Action; score: number | null }> {
   if (!position) throw new Error('missing live position');
   const battle = buildDecisionBattle(position);
   if (!battle) throw new Error('could not build a sim battle');
   const decision = player
-    ? await player.decide({ battle, side: 'p1' })
+    ? await player.decide({ battle, side: 'p1', budgetMs })
     : await decide(ladderPolicy(engine), battle, 'p1', new PRNG([1, 2, 3, 4] as any));
   const action = actionFromChoice(decision.choice);
-  if (!action || !legal.some(candidate => sameAction(candidate, action))) {
+  if (!action || !actionAllowed(legal, action)) {
     throw new Error(`engine returned a choice that is not legal (${decision.choice})`);
   }
   const score = decision.scores?.find(row => row.choice === decision.choice)?.score ?? null;
   return { action, score };
+}
+
+function actionAllowed(legal: Action[], action: Action): boolean {
+  if (legal.some(candidate => sameAction(candidate, action))) return true;
+  if (action.type !== 'move' || !action.terastallize) return false;
+  const plain: Action = { type: 'move', moveIndex: action.moveIndex };
+  return legal.some(candidate => sameAction(candidate, plain));
 }

@@ -1,0 +1,12 @@
+name: hybrid-core
+extends: hybrid.yaml
+search:
+  id: hybrid
+  params:
+    timeBudgetMs: 2500
+hybrid:
+  id: layers
+  params:
+    plan: false
+    opponent: false
+    judgment: false
