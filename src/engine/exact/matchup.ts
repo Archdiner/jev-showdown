@@ -61,12 +61,39 @@ export function likelyMoves(species: string, revealed: string[]): string[] {
 }
 
 const maxHpCache = new Map<string, number>();
+const calcNameCache = new Map<string, string>();
+
+/**
+ * @smogon/calc does not know every sim forme (Gastrodon-East is Gastrodon).
+ * Fall back to the base species instead of throwing or dealing 0.
+ */
+export function calcSpeciesName(species: string): string {
+  const cached = calcNameCache.get(species);
+  if (cached) return cached;
+  const dex = Dex.species.get(species);
+  const candidates = [...new Set([dex.name, dex.baseSpecies, species].filter((name): name is string => Boolean(name)))];
+  let picked = candidates[0] || species;
+  for (const name of candidates) {
+    try {
+      const mon = new CalcPokemon(9, name, { level: 1 });
+      if (mon.species?.baseStats?.hp) {
+        picked = name;
+        break;
+      }
+    } catch {
+      continue;
+    }
+  }
+  calcNameCache.set(species, picked);
+  return picked;
+}
 
 export function estimatedMaxHp(species: string, level: number): number {
-  const key = `${species}|${level}`;
+  const name = calcSpeciesName(species);
+  const key = `${name}|${level}`;
   const cached = maxHpCache.get(key);
   if (cached) return cached;
-  const mon = new CalcPokemon(9, species, { level, evs: NEUTRAL_EVS, ivs: NEUTRAL_IVS });
+  const mon = new CalcPokemon(9, name, { level, evs: NEUTRAL_EVS, ivs: NEUTRAL_IVS });
   const hp = Math.max(1, mon.maxHP());
   maxHpCache.set(key, hp);
   return hp;
@@ -74,8 +101,14 @@ export function estimatedMaxHp(species: string, level: number): number {
 
 const damageCache = new Map<string, number>();
 
+function asCalcMon(pokemon: any): any {
+  const name = calcSpeciesName(pokemon?.species?.name || '');
+  if (!pokemon?.species || name === pokemon.species.name) return pokemon;
+  return { ...pokemon, species: { ...pokemon.species, name } };
+}
+
 function synth(species: string, level: number, hpFrac: number): any {
-  const name = Dex.species.get(species).name || species;
+  const name = calcSpeciesName(species);
   const maxhp = estimatedMaxHp(name, level);
   const hp = Math.max(1, Math.round(maxhp * Math.max(0, Math.min(1, hpFrac))));
   return {
@@ -242,8 +275,10 @@ function slotMoves(pokemon: any): string[] {
  */
 export function battleMargin(our: any, foe: any, weather?: string): number {
   if (!our || !foe || our.fainted || our.hp <= 0) return -2;
-  const ourDmg = bestDamage(our, foe, slotMoves(our), weather);
-  const foeDmg = bestDamage(foe, our, slotMoves(foe), weather);
+  const ourMon = asCalcMon(our);
+  const foeMon = asCalcMon(foe);
+  const ourDmg = bestDamage(ourMon, foeMon, slotMoves(our), weather);
+  const foeDmg = bestDamage(foeMon, ourMon, slotMoves(foe), weather);
   return threatRatio(ourDmg, foe.hp || foe.maxhp || 1) - threatRatio(foeDmg, our.hp || our.maxhp || 1);
 }
 
