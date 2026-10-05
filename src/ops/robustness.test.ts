@@ -22,6 +22,10 @@ describe('jsonl tail', () => {
     const root = tempRoot();
     const priorOps = process.env.OPS_DIR;
     const priorGraph = process.env.GRAPH_DB;
+    const savedKey = process.env.VERCEL_AI_GATEWAY_KEY;
+    const savedAlt = process.env.AI_GATEWAY_API_KEY;
+    delete process.env.VERCEL_AI_GATEWAY_KEY;
+    delete process.env.AI_GATEWAY_API_KEY;
     process.env.OPS_DIR = root;
     process.env.GRAPH_DB = path.join(root, 'graph.db');
     const paths = opsPaths(root);
@@ -35,18 +39,22 @@ describe('jsonl tail', () => {
 
       fs.writeFileSync(paths.liveGames, '{"id":"ok","winner":"win"}\n{bad\n{"id":"tail"');
       fs.writeFileSync(paths.analystOffset, '0');
-      expect(await runAnalyst(paths, { once: true, ladderDirs: [] })).toBe(1);
+      expect(await runAnalyst(paths, { once: true })).toBe(1);
       const offset = Number(fs.readFileSync(paths.analystOffset, 'utf8'));
       expect(offset).toBe(Buffer.byteLength('{"id":"ok","winner":"win"}\n{bad\n'));
       expect(fs.readFileSync(paths.heartbeats, 'utf8')).toContain('log-corrupt');
 
       fs.appendFileSync(paths.liveGames, ',"winner":"loss"}\n');
-      expect(await runAnalyst(paths, { once: true, ladderDirs: [] })).toBe(1);
+      expect(await runAnalyst(paths, { once: true })).toBe(1);
     } finally {
       if (priorOps === undefined) delete process.env.OPS_DIR;
       else process.env.OPS_DIR = priorOps;
       if (priorGraph === undefined) delete process.env.GRAPH_DB;
       else process.env.GRAPH_DB = priorGraph;
+      if (savedKey === undefined) delete process.env.VERCEL_AI_GATEWAY_KEY;
+      else process.env.VERCEL_AI_GATEWAY_KEY = savedKey;
+      if (savedAlt === undefined) delete process.env.AI_GATEWAY_API_KEY;
+      else process.env.AI_GATEWAY_API_KEY = savedAlt;
     }
   }, 20_000);
 });
