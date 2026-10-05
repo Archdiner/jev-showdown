@@ -180,18 +180,16 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         if (decision.viewMiss) result.p1ViewMiss++;
         result.p1TurnTimes.push(decision.ms);
         notePlay(result, 'p1', p1Legal, decision);
-        const wasLegal = p1Legal.includes(decision.choice) || decision.choice === 'default';
-        if (!wasLegal) {
-          const error = `Invalid choice at turn ${battle.turn}, seed ${job.seed}: p1 chose "${decision.choice}", legal: [${p1Legal.join(', ')}]`;
-          console.error(`[INVALID] ${error}`);
-          throw new Error(error);
-        }
+        
+        // safeChoose gets fresh legal choices and handles fallback, so trust its result
         const ok = safeChoose(battle, 'p1', decision.choice);
         if (!ok) {
-          const error = `safeChoose rejected legal choice at turn ${battle.turn}, seed ${job.seed}: "${decision.choice}", legal: [${p1Legal.join(', ')}]`;
+          // This means even the fallback failed - battle is in a bad state
+          const error = `[p1] safeChoose failed at turn ${battle.turn}, seed ${job.seed}: choice="${decision.choice}", original_legal=[${p1Legal.join(', ')}]`;
           console.error(`[SAFE_CHOOSE_FAILED] ${error}`);
           throw new Error(error);
         }
+        
         result.decisions?.push({
           side: 'p1',
           turn: battle.turn,
@@ -205,18 +203,15 @@ export async function runGame(job: GameJob): Promise<GameResult> {
         if (decision.viewMiss) result.p2ViewMiss++;
         result.p2TurnTimes.push(decision.ms);
         notePlay(result, 'p2', p2Legal, decision);
-        const wasLegal = p2Legal.includes(decision.choice) || decision.choice === 'default';
-        if (!wasLegal) {
-          const error = `Invalid choice at turn ${battle.turn}, seed ${job.seed}: p2 chose "${decision.choice}", legal: [${p2Legal.join(', ')}]`;
-          console.error(`[INVALID] ${error}`);
-          throw new Error(error);
-        }
+        
+        // safeChoose gets fresh legal choices and handles fallback
         const ok = safeChoose(battle, 'p2', decision.choice);
         if (!ok) {
-          const error = `safeChoose rejected legal choice at turn ${battle.turn}, seed ${job.seed}: "${decision.choice}", legal: [${p2Legal.join(', ')}]`;
+          const error = `[p2] safeChoose failed at turn ${battle.turn}, seed ${job.seed}: choice="${decision.choice}", original_legal=[${p2Legal.join(', ')}]`;
           console.error(`[SAFE_CHOOSE_FAILED] ${error}`);
           throw new Error(error);
         }
+        
         result.decisions?.push({
           side: 'p2',
           turn: battle.turn,
@@ -304,13 +299,22 @@ async function chooseSeen(
       const result = await chooseDeterminized(position, player.policy.config, dataLoader.getStats());
       const ms = Date.now() - started;
       
+      // Validate that the choice is legal in the real battle
+      // World battles may have different slot conditions (e.g. Revival Blessing)
+      // so their legal choices may differ from the real battle's
+      const choice = legal.includes(result.choice) ? result.choice : legal[0] || 'default';
+      const viewMiss = choice !== result.choice;
+      if (viewMiss) {
+        console.warn(`[exact-det] World choice "${result.choice}" not legal in real battle (legal: ${legal.join(', ')}), using fallback "${choice}"`);
+      }
+      
       try {
         client.destroy();
       } catch {
         // position is already plain data
       }
       
-      return { choice: result.choice, ms, configId: player.id };
+      return { choice, ms, configId: player.id, viewMiss };
     } catch (error) {
       const ms = Date.now() - started;
       console.error('exact-det failed:', error);
@@ -320,7 +324,17 @@ async function chooseSeen(
   
   const viewed = ladderDecisionBattle(battle, side);
   if (!viewed) return { choice: legal[0] || 'default', ms: 0, configId: player.id, viewMiss: true };
-  return choose(player, viewed, 'p1', rng, gameId, seed);
+  const decision = await choose(player, viewed, 'p1', rng, gameId, seed);
+  
+  // Validate choice against real battle's legal choices
+  // Decision battles may have different slot conditions (e.g. Revival Blessing)
+  const choice = legal.includes(decision.choice) ? decision.choice : legal[0] || 'default';
+  const viewMiss = choice !== decision.choice;
+  if (viewMiss) {
+    console.warn(`[${player.policy?.kind || 'policy'}] Decision battle choice "${decision.choice}" not legal in real battle (legal: ${legal.join(', ')}), using fallback "${choice}"`);
+  }
+  
+  return { choice, ms: decision.ms, configId: decision.configId, viewMiss };
 }
 
 async function choose(

@@ -29,9 +29,22 @@ export function legalChoices(battle: Battle, sideId: SideId): string[] {
 
   if (req.forceSwitch) {
     const choices: string[] = [];
+    // Check if any active Pokemon has the revivalblessing condition
+    let hasRevivalBlessing = false;
+    for (const mon of side.active) {
+      if (mon && (side as any).slotConditions?.[mon.position]?.['revivalblessing']) {
+        hasRevivalBlessing = true;
+        break;
+      }
+    }
+    
     for (let i = 0; i < side.pokemon.length; i++) {
       const mon = side.pokemon[i];
-      if (mon && !mon.fainted && !mon.isActive) choices.push(`switch ${i + 1}`);
+      if (!mon || mon.isActive) continue;
+      // Revival Blessing requires passing to a fainted Pokemon
+      // Normal forced switch requires switching to a non-fainted Pokemon
+      const shouldInclude = hasRevivalBlessing ? mon.fainted : !mon.fainted;
+      if (shouldInclude) choices.push(`switch ${i + 1}`);
     }
     return choices;
   }
