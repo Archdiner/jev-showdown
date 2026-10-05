@@ -592,7 +592,10 @@ export class SetInference {
     this.readHp(parsed.position, hp);
     if (!this.isFoe(parsed.side)) return;
     this.ensure(name, level);
-    if (countsAsSwitch) this.stayMoves.set(name, []);
+    if (countsAsSwitch) {
+      // Reset the Choice lock tracking when switching out
+      this.stayMoves.set(name, []);
+    }
     this.writeBelief(parsed.side, this.mons.get(name)!);
     if (countsAsSwitch) this.turnActions.push({ side: parsed.side, kind: 'switch', species: name, priority: 0 });
   }
@@ -754,7 +757,15 @@ export class SetInference {
   private onItem(ident: string | undefined, item: string | undefined, from: string | undefined): void {
     const parsed = this.ident(ident);
     if (!parsed || !item || !this.isFoe(parsed.side)) return;
-    if (from && /knocked off|stole|tricked/i.test(from)) return;
+    // Handle item changes from Trick, Switcheroo, Knock Off, or item consumption
+    const fromLower = (from || '').toLowerCase();
+    if (fromLower.includes('trick') || fromLower.includes('switcheroo') || fromLower.includes('knockoff') || fromLower.includes('knocked off')) {
+      // Item was swapped or knocked off - reset the stay moves to allow re-inferring Choice
+      const species = this.positions.get(parsed.position);
+      if (species) this.stayMoves.set(species, []);
+      return;
+    }
+    if (fromLower.includes('stole') || fromLower.includes('tricked')) return;
     const species = this.positions.get(parsed.position);
     if (species) this.seeItem(species, item);
   }

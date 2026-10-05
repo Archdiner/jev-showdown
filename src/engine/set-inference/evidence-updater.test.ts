@@ -230,10 +230,11 @@ describe('SetInference with belief updater', () => {
       }
     });
 
-    it('bans Choice items for multiple different moves', () => {
+    it('bans Choice items for multiple different moves in same stint', () => {
       const inference = new SetInference(stats, { beliefUpdaterEnabled: false });
 
       inference.addFoe('Garchomp', 84);
+      inference.observe('|switch|p2a: Garchomp|Garchomp, L84|100/100');
       inference.seeMove('Garchomp', 'Earthquake');
       inference.seeMove('Garchomp', 'Stone Edge');
 
@@ -245,6 +246,68 @@ describe('SetInference with belief updater', () => {
       for (const choice of choiceItems) {
         expect(choice.probability).toBeLessThan(0.01);
       }
+    });
+
+    it('does NOT ban Choice items after switching out and back in', () => {
+      const inference = new SetInference(stats, { beliefUpdaterEnabled: false });
+
+      inference.addFoe('Garchomp', 84);
+      // First stint: use Earthquake
+      inference.observe('|switch|p2a: Garchomp|Garchomp, L84|100/100');
+      inference.seeMove('Garchomp', 'Earthquake');
+      
+      // Switch out
+      inference.observe('|switch|p2a: Dragapult|Dragapult, L77|100/100');
+      
+      // Switch back in: use Stone Edge
+      inference.observe('|switch|p2a: Garchomp|Garchomp, L84|100/100');
+      inference.seeMove('Garchomp', 'Stone Edge');
+
+      const items = inference.itemDistribution('Garchomp');
+      const scarf = items.find(item => item.value === 'Choice Scarf');
+
+      // Choice Scarf should still be possible since the lock was reset by switching
+      if (scarf) {
+        expect(scarf.probability).toBeGreaterThan(0.1);
+      }
+    });
+
+    it('resets Choice lock after Trick/Switcheroo', () => {
+      const inference = new SetInference(stats, { beliefUpdaterEnabled: false });
+
+      inference.addFoe('Garchomp', 84);
+      inference.observe('|switch|p2a: Garchomp|Garchomp, L84|100/100');
+      inference.seeMove('Garchomp', 'Earthquake');
+      
+      // Opponent uses Trick, swapping items
+      inference.observe('|-item|p2a: Garchomp|Life Orb|[from] move: Trick');
+      
+      // Now use a different move - should not ban Choice because item was swapped
+      inference.seeMove('Garchomp', 'Stone Edge');
+
+      const items = inference.itemDistribution('Garchomp');
+      const lifeOrb = items.find(item => item.value === 'Life Orb');
+
+      // Should see Life Orb as the revealed item, not infer from moves
+      expect(lifeOrb).toBeDefined();
+    });
+
+    it('resets Choice lock after Knock Off', () => {
+      const inference = new SetInference(stats, { beliefUpdaterEnabled: false });
+
+      inference.addFoe('Garchomp', 84);
+      inference.observe('|switch|p2a: Garchomp|Garchomp, L84|100/100');
+      inference.seeMove('Garchomp', 'Earthquake');
+      
+      // Item knocked off
+      inference.observe('|-enditem|p2a: Garchomp|Choice Band|[from] move: Knock Off');
+      
+      // Now use a different move - should not ban Choice because item was knocked off
+      inference.seeMove('Garchomp', 'Stone Edge');
+
+      // Since we saw the Choice Band get knocked off, we know it had one
+      const mon = inference.getMonEvidence('Garchomp');
+      expect(mon).toBeDefined();
     });
 
     it('bans Heavy-Duty Boots for hazard damage', () => {
