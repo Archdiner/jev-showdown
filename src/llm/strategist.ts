@@ -74,7 +74,7 @@ const PLAN_SCHEMA = {
   },
 } as const;
 
-const SYSTEM = 'Gen 9 random battles. Update the plan as JSON with win, keep, sack, threat, and note. Short strings. Do not choose a move.';
+const SYSTEM = 'Return the JSON plan only. Do not calculate damage, types, or speed. win, threat, keep, and sack are species names copied from the brief. note is at most 8 words.';
 
 const cache = new WeakMap<Battle, Map<SideId, CacheEntry>>();
 
@@ -333,12 +333,12 @@ function requestPlan(
     maxRetries: 0,
     log: line => console.log(line),
   });
-  const brief = renderContextBrief(args.battle, args.side, params.planTokens);
+  const brief = renderContextBrief(args.battle, args.side, params.planTokens, 'plan');
   client.startTurn();
   return client.chat({
     model: DEFAULT_REVIEWER_MODEL_ID,
     temperature: 0,
-    maxTokens: 120,
+    maxTokens: 80,
     reasoningEffort: params.reasoningEffort,
     jsonSchema: PLAN_SCHEMA as unknown as Record<string, unknown>,
     messages: [

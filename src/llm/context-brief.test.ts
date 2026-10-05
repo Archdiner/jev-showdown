@@ -41,6 +41,33 @@ describe('context brief', () => {
     }
   });
 
+  it('line form names both actives and stays inside the plan budget', () => {
+    const teams = teamsForSeed(4);
+    const battle = startRandomBattle(teams.p1, teams.p2, 4);
+    const brief = renderContextBrief(battle, 'p1', 320, 'lines');
+    const us = battle.getSide('p1').active[0]?.species.name || '';
+    const them = battle.getSide('p2').active[0]?.species.name || '';
+    expect(us.length).toBeGreaterThan(0);
+    expect(brief.sections).toContain('sides');
+    expect(brief.text).toContain(us);
+    expect(brief.text).toContain(them);
+    expect(brief.text.length).toBeLessThanOrEqual(320 * 4);
+    expect(brief.text.startsWith('sides:')).toBe(true);
+  });
+
+  it('plan form is the actives, the bench, and the field', () => {
+    const teams = teamsForSeed(4);
+    const battle = startRandomBattle(teams.p1, teams.p2, 4);
+    const brief = renderContextBrief(battle, 'p1', 320, 'plan');
+    const us = battle.getSide('p1').active[0]?.species.name || '';
+    const them = battle.getSide('p2').active[0]?.species.name || '';
+    expect(brief.sections).toEqual(['sides', 'bench', 'field']);
+    expect(brief.text).toContain(us);
+    expect(brief.text).toContain(them);
+    expect(brief.text).not.toContain('moves=');
+    expect(brief.text.length).toBeLessThanOrEqual(320 * 4);
+  });
+
   it('drops sections that do not fit the budget', () => {
     const teams = teamsForSeed(4);
     const battle = startRandomBattle(teams.p1, teams.p2, 4);

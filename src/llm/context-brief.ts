@@ -45,17 +45,27 @@ interface PublicMon {
  * abilities, and items appear only after the log reveals them.
  * This does not call a model and does not register a config layer.
  */
-export function renderContextBrief(battle: Battle, side: SideId, tokenBudget = 800): ContextBrief {
+export type BriefStyle = 'blocks' | 'lines' | 'plan';
+
+export function renderContextBrief(
+  battle: Battle,
+  side: SideId,
+  tokenBudget = 800,
+  style: BriefStyle = 'blocks',
+): ContextBrief {
   const maxChars = Math.max(0, tokenBudget) * CHARS_PER_TOKEN;
   const ours = sideMons(battle, side, true);
   const theirs = sideMons(battle, otherSide(side), false);
+  const ids: readonly BriefSection[] = style === 'plan' ? ['sides', 'bench', 'field'] : BRIEF_SECTIONS;
   let used = 0;
   const blocks: string[] = [];
   const included: BriefSection[] = [];
   let truncated = false;
-  for (const id of BRIEF_SECTIONS) {
-    const body = sectionText(id, battle, side, ours, theirs);
-    const block = `## ${id}\n${body}`;
+  for (const id of ids) {
+    const body = style === 'blocks'
+      ? sectionText(id, battle, side, ours, theirs)
+      : lineText(id, battle, side, ours, theirs, style === 'plan');
+    const block = style === 'blocks' ? `## ${id}\n${body}` : `${id}: ${body}`;
     if (used + block.length + 1 > maxChars) {
       truncated = true;
       continue;
@@ -81,6 +91,80 @@ function sectionText(
   if (id === 'field') return fieldBlock(battle, side);
   if (id === 'sets') return setsBlock(theirs, unrevealedCount(battle, side));
   return switchBlock(battle, side);
+}
+
+function lineText(
+  id: BriefSection,
+  battle: Battle,
+  side: SideId,
+  ours: PublicMon[],
+  theirs: PublicMon[],
+  plan = false,
+): string {
+  if (id === 'sides') {
+    const us = ours.find(mon => mon.active && !mon.fainted);
+    const them = theirs.find(mon => mon.active && !mon.fainted);
+    return `${oneMon('US', us, !plan)} | ${oneMon('THEM', them, !plan)} unrevealed=${unrevealedCount(battle, side)}`;
+  }
+  if (id === 'bench') {
+    const ranked = rankedSwitches(battle, side, true).slice(0, 3);
+    const oursLine = ranked.length
+      ? ranked.map(row => `${row.choice} ${row.species} ${row.margin.toFixed(2)}`).join(', ')
+      : 'none';
+    const theirBench = theirs.filter(mon => !mon.active && !mon.fainted).map(mon => mon.species);
+    return `ours ${oursLine} | theirs ${theirBench.join(', ') || 'none'}`;
+  }
+  if (id === 'damage') return damageLine(ours, theirs, weatherId(battle));
+  if (id === 'speed') {
+    const text = speedBlock(ours, theirs);
+    return text.split(' (')[0];
+  }
+  if (id === 'field') {
+    const field = battle.field as { weather?: { id?: string }; terrain?: { id?: string }; pseudoWeather?: Record<string, unknown> };
+    const us = battle.getSide(side);
+    const them = us.foe;
+    return `weather=${field.weather?.id || 'none'} terrain=${field.terrain?.id || 'none'} trickRoom=${Boolean(field.pseudoWeather?.trickroom)} us ${hazards(us.sideConditions)} them ${hazards(them.sideConditions)}`;
+  }
+  if (id === 'sets') {
+    const them = theirs.find(mon => mon.active && !mon.fainted);
+    if (!them) return 'no active foe';
+    const moves = them.moves.length ? them.moves : likelyMoves(them.species, []);
+    return `${them.species} moves=${moves.join('/') || 'none'} ability=${them.ability ?? 'hidden'} item=${them.item ?? 'hidden'}`;
+  }
+  const features = switchFeatureInput(battle, otherSide(side));
+  return `p=${fittedSwitchProbability(featureVector(features)).toFixed(2)}`;
+}
+
+function oneMon(title: string, mon: PublicMon | undefined, moves = true): string {
+  if (!mon) return `${title} none`;
+  const hp = mon.maxHp > 0 ? `${Math.round(mon.frac * 100)}%` : 'hidden';
+  const status = mon.status !== 'none' ? ` status=${mon.status}` : '';
+  const move = moves ? ` moves=${mon.moves.join('/') || 'none'}` : '';
+  return `${title} #${mon.slot} ${mon.species} hp=${hp}${status}${move}`;
+}
+
+function damageLine(ours: PublicMon[], theirs: PublicMon[], weather: string | undefined): string {
+  const us = ours.find(mon => mon.active && !mon.fainted);
+  const them = theirs.find(mon => mon.active && !mon.fainted);
+  if (!us || !them) return 'no active pair';
+  const ourBest = bestThreat(us.moves, move => threat(us, them, move, weather));
+  const replies = them.moves.length ? them.moves : likelyMoves(them.species, []);
+  const theirBest = bestThreat(replies, move => threat(them, us, move, weather));
+  return `our ${ourBest} | their ${theirBest}`;
+}
+
+function bestThreat(moves: string[], scoreOf: (move: string) => number): string {
+  if (moves.length === 0) return 'none';
+  let best = moves[0];
+  let bestScore = -Infinity;
+  for (const move of moves) {
+    const score = scoreOf(move);
+    if (score > bestScore) {
+      bestScore = score;
+      best = move;
+    }
+  }
+  return `${best}=${bestScore.toFixed(2)}`;
 }
 
 function monBlock(title: string, mons: PublicMon[]): string {

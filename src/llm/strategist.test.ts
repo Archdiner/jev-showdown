@@ -30,7 +30,7 @@ function scripted(plan: string, jevChoice: string): { client: GatewayClient; cha
       chats[0] += 1;
       const sent = JSON.parse(String(init?.body));
       expect(sent.reasoning_effort).toBe('none');
-      expect(sent.max_tokens).toBe(120);
+      expect(sent.max_tokens).toBe(80);
       return new Response(JSON.stringify({
         choices: [{ message: { content: plan } }],
         usage: { prompt_tokens: 40, completion_tokens: 20, completion_tokens_details: { reasoning_tokens: 0 } },
