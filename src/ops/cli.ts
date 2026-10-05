@@ -37,23 +37,25 @@ async function main(): Promise<void> {
     return;
   }
   if (command === 'live') {
-    const summary = await runLive({
-      paths,
-      once: flag('once'),
-      local: flag('local'),
-      server: opt('server'),
-      port: num('port'),
-      username: opt('username'),
-      games: num('games'),
-      runners: num('runners'),
-      concurrency: num('concurrency'),
-      exploreRate: num('explore'),
-      maxLosses: num('max-losses'),
-      maxDrop: num('max-drop'),
-      window: num('window'),
-    });
-    console.log(JSON.stringify(summary));
-    return;
+    for (;;) {
+      const summary = await runLive({
+        paths,
+        once: flag('once'),
+        local: flag('local'),
+        server: opt('server'),
+        port: num('port'),
+        username: opt('username'),
+        games: num('games'),
+        runners: num('runners'),
+        concurrency: num('concurrency'),
+        exploreRate: num('explore'),
+        maxLosses: num('max-losses'),
+        maxDrop: num('max-drop'),
+        window: num('window'),
+      });
+      console.log(JSON.stringify(summary));
+      if (summary.skipped !== 'window' || flag('once')) return;
+    }
   }
   if (command === 'analyst') {
     const extra = [opt('ladder-dir'), opt('live-runs')].filter((dir): dir is string => Boolean(dir));

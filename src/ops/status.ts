@@ -1,4 +1,4 @@
-import { recordedElo, recordedOutcome } from '../client/game-record.js';
+import { isLocalLiveGame, recordedElo, recordedOutcome } from '../client/game-record.js';
 import { openDb } from './db.js';
 import { latestHeartbeats } from './heartbeat.js';
 import { readLabels } from './labels-read.js';
@@ -13,6 +13,8 @@ interface LiveRow {
   rating?: number | null;
   eloAfter?: number | null;
   gxe: number | null;
+  localServer?: boolean;
+  replayStatus?: string | null;
 }
 
 export function statusReport(paths: OpsPaths, now = Date.now()): string {
@@ -42,8 +44,12 @@ export function statusReport(paths: OpsPaths, now = Date.now()): string {
     lines.push(`  ${name.padEnd(12)} ${health.padEnd(8)} ${age.padEnd(8)} ${beat?.detail || ''}`);
   }
   lines.push(`queue ${queued.length}  (${queued.map(job => job.spec.kind).join(', ') || 'empty'})`);
-  const last = games[games.length - 1];
-  lines.push(`rating ${last ? recordedElo(last) ?? 'n/a' : 'n/a'}  gxe ${last?.gxe ?? 'n/a'}`);
+  const lastLadder = [...games].reverse().find(game => !isLocalLiveGame(game) && recordedElo(game) !== null);
+  const last = lastLadder ?? [...games].reverse().find(game => !isLocalLiveGame(game));
+  const localOnly = games.length > 0 && games.every(game => isLocalLiveGame(game));
+  lines.push(localOnly
+    ? 'rating local  gxe local'
+    : `rating ${last ? recordedElo(last) ?? 'n/a' : 'n/a'}  gxe ${last?.gxe ?? 'n/a'}`);
   const ids = new Set([...labels.map(label => label.configId), ...games.map(game => game.configId)]);
   if (ids.size === 0) lines.push('live record: none');
   for (const id of ids) {
@@ -51,8 +57,12 @@ export function statusReport(paths: OpsPaths, now = Date.now()): string {
     const wins = rows.filter(game => recordedOutcome(game) === 'win').length;
     const losses = rows.filter(game => recordedOutcome(game) === 'loss').length;
     const label = labels.find(item => item.configId === id);
-    const lastRow = rows.at(-1);
-    lines.push(`  ${id} [${label?.labels.join('+') || 'unlabeled'}] ${wins}-${losses} rating ${lastRow ? recordedElo(lastRow) ?? 'n/a' : 'n/a'}`);
+    const lastLadderRow = [...rows].reverse().find(game => !isLocalLiveGame(game));
+    const lastLocal = rows.some(game => isLocalLiveGame(game));
+    const ratingText = lastLadderRow
+      ? recordedElo(lastLadderRow) ?? 'n/a'
+      : (lastLocal ? 'local' : 'n/a');
+    lines.push(`  ${id} [${label?.labels.join('+') || 'unlabeled'}] ${wins}-${losses} rating ${ratingText}`);
   }
   lines.push(`open regressions ${regressions}`);
   return lines.join('\n');

@@ -431,7 +431,7 @@ describe('local ladder dry run', () => {
       expect(screen).toContain('rating');
       expect(screen).toContain('queue');
       expect(screen).toContain('open regressions');
-      expect(dailyReport(paths)).toContain('Rating moved');
+      expect(dailyReport(paths)).toContain('not a ladder rating');
     } finally {
       await server.close();
     }

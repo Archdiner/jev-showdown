@@ -10,6 +10,13 @@ import { BattleDriver, GameSummary } from '../client/battle-driver.js';
 import { DecisionClient } from '../client/decision-client.js';
 import { startLocalServer } from '../client/local-server.js';
 import { writeLadderRun } from '../client/ladder-run.js';
+import {
+  AccountLock,
+  AccountLockHeldError,
+  accountLockRefusal,
+  acquireAccountLock,
+  bindLockRemoval,
+} from '../client/account-lock.js';
 import { safeError, toID } from '../client/ids.js';
 import { EngineName, MAX_LADDER_CONCURRENCY, parseEngine } from '../client/engines.js';
 import {
@@ -37,6 +44,14 @@ import {
   LadderIdentity,
   resolveLadderIdentity,
 } from '../client/ladder-identity.js';
+import {
+  AbSession,
+  appendAbIncident,
+  formatAbCanary,
+  formatAbPlan,
+  preflightCanaries,
+  resolveAbPlan,
+} from '../client/ab-route.js';
 
 interface LadderOptions {
   games: number;
@@ -64,6 +79,8 @@ interface LadderOptions {
   rampTarget: number | null;
   labeledChampion: boolean;
   rollback: boolean;
+  /** Repeatable `--ab <config>:<share>`. Share is a fraction of battles. */
+  ab: string[];
   check: boolean;
   help: boolean;
 }
@@ -95,6 +112,7 @@ function parseArgs(argv: string[]): LadderOptions {
     rampTarget: null,
     labeledChampion: false,
     rollback: false,
+    ab: [],
     check: false,
     help: false,
   };
@@ -135,6 +153,7 @@ function parseArgs(argv: string[]): LadderOptions {
     else if (arg === '--ramp-target') opts.rampTarget = Number(next());
     else if (arg === '--labeled-champion') opts.labeledChampion = true;
     else if (arg === '--rollback') opts.rollback = true;
+    else if (arg === '--ab') opts.ab.push(next());
     else if (arg === '--check') opts.check = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -189,13 +208,17 @@ Engines: max-damage (default; @smogon/calc maxDamageChoice), search (exact 1-ply
 --rollback plays the builtin policy for --engine even when a champion label is valid.
 A missing label, a file whose hash no longer matches the label, or two active champions rolls back to that builtin policy and logs the reason.
 The config is chosen once, before the first search. A promotion during the batch does not change it. Drain and start again to pick up a new champion.
-Each finished game records configId, configHash, and the commit. The startup line is: config live source=... id=... hash=... commit=...
+Each finished game records configId, configHash, role (champion or challenger), share, and the commit. The startup line is: config live source=... id=... hash=... commit=...
+--ab <config>:<share> is repeatable. <config> is a yaml/json path, a config id under configs/, or an engine profile (search, exact, max-damage). <share> is that config's fraction of new battles, in (0, 1]. The shares must sum to at most 1. The rest play the champion (--engine, or --labeled-champion). A battle keeps the arm chosen from a hash of its room id. Concurrency, the turn timer, and the choice watchdog stay shared. One process, one login.
+A challenger is pulled to champion-only after an invalid move, a timer loss, a crash, or 4 losses in a row. Each pull is one line in incidents.jsonl.
+  npm run ladder -- --games 40 --format gen9randombattle --engine search --concurrency 3 --ab configs/panel/maxdamage.yaml:0.2
 --concurrency K keeps up to K battles on one login (default 1, absolute max ${MAX_LADDER_CONCURRENCY}).
 --use-engine-profile reads configs/live/concurrency.json (search 3, max-damage 4, grok 1).
 --concurrency-config FILE overrides those numbers. --runners N multiplies the limit. An explicit --concurrency wins.
 --ramp steps from 3 (search) or 4 (max-damage) up to K while p95 latency and the turn timer stay healthy, and steps back when they do not.
 Backpressure always pauses new searches when p95 latency degrades, the turn timer drops under the safety margin, or Showdown throttles a search. Games already running are left in place.
 A proxy lock, ban, or ‽/! name exits immediately and does not reconnect.
+One account, one runner. Before login the process creates state/ladder-<userid>.lock with O_EXCL, storing pid, start time, and host. If that pid is still running, or the lock is from another host, this process prints the holder and exits non-zero. A lock is stale only when its pid is dead on this host. The file is removed on exit and on SIGINT. The first SIGTERM drains and keeps the lock until the process exits, so a restart cannot log in while this one is still sending choices. --check does not take the lock. A local two-bot series locks BotAlpha and BotBravo.
 
 Graceful drain (finish in-progress games, then exit):
   kill -USR1 <pid>    or    kill -TERM <pid>
@@ -238,6 +261,8 @@ async function makePlayer(input: {
   autoSearch?: boolean;
   metrics?: LiveMetrics;
   admission?: SearchAdmission;
+  /** One session for every battle on this login. Absent keeps the process config. */
+  route?: AbSession;
 }): Promise<{ client: ShowdownClient; driver: BattleDriver; decisions: DecisionClient; queue: LadderQueue }> {
   fs.mkdirSync(input.opts.logDir, { recursive: true });
   const config = engineConfig(input.opts);
@@ -272,6 +297,9 @@ async function makePlayer(input: {
     gitSha: input.identity.gitSha,
     configPath: input.identity.configPath,
     concurrency: input.opts.concurrency,
+    routeBattle: input.route ? battleId => input.route!.assign(battleId) : undefined,
+    onBattleFault: input.route ? (battleId, fault) => input.route!.noteFault(battleId, fault) : undefined,
+    onGame: input.route ? record => input.route!.noteGame(record) : undefined,
     localServer: input.local,
     settleMs: input.local ? 400 : 8000,
   });
@@ -383,13 +411,15 @@ async function playSeries(
     });
 
     const consider = (summary: GameSummary) => {
+      if (summary.phantom) return;
       if (finished.has(summary.battleId)) return;
       finished.set(summary.battleId, summary);
       metrics?.noteGame(summary);
       console.log(
         `[ladder] ${finished.size}/${games} ${summary.outcome} vs ${summary.opponent ?? '?'} ` +
         `turns=${summary.turns} invalid=${summary.invalidChoices} crashes=${summary.crashes} ` +
-        `fallbacks=${summary.fallbacks} elo=${summary.eloAfter ?? 'n/a'}`,
+        `fallbacks=${summary.fallbacks} elo=${summary.eloAfter ?? 'n/a'} ` +
+        `config=${summary.configId ?? 'n/a'} role=${summary.role ?? 'n/a'}`,
       );
       if (finished.size >= games || drain.isDraining) {
         stopSearching();
@@ -428,6 +458,7 @@ async function runLocalSeries(
   admission: SearchAdmission,
   identity: LadderIdentity,
   opponentIdentity: LadderIdentity,
+  route: AbSession,
 ): Promise<GameSummary[]> {
   console.log(`[ladder] starting local pokemon-showdown on port ${opts.port}`);
   const server = await startLocalServer(opts.port);
@@ -452,6 +483,7 @@ async function runLocalSeries(
       identity,
       metrics,
       admission,
+      route,
     });
     const bravo = await makePlayer({
       username: 'BotBravo',
@@ -501,6 +533,7 @@ async function runRemote(
   metrics: LiveMetrics,
   admission: SearchAdmission,
   identity: LadderIdentity,
+  route: AbSession,
 ): Promise<GameSummary[]> {
   const { username, local } = ladderIdentity(opts);
   const password = local ? '' : (process.env.SHOWDOWN_PASSWORD || '');
@@ -525,6 +558,7 @@ async function runRemote(
     autoSearch: !opts.accept && !opts.challenge,
     metrics,
     admission,
+    route,
   });
 
   if (opts.accept) watchChallenges(player.client, player.queue, opts.challenge);
@@ -552,14 +586,21 @@ async function runRemote(
   return summaries;
 }
 
-function report(summaries: GameSummary[], opts: LadderOptions, identity: LadderIdentity, drain?: LiveDrain): void {
-  const invalidChoices = summaries.reduce((sum, game) => sum + game.invalidChoices, 0);
-  const crashes = summaries.reduce((sum, game) => sum + game.crashes, 0);
-  const fallbacks = summaries.reduce((sum, game) => sum + game.fallbacks, 0);
-  const mismatches = summaries.reduce((sum, game) => sum + game.mismatches, 0);
-  const wins = summaries.filter(game => game.outcome === 'win').length;
+function report(
+  summaries: GameSummary[],
+  opts: LadderOptions,
+  identity: LadderIdentity,
+  route: AbSession,
+  drain?: LiveDrain,
+): void {
+  const played = summaries.filter(game => !game.phantom);
+  const invalidChoices = played.reduce((sum, game) => sum + game.invalidChoices, 0);
+  const crashes = played.reduce((sum, game) => sum + game.crashes, 0);
+  const fallbacks = played.reduce((sum, game) => sum + game.fallbacks, 0);
+  const mismatches = played.reduce((sum, game) => sum + game.mismatches, 0);
+  const wins = played.filter(game => game.outcome === 'win').length;
   const reportBody = {
-    games: summaries.length,
+    games: played.length,
     requested: opts.games,
     format: opts.format,
     engine: opts.engine,
@@ -571,6 +612,15 @@ function report(summaries: GameSummary[], opts: LadderOptions, identity: LadderI
     configSource: identity.source,
     configPath: identity.configPath,
     configReason: identity.reason,
+    ab: route.plan.arms.map(arm => ({
+      configId: arm.configId,
+      role: arm.role,
+      share: arm.share,
+      engine: arm.engine,
+      configPath: arm.configPath,
+    })),
+    pulled: route.pulledIds(),
+    incidents: route.incidents.length,
     local: opts.local,
     drained: drain?.isDraining ?? false,
     drainReason: drain?.drainReason ?? null,
@@ -579,24 +629,27 @@ function report(summaries: GameSummary[], opts: LadderOptions, identity: LadderI
     fallbacks,
     mismatches,
     wins,
-    results: summaries,
+    results: played,
   };
   fs.mkdirSync(opts.logDir, { recursive: true });
   const out = path.join(opts.logDir, 'summary.json');
   fs.writeFileSync(out, JSON.stringify(reportBody, null, 2));
-  console.log(`[ladder] games=${summaries.length} invalid=${invalidChoices} crashes=${crashes} fallbacks=${fallbacks} mismatches=${mismatches}`);
+  console.log(`[ladder] games=${played.length} invalid=${invalidChoices} crashes=${crashes} fallbacks=${fallbacks} mismatches=${mismatches}`);
   console.log(`[ladder] summary ${out}`);
   if (drain?.isDraining) {
-    console.log(`[ladder] drained (${drain.drainReason}) after ${summaries.length}/${opts.games} games`);
+    console.log(`[ladder] drained (${drain.drainReason}) after ${played.length}/${opts.games} games`);
     if (invalidChoices > 0 || crashes > 0) process.exitCode = 1;
     return;
   }
-  if (invalidChoices > 0 || crashes > 0 || summaries.length < opts.games) {
+  if (invalidChoices > 0 || crashes > 0 || played.length < opts.games) {
     process.exitCode = 1;
   }
 }
 
 async function runCheck(opts: LadderOptions): Promise<void> {
+  for (const canary of preflightCanaries(abPlanFor(opts))) {
+    console.log(formatAbCanary(canary));
+  }
   const { username, local } = ladderIdentity(opts);
   const password = local ? '' : (process.env.SHOWDOWN_PASSWORD || '');
   if (!username || (!local && !password)) {
@@ -699,6 +752,7 @@ async function main(): Promise<void> {
       return;
     }
 
+    const releaseLocks = holdAccountLocks(accountsFor(opts));
     applyLiveConcurrency(opts);
     const gitSha = currentGitSha();
     const identity = resolveLadderIdentity({
@@ -708,6 +762,7 @@ async function main(): Promise<void> {
       gitSha,
       graphPath: graphPathFromEnv(),
     });
+    const route = openAbRoute(opts, identity);
     const opponentIdentity = resolveLadderIdentity({
       engine: opts.opponentEngine ?? opts.engine,
       labeledChampion: false,
@@ -722,20 +777,21 @@ async function main(): Promise<void> {
     console.log('[ladder] loading randbats data');
     await dataLoader.load(gen9RandomBattle);
 
-    const session = openDrain(opts.engine, identity, ladderIdentity(opts));
-    const metrics = openLiveMetrics(opts, identity);
+    const session = openDrain(opts.engine, identity, ladderIdentity(opts), route);
+    const metrics = openLiveMetrics(opts, identity, route);
     const admission = openAdmission(opts);
     try {
       const summaries = opts.local && !opts.server && !opts.accept && !opts.challenge
-        ? await runLocalSeries(opts, session.drain, metrics, admission, identity, opponentIdentity)
-        : await runRemote(opts, session.drain, metrics, admission, identity);
+        ? await runLocalSeries(opts, session.drain, metrics, admission, identity, opponentIdentity, route)
+        : await runRemote(opts, session.drain, metrics, admission, identity, route);
       metrics.finish({ games: summaries.length, requested: opts.games });
-      report(summaries, opts, identity, session.drain);
+      report(summaries, opts, identity, route, session.drain);
       drained = session.drain.isDraining;
     } finally {
       admission.stop();
       session.close();
       await metrics.close();
+      releaseLocks();
     }
   } finally {
     await posthog?.shutdown();
@@ -746,10 +802,77 @@ async function main(): Promise<void> {
   }
 }
 
+function accountsFor(opts: LadderOptions): string[] {
+  if (opts.local && !opts.server && !opts.accept && !opts.challenge) return ['BotAlpha', 'BotBravo'];
+  const { username } = ladderIdentity(opts);
+  if (!username) {
+    throw new Error('Set SHOWDOWN_USERNAME and SHOWDOWN_PASSWORD. They are not read from source files.');
+  }
+  return [username];
+}
+
+function holdAccountLocks(usernames: string[]): () => void {
+  const held: AccountLock[] = [];
+  try {
+    for (const username of usernames) {
+      const lock = acquireAccountLock(username);
+      held.push(lock);
+      if (lock.replacedStale) {
+        console.error(
+          `[ladder] stale account lock for ${username} on ${lock.replacedStale.host || 'this host'} (pid ${lock.replacedStale.pid}, started ${lock.replacedStale.startedAt}) belonged to a dead process. Taking it.`,
+        );
+      }
+      console.log(`[ladder] account lock user=${username} pid=${lock.pid} host=${lock.host} started=${lock.startedAt} file=${lock.path}`);
+    }
+  } catch (err) {
+    for (const lock of held) lock.release();
+    throw err;
+  }
+  const release = () => {
+    for (const lock of held) lock.release();
+  };
+  const unbind = bindLockRemoval(release);
+  return () => {
+    release();
+    unbind();
+  };
+}
+
+function abPlanFor(opts: LadderOptions, identity = resolveLadderIdentity({
+  engine: opts.engine,
+  labeledChampion: opts.labeledChampion,
+  rollback: opts.rollback,
+  gitSha: currentGitSha(),
+  graphPath: graphPathFromEnv(),
+})) {
+  return resolveAbPlan({
+    champion: {
+      configId: identity.configId,
+      configHash: identity.configHash,
+      configPath: identity.championConfigPath ?? identity.configPath,
+      engine: opts.engine,
+    },
+    hostEngine: opts.engine,
+    specs: opts.ab,
+  });
+}
+
+function openAbRoute(opts: LadderOptions, identity: LadderIdentity): AbSession {
+  const plan = abPlanFor(opts, identity);
+  console.log(formatAbPlan(plan));
+  return new AbSession(plan, incident => {
+    appendAbIncident(opts.logDir, incident);
+    console.error(
+      `[ladder] incident pull config=${incident.configId} reason=${incident.reason} battle=${incident.battleId} ${incident.detail}`,
+    );
+  });
+}
+
 function openDrain(
   engine: string,
   identity: LadderIdentity,
   account: { username: string; local: boolean },
+  route: AbSession,
 ): { drain: LiveDrain; close(): void } {
   const runId = `${Date.now()}`;
   const drain = new LiveDrain();
@@ -762,6 +885,11 @@ function openDrain(
     gitSha: identity.gitSha,
     configSource: identity.source,
     configPath: identity.configPath,
+    ab: route.plan.arms.map(arm => ({
+      configId: arm.configId,
+      role: arm.role,
+      share: arm.share,
+    })),
     username: account.username,
     local: account.local,
     drainFile: runDrainFile(runId),
@@ -786,7 +914,7 @@ function openDrain(
   };
 }
 
-function openLiveMetrics(opts: LadderOptions, identity: LadderIdentity): LiveMetrics {
+function openLiveMetrics(opts: LadderOptions, identity: LadderIdentity, route: AbSession): LiveMetrics {
   const runId = `${Date.now()}-${opts.engine}`;
   const filePath = path.join(opts.logDir, 'metrics.jsonl');
   console.log(`[ladder] metrics ${filePath}`);
@@ -797,6 +925,11 @@ function openLiveMetrics(opts: LadderOptions, identity: LadderIdentity): LiveMet
     configId: identity.configId,
     configHash: identity.configHash,
     gitSha: identity.gitSha,
+    ab: route.plan.arms.map(arm => ({
+      configId: arm.configId,
+      role: arm.role,
+      share: arm.share,
+    })),
   });
 }
 
@@ -813,6 +946,7 @@ function openAdmission(opts: LadderOptions): SearchAdmission {
 }
 
 main().catch(err => {
-  console.error(`[ladder] ${safeError(err)}`);
+  if (err instanceof AccountLockHeldError) console.error(accountLockRefusal(err));
+  else console.error(`[ladder] ${safeError(err)}`);
   process.exit(1);
 });

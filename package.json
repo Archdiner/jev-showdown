@@ -24,7 +24,8 @@
     "benchmark": "tsx src/cli/benchmark.ts",
     "export-replays": "tsx src/cli/export-replays.ts",
     "lint": "eslint src/**/*.ts",
-    "dashboard": "tsx src/dashboard/cli.ts"
+    "dashboard": "tsx src/dashboard/cli.ts",
+    "calibration": "tsx src/cli/calibration.ts"
   },
   "keywords": [
     "pokemon",

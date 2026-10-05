@@ -7,7 +7,7 @@ import { Dex } from '@pkmn/dex';
 import { Format } from '../types/format.js';
 import { Action, GameState } from '../types/index.js';
 import { StateMismatch } from '../types/format.js';
-import { ShowdownClient, ReplayNotice, parseRatingLine, parseReplayUrl, replayMatchesRoom } from './showdown-client.js';
+import { ShowdownClient, RatingUpdate, ReplayNotice, parseFormatRating, parseRatingLine, parseReplayUrl, replayMatchesRoom } from './showdown-client.js';
 import { DecisionClient } from './decision-client.js';
 import { OpponentTracker } from './opponent-tracker.js';
 import { GameLog, openGameLog } from './game-log.js';
@@ -21,18 +21,38 @@ import {
   teamPreviewChoice,
 } from './choice.js';
 import { alignToRequest, cloneGameState, mismatchData, overlayProtocol } from './tracked-state.js';
-import { LivePosition } from './decision-battle.js';
+import { LivePosition, buildDecisionBattle } from './decision-battle.js';
 import { livePositionFromClient } from './live-position.js';
 import { ourClockUpdate } from './inactive-clock.js';
 import { safeError, toID } from './ids.js';
-import { appendGameRecord, buildLadderGameRecord, LadderGameRecord } from './game-record.js';
+import { EngineName } from './engines.js';
+import { appendGameRecord, buildLadderGameRecord, isPhantomGame, LadderGameRecord } from './game-record.js';
 import { attributePopup } from './delivery.js';
+import { EXACT_1PLY, type ExactConfig } from '../engine/exact/search.js';
+import { ladderPolicy } from './ladder-engine.js';
+import { parseEngine } from './engines.js';
+import { PredictionLog, PredictionScore } from './prediction.js';
+import { TurnForecast, forecastLine, hpFraction, hpFractionText } from './turn-forecast.js';
 
 export type GameSummary = LadderGameRecord & {
   choiceDeliveryFailures: number;
   noLegalRetries: number;
   ambiguousPopups: number;
 };
+
+function ourHpFromRequest(request: any): number | null {
+  const slots: any[] = request?.side?.pokemon || [];
+  const active = slots.find(mon => mon?.active) || slots[0];
+  const fraction = hpFractionText(typeof active?.condition === 'string' ? active.condition : null);
+  return fraction === null ? null : Math.round(fraction * 10000) / 10000;
+}
+
+function foeHpFrom(position: LivePosition): number | null {
+  const foe = position.foeActive;
+  if (!foe) return null;
+  const fraction = hpFraction(foe.hp, foe.maxhp, foe.fainted);
+  return fraction === null ? null : Math.round(fraction * 10000) / 10000;
+}
 
 interface RoomState {
   roomId: string;
@@ -73,6 +93,8 @@ interface RoomState {
   noLegalRetries: number;
   ambiguousPopups: number;
   noLegalRetryLogged: boolean;
+  prediction: PredictionLog;
+  assignment: BattleAssignment | null;
   requestTimer?: NodeJS.Timeout;
   finalizeTimer?: NodeJS.Timeout;
   deliveryTimer?: NodeJS.Timeout;
@@ -104,6 +126,22 @@ export interface BattleDriverOptions {
   choiceWatchMs?: number;
   /** How long to wait for a replay popup. Tests use 0. */
   settleMs?: number;
+  /**
+   * Config for this battle. Absent keeps the process config.
+   * The same driver, timer, and choice watchdog serve every config.
+   */
+  routeBattle?: (battleId: string) => BattleAssignment;
+  onBattleFault?: (battleId: string, fault: 'invalid-move' | 'crash') => void;
+  onGame?: (record: LadderGameRecord) => void;
+}
+
+export interface BattleAssignment {
+  configId: string;
+  configHash: string;
+  configPath: string | null;
+  role: 'champion' | 'challenger';
+  share: number;
+  engine: EngineName;
 }
 
 const DELIVERY_ATTEMPTS = 3;
@@ -132,6 +170,9 @@ export class BattleDriver extends EventEmitter {
     client.on('replay', (replay: ReplayNotice) => {
       this.onReplay(replay);
     });
+    client.on('rating', (update: RatingUpdate) => {
+      this.noteRating(update);
+    });
     client.on('popup', (message: string) => {
       this.onPopup(message);
     });
@@ -149,6 +190,7 @@ export class BattleDriver extends EventEmitter {
   async stop(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
+    await this.fillMissingRatings();
     for (const room of [...this.rooms.values()]) {
       if (room.requestTimer) clearTimeout(room.requestTimer);
       if (room.finalizeTimer) clearTimeout(room.finalizeTimer);
@@ -172,12 +214,8 @@ export class BattleDriver extends EventEmitter {
 
     const clock = ourClockUpdate(line, this.options.username);
     if (clock !== undefined) room.secondsLeft = clock;
-    if (typeof clock === 'number') {
-      room.minTimerMarginSec = room.minTimerMarginSec === null
-        ? clock
-        : Math.min(room.minTimerMarginSec, clock);
-    }
-
+    if (typeof clock === 'number') this.noteTimerMargin(room, clock);
+    this.noteProtocol(room, line);
     room.lines.push(line);
     this.observePlayers(room, line);
     room.tracker.applyLine(line);
@@ -270,6 +308,7 @@ export class BattleDriver extends EventEmitter {
 
     if (/invalid choice/i.test(line)) {
       room.invalidChoices += 1;
+      this.options.onBattleFault?.(room.roomId, 'invalid-move');
       room.log.write({
         type: 'error',
         battleId: room.roomId,
@@ -332,18 +371,30 @@ export class BattleDriver extends EventEmitter {
       noLegalRetries: 0,
       ambiguousPopups: 0,
       noLegalRetryLogged: false,
+      prediction: new PredictionLog(),
+      assignment: null,
     };
+    const assignment = this.options.routeBattle?.(roomId) ?? null;
+    room.assignment = assignment;
     this.rooms.set(roomId, room);
     this.options.client.trackRoom(roomId);
-    this.options.decisions.openBattle(roomId);
+    this.options.decisions.openBattle(
+      roomId,
+      assignment ? { configPath: assignment.configPath, engine: assignment.engine } : undefined,
+    );
     log.write({
       type: 'game_start',
       battleId: roomId,
       format: this.options.format.id,
       username: this.options.username,
-      engine: this.options.engineName,
+      engine: assignment?.engine ?? this.options.engineName,
+      ...(assignment ? {
+        configId: assignment.configId,
+        role: assignment.role,
+        share: assignment.share,
+      } : {}),
     });
-    this.emit('battleStart', roomId);
+    this.emit('battleStart', roomId, assignment);
     // Partial test clients implement only the methods that battle uses.
     this.options.client.enableBattleTimer?.(roomId);
     return room;
@@ -391,8 +442,7 @@ export class BattleDriver extends EventEmitter {
     try {
       mismatches = this.reconcile(room, request);
     } catch (err) {
-      room.crashes += 1;
-      room.log.write({ type: 'crash', battleId: room.roomId, message: safeError(err) });
+      this.markCrash(room, safeError(err));
     }
 
     const tracking = room.tracker.tracking();
@@ -426,8 +476,7 @@ export class BattleDriver extends EventEmitter {
         decision = await this.options.decisions.decide(room.roomId, state, legal, budget, position);
       }
     } catch (err) {
-      room.crashes += 1;
-      room.log.write({ type: 'crash', battleId: room.roomId, message: safeError(err) });
+      this.markCrash(room, safeError(err));
       decision = {
         action: pickBestLegal(state, legal),
         score: null as number | null,
@@ -439,11 +488,7 @@ export class BattleDriver extends EventEmitter {
 
     const latencyMs = Date.now() - startedAt;
     room.latencies.push(latencyMs);
-    if (typeof room.secondsLeft === 'number') {
-      room.minTimerMarginSec = room.minTimerMarginSec === null
-        ? room.secondsLeft
-        : Math.min(room.minTimerMarginSec, room.secondsLeft);
-    }
+    if (typeof room.secondsLeft === 'number') this.noteTimerMargin(room, room.secondsLeft);
     if (room.ended || (rqid !== null && room.answered.has(rqid))) {
       this.emit('decision', {
         battleId: room.roomId,
@@ -457,36 +502,9 @@ export class BattleDriver extends EventEmitter {
 
     const safe = sanitizeAction(decision.action, request, legal) ?? pickBestLegal(state, legal);
     const adjusted = !sameAction(safe, decision.action);
-    if (decision.fallback || adjusted) {
-      room.fallbacks += 1;
-      room.log.write({
-        type: 'fallback',
-        battleId: room.roomId,
-        turn: state.turn,
-        rqid,
-        reason: decision.reason || (adjusted ? 'removed an illegal modifier from the engine choice' : 'fallback'),
-        action: safe,
-      });
-    }
+    if (decision.fallback || adjusted) room.fallbacks += 1;
 
     const choice = formatChoice(safe, rqid ?? undefined);
-    room.log.write({
-      type: 'turn',
-      kind: 'turn',
-      battleId: room.roomId,
-      turn: state.turn,
-      rqid,
-      decision: safe,
-      choice,
-      score: decision.score,
-      searchMs: decision.timeMs,
-      latencyMs,
-      fallback: decision.fallback || adjusted,
-      mismatches: mismatchData(mismatches),
-      opponentRoles: roles,
-      legalCount: legal.length,
-      secondsLeft: room.secondsLeft,
-    });
     room.mismatchCount += mismatches.length;
     this.emit('decision', {
       battleId: room.roomId,
@@ -495,7 +513,136 @@ export class BattleDriver extends EventEmitter {
       secondsLeft: room.secondsLeft,
       fallback: decision.fallback || adjusted,
     });
+    // Send before any prediction or log write. A logging failure must not skip the choice.
     this.sendChoice(room, choice, rqid, safe, false);
+    this.recordTurn(room, {
+      request,
+      position,
+      stateTurn: state.turn,
+      rqid,
+      safe,
+      choice,
+      simChoice: formatChoice(safe),
+      score: decision.score,
+      searchMs: decision.timeMs,
+      latencyMs,
+      fallback: Boolean(decision.fallback || adjusted),
+      fallbackReason: decision.reason || (adjusted ? 'removed an illegal modifier from the engine choice' : 'fallback'),
+      adjusted: Boolean(decision.fallback || adjusted),
+      mismatches: mismatchData(mismatches),
+      roles,
+      legalCount: legal.length,
+    });
+  }
+
+  private noteProtocol(room: RoomState, line: string): void {
+    try {
+      const score = room.prediction.observe(line);
+      if (score) this.writeScore(room, score);
+    } catch {
+      // Protocol parsing must not drop the line or the choice.
+    }
+  }
+
+  private writeScore(room: RoomState, score: PredictionScore): void {
+    try {
+      room.log.write({
+        type: 'prediction_error',
+        battleId: room.roomId,
+        engine: this.options.engineName,
+        ...score,
+      });
+    } catch {
+      // The choice is already in, or this line is only a record.
+    }
+  }
+
+  private recordTurn(room: RoomState, input: {
+    request: any;
+    position: LivePosition;
+    stateTurn: number;
+    rqid: number | null;
+    safe: Action;
+    choice: string;
+    simChoice: string;
+    score: number | null;
+    searchMs: number;
+    latencyMs: number;
+    fallback: boolean;
+    fallbackReason: string;
+    adjusted: boolean;
+    mismatches: ReturnType<typeof mismatchData>;
+    roles: Array<{ role: string; probability: number }>;
+    legalCount: number;
+  }): void {
+    try {
+      if (input.adjusted) {
+        room.log.write({
+          type: 'fallback',
+          battleId: room.roomId,
+          turn: input.stateTurn,
+          rqid: input.rqid,
+          reason: input.fallbackReason,
+          action: input.safe,
+        });
+      }
+      const prediction = this.forecastSafe(input.position, input.simChoice);
+      const baseline = prediction && (room.ourSide === 'p1' || room.ourSide === 'p2')
+        ? {
+          ourSide: room.ourSide,
+          ourHpBefore: ourHpFromRequest(input.request),
+          foeHpBefore: foeHpFrom(input.position),
+        }
+        : null;
+      room.log.write({
+        type: 'turn',
+        kind: 'turn',
+        battleId: room.roomId,
+        turn: input.stateTurn,
+        rqid: input.rqid,
+        decision: input.safe,
+        choice: input.choice,
+        score: input.score,
+        searchMs: input.searchMs,
+        latencyMs: input.latencyMs,
+        fallback: input.fallback,
+        mismatches: input.mismatches,
+        opponentRoles: input.roles,
+        legalCount: input.legalCount,
+        secondsLeft: room.secondsLeft,
+        engine: this.options.engineName,
+        prediction,
+        predictionBaseline: baseline,
+      });
+      if (prediction && baseline) {
+        const previous = room.prediction.start({
+          forecast: prediction,
+          baseline,
+          turn: input.stateTurn,
+          rqid: input.rqid,
+        });
+        if (previous) this.writeScore(room, previous);
+      }
+    } catch {
+      // Already sent. A forecast or disk failure stays off the turn.
+    }
+  }
+
+  private forecastSafe(position: LivePosition, choice: string): TurnForecast | null {
+    try {
+      const battle = buildDecisionBattle(position);
+      if (!battle) return null;
+      let config: ExactConfig = { ...EXACT_1PLY, samples: 1 };
+      try {
+        const spec = ladderPolicy(parseEngine(this.options.engineName));
+        if (spec.kind === 'exact') config = spec.config;
+      } catch {
+        // An unknown engine name still gets the champion's foe model, one draw.
+      }
+      return forecastLine(battle, 'p1', choice, config);
+    } catch {
+      return null;
+    }
   }
 
   private livePosition(room: RoomState, request: any): LivePosition {
@@ -573,9 +720,8 @@ export class BattleDriver extends EventEmitter {
       sent = this.options.client.choose(intendedRoomId, choice);
     } catch (err) {
       if (this.stopped) return;
-      room.crashes += 1;
       const message = `send failed: ${safeError(err)}`;
-      room.log.write({ type: 'crash', kind: 'crash', battleId: room.roomId, message });
+      this.markCrash(room, message);
       this.failDelivery(room, choice, rqid, action, preview, attempt, 'send-threw', message, source, watchdogResends, intendedRoomId);
       return;
     }
@@ -796,6 +942,12 @@ export class BattleDriver extends EventEmitter {
     });
   }
 
+  private markCrash(room: RoomState, message: string): void {
+    room.crashes += 1;
+    room.log.write({ type: 'crash', kind: 'crash', battleId: room.roomId, message });
+    this.options.onBattleFault?.(room.roomId, 'crash');
+  }
+
   private markEnded(room: RoomState, line: string): void {
     if (room.ended) return;
     room.ended = true;
@@ -844,6 +996,10 @@ export class BattleDriver extends EventEmitter {
     }
     const target = open.find(room => room.roomId === attribution.roomId);
     if (!target) return;
+    const rating = parseRatingLine(message);
+    if (rating) this.noteRating(rating, target.roomId);
+    const replay = parseReplayUrl(message);
+    if (replay && replayMatchesRoom(target.roomId, replay.id)) target.replay = replay;
     target.log.write({
       type: 'popup',
       kind: 'popup',
@@ -853,6 +1009,61 @@ export class BattleDriver extends EventEmitter {
       attribution: attribution.attribution,
       candidates: [target.roomId],
     });
+  }
+
+  private noteTimerMargin(room: RoomState, seconds: number): void {
+    if (!Number.isFinite(seconds)) return;
+    room.minTimerMarginSec = room.minTimerMarginSec === null
+      ? seconds
+      : Math.min(room.minTimerMarginSec, seconds);
+  }
+
+  /**
+   * A rating popup does not name the battle. Apply it to the room the popup
+   * was attributed to, or to the one ended battle still waiting on Elo.
+   */
+  private noteRating(update: RatingUpdate, roomId?: string): void {
+    if (update.after === null || !Number.isFinite(update.after)) return;
+    if (update.username && toID(update.username) !== toID(this.options.username)) return;
+    const room = roomId ? this.rooms.get(roomId) : this.onlyEndedRoomMissingRating();
+    if (!room || room.finalized) return;
+    room.elo = {
+      before: update.before ?? room.elo?.before ?? null,
+      after: update.after,
+      gxe: update.gxe,
+      gxeSource: update.gxeSource,
+    };
+    if (update.gxe !== null) room.gxe = update.gxe;
+  }
+
+  private onlyEndedRoomMissingRating(): RoomState | undefined {
+    const needy = [...this.rooms.values()].filter(room => !room.finalized && room.ended && room.elo?.after == null);
+    return needy.length === 1 ? needy[0] : undefined;
+  }
+
+  /** `/rank` after a disconnect, when the per-battle rating line never arrived. */
+  private async fillMissingRatings(): Promise<void> {
+    if (this.options.localServer) return;
+    const missing = [...this.rooms.values()].filter(room =>
+      !room.finalized
+      && room.elo?.after == null
+      && !isPhantomGame({
+        turns: room.turns || room.battle.turn || 0,
+        winner: room.winner,
+        lines: room.lines,
+      }),
+    );
+    if (missing.length === 0) return;
+    const rating = await readFormatRank(this.options.client, this.options.format.id);
+    if (rating === null) return;
+    const target = missing.sort((a, b) => a.startedAt - b.startedAt).at(-1);
+    if (!target || target.finalized) return;
+    target.elo = {
+      before: target.elo?.before ?? null,
+      after: rating,
+      gxe: target.elo?.gxe ?? target.gxe,
+      gxeSource: target.elo?.gxeSource ?? 'missing',
+    };
   }
 
   private onReplay(replay: ReplayNotice): void {
@@ -892,6 +1103,15 @@ export class BattleDriver extends EventEmitter {
     fs.writeFileSync(localReplayPath, room.lines.join('\n'));
     this.replayFromLines(room);
 
+    let calibration = null;
+    try {
+      const pending = room.prediction.close();
+      if (pending) this.writeScore(room, pending);
+      calibration = room.prediction.summary();
+    } catch {
+      calibration = null;
+    }
+
     const record = buildLadderGameRecord({
       startedAt: room.startedAt,
       battleId: room.roomId,
@@ -911,12 +1131,14 @@ export class BattleDriver extends EventEmitter {
       gxe: room.gxe,
       latencies: room.latencies,
       minTimerMarginSec: room.minTimerMarginSec,
-      engine: this.options.engineName,
+      engine: room.assignment?.engine ?? this.options.engineName,
       ourSide: room.ourSide,
-      configId: this.options.configId ?? null,
-      configHash: this.options.configHash ?? null,
+      configId: room.assignment?.configId ?? this.options.configId ?? null,
+      configHash: room.assignment?.configHash ?? this.options.configHash ?? null,
       gitSha: this.options.gitSha ?? null,
-      configPath: this.options.configPath ?? undefined,
+      configPath: room.assignment?.configPath ?? this.options.configPath ?? undefined,
+      role: room.assignment?.role,
+      share: room.assignment?.share,
       concurrency: this.options.concurrency ?? 1,
       replayId: room.replay?.id ?? null,
       replayUrl: room.replay?.url ?? null,
@@ -924,6 +1146,7 @@ export class BattleDriver extends EventEmitter {
       localServer: this.options.localServer ?? false,
       disconnected: room.disconnected,
       logPath: room.log.filePath,
+      calibration,
     });
     const summary: GameSummary = {
       ...record,
@@ -938,6 +1161,7 @@ export class BattleDriver extends EventEmitter {
       gxeSource: room.elo?.gxeSource ?? 'missing',
     });
     appendGameRecord(this.options.logDir, summary);
+    this.options.onGame?.(summary);
     this.options.decisions.closeBattle(room.roomId);
     await room.log.close();
     this.options.client.untrackRoom(room.roomId);
@@ -945,4 +1169,30 @@ export class BattleDriver extends EventEmitter {
     this.rooms.delete(room.roomId);
     this.emit('gameEnd', summary);
   }
+}
+
+/** One `/rank` reply. Null when the client cannot ask or the table has no format row. */
+function readFormatRank(client: ShowdownClient, format: string): Promise<number | null> {
+  if (typeof client.queryRank !== 'function' || (typeof client.isReady === 'function' && !client.isReady())) {
+    return Promise.resolve(null);
+  }
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      client.off('line', onLine);
+      resolve(null);
+    }, 1500);
+    const onLine = (_room: string, line: string) => {
+      const parsed = parseFormatRating(line, format);
+      if (parsed === undefined) return;
+      clearTimeout(timer);
+      client.off('line', onLine);
+      resolve(parsed);
+    };
+    client.on('line', onLine);
+    if (!client.queryRank()) {
+      clearTimeout(timer);
+      client.off('line', onLine);
+      resolve(null);
+    }
+  });
 }

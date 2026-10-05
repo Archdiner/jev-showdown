@@ -9,6 +9,7 @@
     body { margin: 0; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); }
     header, section, form { padding: 12px 16px; }
     h1 { margin: 0 0 4px; font-size: 18px; }
+    h2 { margin: 0 0 8px; font-size: 16px; }
     p { margin: 4px 0; color: var(--muted); }
     .rates { display: flex; flex-wrap: wrap; gap: 8px; }
     .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-width: 160px; }
@@ -38,6 +39,25 @@
   </header>
   <pre id="ops">Loading ops status…</pre>
   <section class="rates" id="rates"></section>
+  <section>
+    <h2>Sim calibration</h2>
+    <p id="calNote">Predicted foe action, damage, KOs, and speed order against the protocol that followed the choice.</p>
+    <div class="rates" id="calibration"></div>
+  </section>
+  <section>
+    <h2>Per config</h2>
+    <div class="wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Config</th><th>Role</th><th>Share</th><th>W-L-T</th><th>Elo Δ</th><th>Invalid</th>
+            <th>Strategy</th><th>Timer / disconnect</th><th>Crash</th><th>All</th>
+          </tr>
+        </thead>
+        <tbody id="configRows"></tbody>
+      </table>
+    </div>
+  </section>
   <form id="filters">
     <label>End reason
       <select id="endReason">
