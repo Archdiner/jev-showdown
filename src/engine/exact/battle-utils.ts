@@ -189,3 +189,19 @@ export function switchChoice(battle: Battle, sideId: SideId, species: string): s
   if (idx < 0) return null;
   return `switch ${idx + 1}`;
 }
+
+/**
+ * Count total remaining unfainted pokemon across both sides
+ */
+export function totalRemainingMons(battle: Battle): number {
+  const p1 = battle.getSide('p1');
+  const p2 = battle.getSide('p2');
+  let count = 0;
+  for (const mon of p1.pokemon) {
+    if (!mon.fainted && mon.hp > 0) count++;
+  }
+  for (const mon of p2.pokemon) {
+    if (!mon.fainted && mon.hp > 0) count++;
+  }
+  return count;
+}

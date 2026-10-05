@@ -54,13 +54,15 @@ export const AgentParamsSchema = z.object({
 export type AgentParams = z.infer<typeof AgentParamsSchema>;
 
 export const SearchParamsSchema = z.object({
-  depth: z.number().int().min(1).max(3).default(1),
+  depth: z.number().int().min(1).max(4).default(1),
   samples: z.number().int().min(1).max(16).default(1),
   timeBudgetMs: z.number().int().positive().default(2000),
   risk: z.enum(['expected-value', 'minimax', 'risk-averse']).default('expected-value'),
   variancePenalty: z.number().nonnegative().default(0),
   opponentModel: z.enum(['max-damage', 'uniform']).default('max-damage'),
   evalMode: z.enum(['hp', 'full']).default('hp'),
+  endgameMonThreshold: z.number().int().min(2).max(6).optional(),
+  endgameDepth: z.number().int().min(2).max(4).optional(),
 }).strict();
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
 

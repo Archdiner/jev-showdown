@@ -110,7 +110,16 @@ export function exactConfig(
   depth: number,
   deadlineMs?: number,
 ): ExactConfig {
-  return { depth, opponentModel, evalMode, errorAsLoss: false, samples: params.samples, deadlineMs };
+  return {
+    depth,
+    opponentModel,
+    evalMode,
+    errorAsLoss: false,
+    samples: params.samples,
+    deadlineMs,
+    endgameMonThreshold: params.endgameMonThreshold,
+    endgameDepth: params.endgameDepth,
+  };
 }
 
 function outlined(battle: Battle, side: SideId, params: SearchParams, ctx: SearchCtx, depth: number): SearchTrace {

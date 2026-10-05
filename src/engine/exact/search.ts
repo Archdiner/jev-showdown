@@ -9,6 +9,7 @@ import {
   otherSide,
   playChoices,
   snapshot,
+  totalRemainingMons,
 } from './battle-utils.js';
 import { maxDamageChoice } from './max-damage.js';
 import { SearchProfile } from './config.js';
@@ -38,6 +39,10 @@ export interface ExactConfig {
   deeperChoices?: number;
   /** Stop once this time has passed and at least one score exists. */
   deadlineMs?: number;
+  /** Endgame deepening: increase depth when total remaining mons <= this threshold */
+  endgameMonThreshold?: number;
+  /** Depth to use in endgame (when threshold is met) */
+  endgameDepth?: number;
 }
 
 /** True when the deadline has passed and the search already has a score to return. */
@@ -189,11 +194,21 @@ function ownChoices(battle: Battle, sideId: SideId, config: ExactConfig, atRoot:
 /**
  * 1-ply (or deeper) exact search.
  * Every branch is a clone of the real battle stepped with Battle.choose.
+ * Conditionally deepens in endgames when configured.
  */
 export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig = EXACT_1PLY): SearchTrace {
   const mine = ownChoices(battle, sideId, config, true);
   if (mine.length === 0) return { choice: 'default', scores: [] };
   if (mine.length === 1) return { choice: mine[0], scores: [{ choice: mine[0], score: 0 }] };
+
+  // Check for endgame condition and adjust depth if configured
+  let effectiveDepth = config.depth;
+  if (config.endgameMonThreshold !== undefined && config.endgameDepth !== undefined) {
+    const remaining = totalRemainingMons(battle);
+    if (remaining <= config.endgameMonThreshold && remaining > 0) {
+      effectiveDepth = config.endgameDepth;
+    }
+  }
 
   const snap = snapshot(battle);
   const replies = opponentDistribution(battle, otherSide(sideId), config);
@@ -212,7 +227,7 @@ export function exactSearch(battle: Battle, sideId: SideId, config: ExactConfig 
 
   for (const choice of mine) {
     if (searchBudgetExpired(config.deadlineMs, scores.length)) break;
-    const parts = scoreChoice(snap, sideId, choice, config.depth, config, config.samples ?? 1, replies, switchReply?.choice || null);
+    const parts = scoreChoice(snap, sideId, choice, effectiveDepth, config, config.samples ?? 1, replies, switchReply?.choice || null);
     scores.push({ choice, score: parts.mean });
     if (parts.mean > bestScore) {
       bestScore = parts.mean;
