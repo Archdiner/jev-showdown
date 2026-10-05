@@ -1,5 +1,42 @@
 # Changelog
 
+## Depth-2 switch search promoted
+
+The live champion attacked. This one can switch, expects the opponent to switch, and scores both benches.
+
+A switch is an ordinary action. At the root the search scores every legal move and every legal switch. The incoming Pokémon is compared with the opponent's likely set: damage both ways, speed, hazard damage on entry, and the chance of being hit on the way in. Deeper in the tree, moves are kept and the best switches are kept up to a cap. The root is not capped.
+
+The opponent is a mix of "stay and attack" and "switch to this bench Pokémon". The switch chance comes from the matchup: threatened with a knockout, outsped, a bench Pokémon that is a hard counter, HP, and hazards. No species is hard-coded. The weights were fit on scraped high-Elo replays and then left alone. On held-out replays, 3,934 decisions, 19.9% of them switches, log loss is 0.463. Always-attack scores 2.753. A model that only knows the base rate scores 0.499. Accuracy is 80.2%, and always-staying is 80.1%. The gain is in the probabilities. Search uses those probabilities instead of a single max-damage reply.
+
+The score covers both full teams: remaining HP, who checks or revenge-kills the active Pokémon, speed, hazards, and whether Tera is still available. An opponent Pokémon that has not been seen is filled in from the random-battle team prior.
+
+Search looks two turns ahead. Both players can move or switch. Replies are pruned with the switch model. Games run on worker threads, each heap capped, and the next game starts on a fresh worker. Turn time is that thread's CPU time, so a host clock jump is not a slow search. A garbage-collection pause on the searching thread still counts.
+
+Gate verdict **promoted** at commit `f877174`. Seed 1, 150 pairs, sides swapped, 300 games per opponent:
+
+| Opponent | Result | 95% CI |
+| --- | --- | --- |
+| random | 98.7% (296 wins in 300) | 96.6%–99.5% |
+| max-damage | 82.7% (248 wins in 300) | 78.0%–86.5% |
+| exact 1-ply | 70.0% (210 wins in 300) | 64.6%–74.9% |
+
+Invalid choices 0, crashes 0, timeouts 0, fallback 0, p99 turn time 910ms. No turn used more than 2 seconds of CPU.
+
+Across those 900 games the bot switched on 25.7% of voluntary decisions (8,405 of 32,728). When the model's most likely reply was a switch, the chosen line was the best answer to that switch 52.1% of the time (125 of 240).
+
+Generated positions, labeled by a depth-2 max-damage search. Dev may be inspected. Held-out was not opened while tuning.
+
+| Split | Positions | Replay snapshots | Switch search agrees | Max-damage agrees |
+| --- | --- | --- | --- | --- |
+| dev | 230 | 30 | 53.5% (123/230) | 23.9% (55/230) |
+| held-out | 217 | 17 | 55.8% (121/217) | 21.2% (46/217) |
+
+The forced-win slice is empty. These positions are the first turn where both sides can act.
+
+The pieces live in `experiments/switch-depth2/config.json`: depth, opponent model, eval, how many replies to keep, and how many of our own switches the deeper ply keeps. The exact 1-ply bot is still in the code. Only the gate writes a new champion.
+
+`npm run ladder -- --engine search` still calls `Bot.selectAction`. This promotion does not switch the live client.
+
 ## Exact 1-ply search promoted
 
 The old 3-ply search was not looking at the live battle. It built a fresh one. After a knockout the live request is a switch, and the copy still asked both players for a move. The switch was rejected. Every rejection was scored as a loss, so the search was grading crashes instead of HP. Cloning the live battle and scoring HP fraction plus faints fixes that.

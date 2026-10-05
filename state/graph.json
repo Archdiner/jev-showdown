@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "exported_at": 1791160488073,
+  "exported_at": 1791242308063,
   "nodes": [
     {
       "id": "goal-ladder-1",
@@ -660,28 +660,6 @@
       "test_plan": "Diagnostics on 21 obvious positions. Paired games, swapped sides, seed 1. Baseline exact:1,max-damage,hp over 150 pairs vs random and vs max-damage. Then uniform, depth 2, depth 3, and full eval on the same seeds. Kill the clone engine if it is under 90% vs random or under 70% vs max-damage."
     },
     {
-      "id": "champion-exact-1ply",
-      "type": "Champion",
-      "status": "active",
-      "title": "Champion: exact 1-ply HP search",
-      "description": "1-ply exact @pkmn/sim battle clone. Opponent line is the accuracy-weighted max-damage move. Eight RNG draws are averaged. Eval is HP fraction plus faint counts.",
-      "created_at": 1791160362784,
-      "updated_at": 1791160457509,
-      "metrics": {
-        "win_rate_vs_random": 0.98,
-        "win_rate_vs_maxdamage": 0.78,
-        "invalid_choices": 0,
-        "crashes": 0,
-        "timeouts": 0,
-        "p99_turn_time_ms": 190,
-        "fallback_rate": 0,
-        "state_mismatches": 0
-      },
-      "version": "exact-1ply",
-      "config_path": "src/engine/exact/search.ts",
-      "promoted_at": 1791160362784
-    },
-    {
       "id": "result-ablation-exact-search",
       "type": "Result",
       "status": "done",
@@ -777,6 +755,478 @@
       "insight": "The old search rebuilt a battle that still had a move request after a KO, rejected the legal switch, and scored that rejection as a loss.",
       "evidence": "src/engine/exact/legacy-repro.ts. The clone search is 98.0% vs random and 78.0% vs max-damage over 300 paired games, gate promoted, commit fcd9c92.",
       "confidence": "high"
+    },
+    {
+      "id": "result-challenger-switch-depth2-1791212678618",
+      "type": "Result",
+      "status": "done",
+      "title": "Gate: rejected",
+      "description": "Failed hard guardrails: invalid_choices=747, timeouts=31",
+      "created_at": 1791212678618,
+      "updated_at": 1791212678618,
+      "metrics": {
+        "verdict": "rejected",
+        "games": 900,
+        "panel_results": [
+          {
+            "opponent": "random-v1",
+            "challenger_elo": 2247.6926878923896,
+            "champion_elo": 1500,
+            "elo_diff": 747.6926878923896,
+            "win_rate": 0.9866666666666667,
+            "ci_lower": 0.9662239391535502,
+            "ci_upper": 0.9948031223153205,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          },
+          {
+            "opponent": "maxdamage-v1",
+            "challenger_elo": 1775.4516683991199,
+            "champion_elo": 1500,
+            "elo_diff": 275.45166839911985,
+            "win_rate": 0.83,
+            "ci_lower": 0.7833848085580865,
+            "ci_upper": 0.8682705276434078,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          },
+          {
+            "opponent": "exact-1ply",
+            "challenger_elo": 1441.5487857287048,
+            "champion_elo": 1500,
+            "elo_diff": -58.45121427129516,
+            "win_rate": 0.4166666666666667,
+            "ci_lower": 0.36227512359534986,
+            "ci_upper": 0.4731654480709394,
+            "games": 300,
+            "significant_improvement": false,
+            "significant_regression": true
+          }
+        ],
+        "guardrails": {
+          "passed": false,
+          "invalid_choices": 747,
+          "crashes": 0,
+          "timeouts": 31,
+          "p99_turn_time_ms": 760,
+          "fallback_rate": 0,
+          "state_mismatches": 0
+        },
+        "held_out": {
+          "ok": true,
+          "reason": "held-out forced-win 0/0, deep agreement 55.8% vs max-damage 21.2% (17 replay positions)",
+          "positions": 217,
+          "replay_positions": 17,
+          "forced_win_hit": 0,
+          "forced_win_total": 0,
+          "deep_hit": 121,
+          "deep_total": 217,
+          "max_damage_deep_hit": 46,
+          "max_damage_deep_total": 217
+        },
+        "play": {
+          "switch_rate": 0.7337242268041237,
+          "punish_rate": 0.4672489082969432,
+          "decisions": 77600,
+          "switches": 56937,
+          "predicted": 1374,
+          "answered": 642
+        }
+      }
+    },
+    {
+      "id": "result-challenger-switch-depth2-1791218509941",
+      "type": "Result",
+      "status": "done",
+      "title": "Gate: rejected",
+      "description": "Failed hard guardrails: invalid_choices=755, crashes=1, timeouts=7",
+      "created_at": 1791218509941,
+      "updated_at": 1791218509941,
+      "metrics": {
+        "verdict": "rejected",
+        "games": 900,
+        "panel_results": [
+          {
+            "opponent": "random-v1",
+            "challenger_elo": 2208.3408046568584,
+            "champion_elo": 1500,
+            "elo_diff": 708.3408046568584,
+            "win_rate": 0.9833333333333333,
+            "ci_lower": 0.9615840563782944,
+            "ci_upper": 0.9928606279572277,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          },
+          {
+            "opponent": "maxdamage-v1",
+            "challenger_elo": 1771.3793348765669,
+            "champion_elo": 1500,
+            "elo_diff": 271.3793348765669,
+            "win_rate": 0.8266666666666667,
+            "ci_lower": 0.7797729263389721,
+            "ci_upper": 0.865300032729174,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          },
+          {
+            "opponent": "exact-1ply",
+            "challenger_elo": 1641.7102030468825,
+            "champion_elo": 1500,
+            "elo_diff": 141.7102030468825,
+            "win_rate": 0.6933333333333334,
+            "ci_lower": 0.6389827786899308,
+            "ci_upper": 0.7427950950442782,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          }
+        ],
+        "guardrails": {
+          "passed": false,
+          "invalid_choices": 755,
+          "crashes": 1,
+          "timeouts": 7,
+          "p99_turn_time_ms": 732,
+          "fallback_rate": 0,
+          "state_mismatches": 0
+        },
+        "held_out": {
+          "ok": true,
+          "reason": "held-out forced-win 0/0, deep agreement 55.8% vs max-damage 21.2% (17 replay positions)",
+          "positions": 217,
+          "replay_positions": 17,
+          "forced_win_hit": 0,
+          "forced_win_total": 0,
+          "deep_hit": 121,
+          "deep_total": 217,
+          "max_damage_deep_hit": 46,
+          "max_damage_deep_total": 217
+        },
+        "play": {
+          "switch_rate": 0.2569155446756426,
+          "punish_rate": 0.5208333333333334,
+          "decisions": 32680,
+          "switches": 8396,
+          "predicted": 240,
+          "answered": 125
+        }
+      }
+    },
+    {
+      "id": "result-challenger-switch-depth2-1791224355703",
+      "type": "Result",
+      "status": "done",
+      "title": "Gate: rejected",
+      "description": "Failed hard guardrails: timeouts=15",
+      "created_at": 1791224355703,
+      "updated_at": 1791224355703,
+      "metrics": {
+        "verdict": "rejected",
+        "games": 900,
+        "panel_results": [
+          {
+            "opponent": "random-v1",
+            "challenger_elo": 2247.6926878923896,
+            "champion_elo": 1500,
+            "elo_diff": 747.6926878923896,
+            "win_rate": 0.9866666666666667,
+            "ci_lower": 0.9662239391535502,
+            "ci_upper": 0.9948031223153205,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          },
+          {
+            "opponent": "maxdamage-v1",
+            "challenger_elo": 1771.3793348765669,
+            "champion_elo": 1500,
+            "elo_diff": 271.3793348765669,
+            "win_rate": 0.8266666666666667,
+            "ci_lower": 0.7797729263389721,
+            "ci_upper": 0.865300032729174,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          },
+          {
+            "opponent": "exact-1ply",
+            "challenger_elo": 1647.1907141178378,
+            "champion_elo": 1500,
+            "elo_diff": 147.19071411783784,
+            "win_rate": 0.7,
+            "ci_lower": 0.6458814453011743,
+            "ci_upper": 0.7490611826997313,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          }
+        ],
+        "guardrails": {
+          "passed": false,
+          "invalid_choices": 0,
+          "crashes": 0,
+          "timeouts": 15,
+          "p99_turn_time_ms": 753,
+          "fallback_rate": 0,
+          "state_mismatches": 0
+        },
+        "held_out": {
+          "ok": true,
+          "reason": "held-out forced-win 0/0, deep agreement 55.8% vs max-damage 21.2% (17 replay positions)",
+          "positions": 217,
+          "replay_positions": 17,
+          "forced_win_hit": 0,
+          "forced_win_total": 0,
+          "deep_hit": 121,
+          "deep_total": 217,
+          "max_damage_deep_hit": 46,
+          "max_damage_deep_total": 217
+        },
+        "play": {
+          "switch_rate": 0.25681373747250064,
+          "punish_rate": 0.5208333333333334,
+          "decisions": 32728,
+          "switches": 8405,
+          "predicted": 240,
+          "answered": 125
+        }
+      }
+    },
+    {
+      "id": "result-challenger-switch-depth2-1791230745446",
+      "type": "Result",
+      "status": "done",
+      "title": "Gate: rejected",
+      "description": "Failed hard guardrails: timeouts=9",
+      "created_at": 1791230745446,
+      "updated_at": 1791230745446,
+      "metrics": {
+        "verdict": "rejected",
+        "games": 900,
+        "panel_results": [
+          {
+            "opponent": "random-v1",
+            "challenger_elo": 2247.6926878923896,
+            "champion_elo": 1500,
+            "elo_diff": 747.6926878923896,
+            "win_rate": 0.9866666666666667,
+            "ci_lower": 0.9662239391535502,
+            "ci_upper": 0.9948031223153205,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          },
+          {
+            "opponent": "maxdamage-v1",
+            "challenger_elo": 1771.3793348765669,
+            "champion_elo": 1500,
+            "elo_diff": 271.3793348765669,
+            "win_rate": 0.8266666666666667,
+            "ci_lower": 0.7797729263389721,
+            "ci_upper": 0.865300032729174,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          },
+          {
+            "opponent": "exact-1ply",
+            "challenger_elo": 1647.1907141178378,
+            "champion_elo": 1500,
+            "elo_diff": 147.19071411783784,
+            "win_rate": 0.7,
+            "ci_lower": 0.6458814453011743,
+            "ci_upper": 0.7490611826997313,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          }
+        ],
+        "guardrails": {
+          "passed": false,
+          "invalid_choices": 0,
+          "crashes": 0,
+          "timeouts": 9,
+          "p99_turn_time_ms": 1122,
+          "fallback_rate": 0,
+          "state_mismatches": 0
+        },
+        "held_out": {
+          "ok": true,
+          "reason": "held-out forced-win 0/0, deep agreement 55.8% vs max-damage 21.2% (17 replay positions)",
+          "positions": 217,
+          "replay_positions": 17,
+          "forced_win_hit": 0,
+          "forced_win_total": 0,
+          "deep_hit": 121,
+          "deep_total": 217,
+          "max_damage_deep_hit": 46,
+          "max_damage_deep_total": 217
+        },
+        "play": {
+          "switch_rate": 0.25681373747250064,
+          "punish_rate": 0.5208333333333334,
+          "decisions": 32728,
+          "switches": 8405,
+          "predicted": 240,
+          "answered": 125
+        }
+      }
+    },
+    {
+      "id": "result-challenger-switch-depth2-1791241675633",
+      "type": "Result",
+      "status": "done",
+      "title": "Gate: promoted",
+      "description": "+388.8 avg Elo vs panel (3/3 improved). held-out forced-win 0/0, deep agreement 55.8% vs max-damage 21.2% (17 replay positions)",
+      "created_at": 1791241675633,
+      "updated_at": 1791241675633,
+      "metrics": {
+        "verdict": "promoted",
+        "games": 900,
+        "panel_results": [
+          {
+            "opponent": "random-v1",
+            "challenger_elo": 2247.6926878923896,
+            "champion_elo": 1500,
+            "elo_diff": 747.6926878923896,
+            "win_rate": 0.9866666666666667,
+            "ci_lower": 0.9662239391535502,
+            "ci_upper": 0.9948031223153205,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          },
+          {
+            "opponent": "maxdamage-v1",
+            "challenger_elo": 1771.3793348765669,
+            "champion_elo": 1500,
+            "elo_diff": 271.3793348765669,
+            "win_rate": 0.8266666666666667,
+            "ci_lower": 0.7797729263389721,
+            "ci_upper": 0.865300032729174,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          },
+          {
+            "opponent": "exact-1ply",
+            "challenger_elo": 1647.1907141178378,
+            "champion_elo": 1500,
+            "elo_diff": 147.19071411783784,
+            "win_rate": 0.7,
+            "ci_lower": 0.6458814453011743,
+            "ci_upper": 0.7490611826997313,
+            "games": 300,
+            "significant_improvement": true,
+            "significant_regression": false
+          }
+        ],
+        "guardrails": {
+          "passed": true,
+          "invalid_choices": 0,
+          "crashes": 0,
+          "timeouts": 0,
+          "p99_turn_time_ms": 910,
+          "fallback_rate": 0,
+          "state_mismatches": 0
+        },
+        "held_out": {
+          "ok": true,
+          "reason": "held-out forced-win 0/0, deep agreement 55.8% vs max-damage 21.2% (17 replay positions)",
+          "positions": 217,
+          "replay_positions": 17,
+          "forced_win_hit": 0,
+          "forced_win_total": 0,
+          "deep_hit": 121,
+          "deep_total": 217,
+          "max_damage_deep_hit": 46,
+          "max_damage_deep_total": 217
+        },
+        "play": {
+          "switch_rate": 0.25681373747250064,
+          "punish_rate": 0.5208333333333334,
+          "decisions": 32728,
+          "switches": 8405,
+          "predicted": 240,
+          "answered": 125
+        }
+      }
+    },
+    {
+      "id": "challenger-switch-depth2",
+      "type": "Experiment",
+      "status": "done",
+      "title": "Depth-2 switch and team-eval search",
+      "description": "Every legal switch is scored at the root. Opponent replies mix staying and switching. Eval scores both teams. Unrevealed foes use the randbats prior.",
+      "commit": "ea9a014",
+      "created_at": 1791162534674,
+      "updated_at": 1791241675651,
+      "config_path": "experiments/switch-depth2/config.json",
+      "hypothesis_id": "hyp-switch-model",
+      "predicted_effect": "Higher win rate than exact 1-ply over 300 paired games, with a non-zero switch rate, p99 under 2000ms, and held-out log loss better than always-attack.",
+      "kill_condition": "p99 at or above 2000ms, a significant regression versus exact 1-ply, a missed held-out forced win, or held-out switch log loss worse than always-attack."
+    },
+    {
+      "id": "champion-exact-1ply",
+      "type": "Champion",
+      "status": "superseded",
+      "title": "Champion: exact 1-ply HP search",
+      "description": "1-ply exact @pkmn/sim battle clone. Opponent line is the accuracy-weighted max-damage move. Eight RNG draws are averaged. Eval is HP fraction plus faint counts.",
+      "created_at": 1791160362784,
+      "updated_at": 1791241675657,
+      "metrics": {
+        "win_rate_vs_random": 0.98,
+        "win_rate_vs_maxdamage": 0.78,
+        "invalid_choices": 0,
+        "crashes": 0,
+        "timeouts": 0,
+        "p99_turn_time_ms": 190,
+        "fallback_rate": 0,
+        "state_mismatches": 0
+      },
+      "version": "exact-1ply",
+      "config_path": "src/engine/exact/search.ts",
+      "promoted_at": 1791160362784
+    },
+    {
+      "id": "champion-switch-depth2",
+      "type": "Champion",
+      "status": "active",
+      "title": "Champion: depth-2 switch search",
+      "description": "Depth-2 exact battle clone. Opponent replies mix staying to attack and switching, fit on high-Elo replays. Eval scores both teams. Every legal switch is scored at the root.",
+      "created_at": 1791241675662,
+      "updated_at": 1791241675662,
+      "metrics": {
+        "win_rate_vs_random": 0.9866666666666667,
+        "win_rate_vs_maxdamage": 0.8266666666666667,
+        "win_rate_vs_champion": 0.7,
+        "invalid_choices": 0,
+        "crashes": 0,
+        "timeouts": 0,
+        "p99_turn_time_ms": 910,
+        "fallback_rate": 0,
+        "state_mismatches": 0
+      },
+      "version": "switch-depth2",
+      "config_path": "experiments/switch-depth2/config.json",
+      "promoted_at": 1791241675662
+    },
+    {
+      "id": "hyp-switch-model",
+      "type": "Hypothesis",
+      "status": "done",
+      "title": "Benches and switches are the missing part of the champion",
+      "description": "Exact 1-ply answers only the max-damage move and scores HP, so it almost never switches.",
+      "commit": "f877174",
+      "created_at": 1791162534674,
+      "updated_at": 1791242307811,
+      "rationale": "The champion stays in and attacks because the opponent model never switches and HP eval makes a free hit look worse than staying. High-Elo random battles switch on about one voluntary turn in five, and that rate moves with who is threatened, who is faster, and whether a benched mon has a better matchup.",
+      "expected_effect": "Depth-2 search with a replay-fit switch mixture and a team eval wins more paired games than exact 1-ply and max-damage, and the switch model has better held-out log loss than always attacking.",
+      "test_plan": "Fit on even replay ids and score odd ids once. Paired games from seed 1, 150 pairs, sides swapped, against random, max-damage, and exact 1-ply. Report switch rate and how often the chosen move also answers a predicted switch. Stop if p99 reaches 2000ms, if win rate regresses against exact 1-ply, if a held-out forced win is missed, or if held-out log loss is worse than always-attack."
     }
   ],
   "edges": [
@@ -1024,6 +1474,62 @@
       "to_node": "learning-rebuild-scored-as-loss",
       "type": "derived_from",
       "created_at": 1791160463725
+    },
+    {
+      "id": "challenger-switch-depth2-tests-hyp-switch-model",
+      "from_node": "challenger-switch-depth2",
+      "to_node": "hyp-switch-model",
+      "type": "tests",
+      "created_at": 1791162534674
+    },
+    {
+      "id": "challenger-switch-depth2-produced-result-challenger-switch-depth2-1791212678618",
+      "from_node": "challenger-switch-depth2",
+      "to_node": "result-challenger-switch-depth2-1791212678618",
+      "type": "produced",
+      "created_at": 1791212678631
+    },
+    {
+      "id": "challenger-switch-depth2-produced-result-challenger-switch-depth2-1791218509941",
+      "from_node": "challenger-switch-depth2",
+      "to_node": "result-challenger-switch-depth2-1791218509941",
+      "type": "produced",
+      "created_at": 1791218509951
+    },
+    {
+      "id": "challenger-switch-depth2-produced-result-challenger-switch-depth2-1791224355703",
+      "from_node": "challenger-switch-depth2",
+      "to_node": "result-challenger-switch-depth2-1791224355703",
+      "type": "produced",
+      "created_at": 1791224355715
+    },
+    {
+      "id": "challenger-switch-depth2-produced-result-challenger-switch-depth2-1791230745446",
+      "from_node": "challenger-switch-depth2",
+      "to_node": "result-challenger-switch-depth2-1791230745446",
+      "type": "produced",
+      "created_at": 1791230745461
+    },
+    {
+      "id": "challenger-switch-depth2-produced-result-challenger-switch-depth2-1791241675633",
+      "from_node": "challenger-switch-depth2",
+      "to_node": "result-challenger-switch-depth2-1791241675633",
+      "type": "produced",
+      "created_at": 1791241675646
+    },
+    {
+      "id": "champion-switch-depth2-supersedes-champion-exact-1ply",
+      "from_node": "champion-switch-depth2",
+      "to_node": "champion-exact-1ply",
+      "type": "supersedes",
+      "created_at": 1791241675670
+    },
+    {
+      "id": "challenger-switch-depth2-supersedes-champion-exact-1ply",
+      "from_node": "challenger-switch-depth2",
+      "to_node": "champion-exact-1ply",
+      "type": "supersedes",
+      "created_at": 1791241675673
     }
   ]
 }
