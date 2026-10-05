@@ -90,9 +90,10 @@ export async function runGame(job: GameJob): Promise<GameResult> {
     decisions: job.logDecisions ? [] : undefined,
   };
 
+  const started = Date.now();
+  let loops = 0;
   try {
     const battle = startRandomBattle(job.p1Team, job.p2Team, job.seed);
-    let loops = 0;
     while (!battle.ended && loops < MAX_LOOPS) {
       loops++;
       const p1Legal = legalChoices(battle, 'p1');
@@ -138,5 +139,9 @@ export async function runGame(job: GameJob): Promise<GameResult> {
     result.error = error instanceof Error ? error.message : String(error);
   }
 
+  const elapsed = Date.now() - started;
+  if (elapsed > 20000) {
+    console.error(`slow game seed=${job.seed} turns=${result.turns} loops=${loops} ms=${elapsed} winner=${result.winner} err=${result.error || ''}`);
+  }
   return result;
 }
