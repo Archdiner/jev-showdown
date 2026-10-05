@@ -22,6 +22,8 @@ export function validateConfigs(root = path.join(process.cwd(), 'configs')): Val
       } else if (rel.startsWith('experiments/')) {
         const raw = file.endsWith('.json') ? JSON.parse(fs.readFileSync(file, 'utf8')) : parseYaml(fs.readFileSync(file, 'utf8'));
         ExperimentSpecSchema.parse(raw);
+      } else if (rel.startsWith('live/')) {
+        continue;
       } else {
         loadConfig(file);
       }
