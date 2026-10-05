@@ -29,8 +29,14 @@ import {
 } from '../client/drain.js';
 import { LiveMetrics } from '../client/live-metrics.js';
 import { SearchAdmission, admissionSettings, ConcurrencyGovernor } from '../client/concurrency-governor.js';
-import { configHash, currentGitSha } from '../client/game-record.js';
+import { currentGitSha } from '../client/game-record.js';
 import { installPosthogSink } from '../client/posthog-sink.js';
+import {
+  formatLiveConfig,
+  graphPathFromEnv,
+  LadderIdentity,
+  resolveLadderIdentity,
+} from '../client/ladder-identity.js';
 
 interface LadderOptions {
   games: number;
@@ -56,6 +62,8 @@ interface LadderOptions {
   ramp: boolean;
   rampFrom: number | null;
   rampTarget: number | null;
+  labeledChampion: boolean;
+  rollback: boolean;
   check: boolean;
   help: boolean;
 }
@@ -85,6 +93,8 @@ function parseArgs(argv: string[]): LadderOptions {
     ramp: false,
     rampFrom: null,
     rampTarget: null,
+    labeledChampion: false,
+    rollback: false,
     check: false,
     help: false,
   };
@@ -123,6 +133,8 @@ function parseArgs(argv: string[]): LadderOptions {
     else if (arg === '--no-ramp') opts.ramp = false;
     else if (arg === '--ramp-from') opts.rampFrom = Number(next());
     else if (arg === '--ramp-target') opts.rampTarget = Number(next());
+    else if (arg === '--labeled-champion') opts.labeledChampion = true;
+    else if (arg === '--rollback') opts.rollback = true;
     else if (arg === '--check') opts.check = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -173,6 +185,11 @@ Real ladder, from a residential or university network (this process never stores
   SHOWDOWN_USERNAME=bot SHOWDOWN_PASSWORD=secret npm run ladder -- --games 10 --format gen9randombattle --engine max-damage --concurrency 1
 
 Engines: max-damage (default; @smogon/calc maxDamageChoice), search (exact 1-ply, the gate champion; exact is an alias), or grok (search + LLM prior, concurrency 1).
+--labeled-champion loads the gatekeeper's active champion at batch start and plays that file for every game in the batch. It stays off unless you pass it.
+--rollback plays the builtin policy for --engine even when a champion label is valid.
+A missing label, a file whose hash no longer matches the label, or two active champions rolls back to that builtin policy and logs the reason.
+The config is chosen once, before the first search. A promotion during the batch does not change it. Drain and start again to pick up a new champion.
+Each finished game records configId, configHash, and the commit. The startup line is: config live source=... id=... hash=... commit=...
 --concurrency K keeps up to K battles on one login (default 1, absolute max ${MAX_LADDER_CONCURRENCY}).
 --use-engine-profile reads configs/live/concurrency.json (search 3, max-damage 4, grok 1).
 --concurrency-config FILE overrides those numbers. --runners N multiplies the limit. An explicit --concurrency wins.
@@ -217,6 +234,7 @@ async function makePlayer(input: {
   opts: LadderOptions;
   label: string;
   engine: EngineName;
+  identity: LadderIdentity;
   autoSearch?: boolean;
   metrics?: LiveMetrics;
   admission?: SearchAdmission;
@@ -228,6 +246,7 @@ async function makePlayer(input: {
     engine: input.engine,
     timeoutMs: input.opts.decisionMs ?? (input.local ? 1500 : 12000),
     workers: input.opts.concurrency,
+    championConfigPath: input.identity.championConfigPath,
   });
   const client = new ShowdownClient({
     server: input.server,
@@ -247,9 +266,10 @@ async function makePlayer(input: {
     logDir: input.opts.logDir,
     decisionTimeoutMs: input.opts.decisionMs ?? (input.local ? 1500 : 12000),
     replayDir: path.join(input.opts.logDir, 'replays'),
-    configId: null,
-    configHash: configHash({ engine: input.engine, ...config }),
-    gitSha: currentGitSha(),
+    configId: input.identity.configId,
+    configHash: input.identity.configHash,
+    gitSha: input.identity.gitSha,
+    configPath: input.identity.configPath,
     concurrency: input.opts.concurrency,
     localServer: input.local,
     settleMs: input.local ? 400 : 8000,
@@ -401,6 +421,8 @@ async function runLocalSeries(
   drain: LiveDrain,
   metrics: LiveMetrics,
   admission: SearchAdmission,
+  identity: LadderIdentity,
+  opponentIdentity: LadderIdentity,
 ): Promise<GameSummary[]> {
   console.log(`[ladder] starting local pokemon-showdown on port ${opts.port}`);
   const server = await startLocalServer(opts.port);
@@ -422,6 +444,7 @@ async function runLocalSeries(
       opts,
       label: 'alpha',
       engine: opts.engine,
+      identity,
       metrics,
       admission,
     });
@@ -434,6 +457,7 @@ async function runLocalSeries(
       opts,
       label: 'bravo',
       engine: opts.opponentEngine ?? opts.engine,
+      identity: opponentIdentity,
       metrics,
       admission,
     });
@@ -464,6 +488,7 @@ async function runRemote(
   drain: LiveDrain,
   metrics: LiveMetrics,
   admission: SearchAdmission,
+  identity: LadderIdentity,
 ): Promise<GameSummary[]> {
   const local = opts.local;
   const username = opts.username || (local ? 'BotAlpha' : process.env.SHOWDOWN_USERNAME || '');
@@ -485,6 +510,7 @@ async function runRemote(
     opts,
     label: toID(username) || 'ladder',
     engine: opts.engine,
+    identity,
     autoSearch: !opts.accept && !opts.challenge,
     metrics,
     admission,
@@ -515,7 +541,7 @@ async function runRemote(
   return summaries;
 }
 
-function report(summaries: GameSummary[], opts: LadderOptions, drain?: LiveDrain): void {
+function report(summaries: GameSummary[], opts: LadderOptions, identity: LadderIdentity, drain?: LiveDrain): void {
   const invalidChoices = summaries.reduce((sum, game) => sum + game.invalidChoices, 0);
   const crashes = summaries.reduce((sum, game) => sum + game.crashes, 0);
   const fallbacks = summaries.reduce((sum, game) => sum + game.fallbacks, 0);
@@ -528,6 +554,12 @@ function report(summaries: GameSummary[], opts: LadderOptions, drain?: LiveDrain
     engine: opts.engine,
     opponentEngine: opts.opponentEngine,
     concurrency: opts.concurrency,
+    configId: identity.configId,
+    configHash: identity.configHash,
+    gitSha: identity.gitSha,
+    configSource: identity.source,
+    configPath: identity.configPath,
+    configReason: identity.reason,
     local: opts.local,
     drained: drain?.isDraining ?? false,
     drainReason: drain?.drainReason ?? null,
@@ -657,18 +689,37 @@ async function main(): Promise<void> {
     }
 
     applyLiveConcurrency(opts);
+    const gitSha = currentGitSha();
+    const identity = resolveLadderIdentity({
+      engine: opts.engine,
+      labeledChampion: opts.labeledChampion,
+      rollback: opts.rollback,
+      gitSha,
+      graphPath: graphPathFromEnv(),
+    });
+    const opponentIdentity = resolveLadderIdentity({
+      engine: opts.opponentEngine ?? opts.engine,
+      labeledChampion: false,
+      rollback: false,
+      gitSha,
+      graphPath: graphPathFromEnv(),
+    });
+    console.log(formatLiveConfig(identity));
+    if (opts.local && !opts.server && !opts.accept && !opts.challenge && opponentIdentity.configId !== identity.configId) {
+      console.log(`${formatLiveConfig(opponentIdentity)} role=opponent`);
+    }
     console.log('[ladder] loading randbats data');
     await dataLoader.load(gen9RandomBattle);
 
-    const session = openDrain(opts.engine);
-    const metrics = openLiveMetrics(opts);
+    const session = openDrain(opts.engine, identity);
+    const metrics = openLiveMetrics(opts, identity);
     const admission = openAdmission(opts);
     try {
       const summaries = opts.local && !opts.server && !opts.accept && !opts.challenge
-        ? await runLocalSeries(opts, session.drain, metrics, admission)
-        : await runRemote(opts, session.drain, metrics, admission);
+        ? await runLocalSeries(opts, session.drain, metrics, admission, identity, opponentIdentity)
+        : await runRemote(opts, session.drain, metrics, admission, identity);
       metrics.finish({ games: summaries.length, requested: opts.games });
-      report(summaries, opts, session.drain);
+      report(summaries, opts, identity, session.drain);
     } finally {
       admission.stop();
       session.close();
@@ -679,7 +730,7 @@ async function main(): Promise<void> {
   }
 }
 
-function openDrain(engine: string): { drain: LiveDrain; close(): void } {
+function openDrain(engine: string, identity: LadderIdentity): { drain: LiveDrain; close(): void } {
   const runId = `${Date.now()}`;
   const drain = new LiveDrain();
   const meta = runMetaFile(runId);
@@ -688,6 +739,11 @@ function openDrain(engine: string): { drain: LiveDrain; close(): void } {
     runId,
     pid: process.pid,
     engine,
+    configId: identity.configId,
+    configHash: identity.configHash,
+    gitSha: identity.gitSha,
+    configSource: identity.source,
+    configPath: identity.configPath,
     drainFile: runDrainFile(runId),
     globalDrainFile: 'state/DRAIN',
   }, null, 2));
@@ -710,11 +766,18 @@ function openDrain(engine: string): { drain: LiveDrain; close(): void } {
   };
 }
 
-function openLiveMetrics(opts: LadderOptions): LiveMetrics {
+function openLiveMetrics(opts: LadderOptions, identity: LadderIdentity): LiveMetrics {
   const runId = `${Date.now()}-${opts.engine}`;
   const filePath = path.join(opts.logDir, 'metrics.jsonl');
   console.log(`[ladder] metrics ${filePath}`);
-  return new LiveMetrics(filePath, { runId, engine: opts.engine, concurrency: opts.concurrency });
+  return new LiveMetrics(filePath, {
+    runId,
+    engine: opts.engine,
+    concurrency: opts.concurrency,
+    configId: identity.configId,
+    configHash: identity.configHash,
+    gitSha: identity.gitSha,
+  });
 }
 
 function openAdmission(opts: LadderOptions): SearchAdmission {

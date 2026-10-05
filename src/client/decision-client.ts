@@ -19,6 +19,8 @@ export interface DecisionClientOptions {
   engine: EngineName;
   timeoutMs: number;
   workers: number;
+  /** Loaded once at worker start. Not replaced while the batch is running. */
+  championConfigPath?: string | null;
 }
 
 interface PendingDecision {
@@ -223,6 +225,7 @@ export class DecisionClient {
         type: 'init',
         config: this.options.config,
         engine: this.options.engine,
+        championConfigPath: this.options.championConfigPath ?? null,
       });
     });
   }

@@ -13,6 +13,21 @@ import { appendJsonl, readJsonl, type OpsPaths } from './paths.js';
 import { inputLogFromTranscript, localSimBridge } from './sim-bridge.js';
 import { countsFromLiveGames, loadVariantPool, observeVariant, thompsonDraw, type ArmCount } from './variants.js';
 
+type Seat = 'p1' | 'p2';
+
+/**
+ * Seat used to answer a request. When the request and the remembered player line
+ * both omit the seat, the choice is still p1 so a move goes out. That guess is
+ * not persisted, so later priors do not treat it as our side.
+ */
+export function seatForChoice(
+  requested: string | undefined,
+  remembered: Seat | undefined,
+): { choice: Seat; persist: Seat | null } {
+  const known = requested === 'p1' || requested === 'p2' ? requested : remembered ?? null;
+  return { choice: known ?? 'p1', persist: known };
+}
+
 export interface LiveOptions {
   paths: OpsPaths;
   local?: boolean;
@@ -167,8 +182,9 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
       } catch {
         return;
       }
-      const side = request.side?.id === 'p2' ? 'p2' : request.side?.id === 'p1' ? 'p1' : sides.get(room) ?? 'p1';
-      if (side === 'p1' || side === 'p2') sides.set(room, side);
+      const seat = seatForChoice(request.side?.id, sides.get(room));
+      if (seat.persist) sides.set(room, seat.persist);
+      const side = seat.choice;
       let current = sessions.get(room);
       if (!current) {
         const config = allocate(withPulls(approved, circuits), Math.random, exploreRate);
@@ -231,6 +247,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
           latencies: watched?.latencies ?? [],
           minTimerMarginSec: facts.minTimerMarginSec,
           engine: current.session.bot.layerIds.search,
+          ourSide: sides.get(room) ?? facts.ourSide,
           configId: current.config.configId,
           configHash: current.session.bot.configId,
           gitSha,

@@ -15,7 +15,14 @@ describe('live metrics', () => {
   it('writes decision, throttle, game, and run records', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-metrics-'));
     const filePath = path.join(dir, 'metrics.jsonl');
-    const metrics = new LiveMetrics(filePath, { runId: 'run-1', engine: 'search', concurrency: 3 });
+    const metrics = new LiveMetrics(filePath, {
+      runId: 'run-1',
+      engine: 'search',
+      concurrency: 3,
+      configId: 'champion-exact-1ply',
+      configHash: 'policyhash',
+      gitSha: 'abc123',
+    });
     const driver = new EventEmitter();
     metrics.attach(driver);
 
@@ -53,6 +60,9 @@ describe('live metrics', () => {
     });
     expect(lines[3]).toMatchObject({
       type: 'game',
+      configId: 'champion-exact-1ply',
+      configHash: 'policyhash',
+      gitSha: 'abc123',
       decisions: 2,
       latencyP50Ms: 100,
       latencyP95Ms: 400,
