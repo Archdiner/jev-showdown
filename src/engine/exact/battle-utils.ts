@@ -78,10 +78,12 @@ function forceSwitchChoices(side: { pokemon: any[]; active: any[]; slotCondition
 }
 
 function battleSnapshot(battle: Battle): string {
-  // The protocol log grows every turn and is copied into every search node.
-  // Choices do not read it. Dropping it keeps late-game turns inside the 2s cap.
-  const state = battle.toJSON() as { log?: unknown };
+  // The protocol log and the input log grow every turn and are copied into
+  // every search node. Choices do not read either one. Dropping them keeps
+  // late-game turns inside the 2s cap.
+  const state = battle.toJSON() as { log?: unknown; inputLog?: unknown };
   state.log = [];
+  delete state.inputLog;
   return JSON.stringify(state);
 }
 
