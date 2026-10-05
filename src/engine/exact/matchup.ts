@@ -34,17 +34,26 @@ function randbats(): typeof sets {
   return sets;
 }
 
+function speciesData(species: string): { level?: number; sets?: Array<{ movepool?: string[] }> } | undefined {
+  const table = randbats();
+  if (!table) return undefined;
+  const id = Dex.species.get(species).id;
+  return table[id] || table[species];
+}
+
 export function speciesLevel(species: string, fallback = 80): number {
-  const data = randbats()?.[species];
-  return data?.level || fallback;
+  return speciesData(species)?.level || fallback;
 }
 
 export function likelyMoves(species: string, revealed: string[]): string[] {
-  const known = revealed.filter(Boolean);
+  const known = revealed.filter(Boolean).map(name => Dex.moves.get(name).id || name);
   if (known.length > 0) return known;
-  const pool = randbats()?.[species]?.sets?.[0]?.movepool || [];
+  const pool = speciesData(species)?.sets?.[0]?.movepool || [];
   const ranked = pool
-    .map(id => ({ id, bp: Dex.moves.get(id).basePower || 0 }))
+    .map(name => {
+      const move = Dex.moves.get(name);
+      return { id: move.id || name, bp: move.basePower || 0 };
+    })
     .sort((a, b) => b.bp - a.bp || a.id.localeCompare(b.id));
   const damaging = ranked.filter(move => move.bp > 0).slice(0, 4);
   const picked = damaging.length > 0 ? damaging : ranked.slice(0, 4);
