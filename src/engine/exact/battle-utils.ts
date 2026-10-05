@@ -83,6 +83,7 @@ export function legalChoices(battle: Battle, sideId: SideId, options?: { tera?: 
       if (move.disabled) continue;
       if (move.pp !== undefined && Number(move.pp) <= 0) continue;
       choices.push(`move ${i + 1}`);
+      if (options?.tera && active.canTerastallize) choices.push(`move ${i + 1} terastallize`);
     }
   }
   if (active && !active.trapped) {

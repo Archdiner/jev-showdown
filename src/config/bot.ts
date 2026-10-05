@@ -1,7 +1,7 @@
 import { PRNG, type Battle } from '@pkmn/sim';
-import { appendTeraChoices, legalChoices, type SideId } from '../engine/exact/battle-utils.js';
+import { legalChoices, type SideId } from '../engine/exact/battle-utils.js';
 import { readHybridMetrics } from '../engine/hybrid/search.js';
-import { battleToState } from '../engine/exact/search.js';
+import { QUICK_WIN_SEARCH_ID, battleToState } from '../engine/exact/search.js';
 import { blendCandidates } from '../llm/blend.js';
 import { toAdvisorCandidates } from '../llm/state-summary.js';
 import { GatewayClient } from '../llm/gateway-client.js';
@@ -128,8 +128,9 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
       const active = activeConfig === loaded.config ? base : implsOf(activeConfig);
       const activeLayerIds = layerIdsOf(activeConfig);
       const plan = await planFor(active, activeConfig, input, client, spend, runtime);
-      const plain = legalChoices(input.battle, input.side);
-      const legal = active.search.id === 'hybrid' ? appendTeraChoices(input.battle, input.side, plain) : plain;
+      const legal = legalChoices(input.battle, input.side, {
+        tera: active.search.id === 'hybrid' || active.search.id === QUICK_WIN_SEARCH_ID,
+      });
       const budget = Math.min(
         activeConfig.search.params.timeBudgetMs,
         runtime.timeLimitMs,

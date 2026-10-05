@@ -42,6 +42,11 @@ describe('choice validation', () => {
       { type: 'move', moveIndex: 1 },
       { type: 'switch', switchIndex: 2 },
     ]);
+    expect(strictLegalActions(request(), { tera: true })).toEqual([
+      { type: 'move', moveIndex: 1 },
+      { type: 'move', moveIndex: 1, terastallize: true },
+      { type: 'switch', switchIndex: 2 },
+    ]);
     expect(isActionLegal({ type: 'move', moveIndex: 2 }, request())).toBe(false);
     expect(isActionLegal({ type: 'move', moveIndex: 1, terastallize: true }, request())).toBe(true);
   });

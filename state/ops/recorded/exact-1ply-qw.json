@@ -1,0 +1,20 @@
+{
+  "policyId": "EXACT_1PLY_QW",
+  "searchId": "exact-1ply-qw",
+  "configPath": "configs/exact-1ply-qw.yaml",
+  "action": "live-approved",
+  "opponent": "EXACT_1PLY",
+  "information": "hidden",
+  "seed": 1,
+  "samples": 8,
+  "games": 200,
+  "wins": 115,
+  "losses": 85,
+  "ties": 0,
+  "invalid": 0,
+  "crashes": 0,
+  "viewMiss": 0,
+  "p99ms": 175,
+  "maxMs": 510,
+  "wilson95": [0.506, 0.641]
+}

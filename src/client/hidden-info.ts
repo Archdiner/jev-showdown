@@ -77,10 +77,17 @@ function replayClient(log: readonly string[], side: ViewerSide, request: unknown
  * p1 of the returned battle is the deciding side. `move N` and `switch N`
  * match that side's request on the real battle.
  */
-export function ladderDecisionBattle(battle: SimBattle, side: SideId): SimBattle | null {
+export function ladderDecisionBattle(
+  battle: SimBattle,
+  side: SideId,
+  options?: { quickWins?: boolean },
+): SimBattle | null {
   const request = battle.getSide(side).activeRequest;
   if (!request || request.wait || request.teamPreview) return null;
-  return decisionBattleFromViewerLog(battle.log.join('\n'), side, request, battle.turn);
+  return decisionBattleFromViewerLog(battle.log.join('\n'), side, request, {
+    ...options,
+    turn: battle.turn,
+  });
 }
 
 /** Replay a spectator log and the side's `|request|` into the ladder's decision battle. */
@@ -88,7 +95,7 @@ export function decisionBattleFromViewerLog(
   log: string,
   side: ViewerSide,
   request: unknown,
-  turn?: number,
+  options?: { quickWins?: boolean; turn?: number },
 ): SimBattle | null {
   if (!request || typeof request !== 'object') return null;
   const raw = log.split('\n');
@@ -96,8 +103,8 @@ export function decisionBattleFromViewerLog(
   const client = replayClient(raw, side, request);
   try {
     const position = livePositionFromClient(client, request, side, lines);
-    if (typeof turn === 'number') position.turn = turn;
-    return buildDecisionBattle(position);
+    if (typeof options?.turn === 'number') position.turn = options.turn;
+    return buildDecisionBattle(position, options);
   } catch {
     return null;
   } finally {

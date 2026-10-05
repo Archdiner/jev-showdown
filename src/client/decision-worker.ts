@@ -5,6 +5,7 @@ import { buildBot, type BuiltBot } from '../config/bot.js';
 import { BotConfig } from '../types/index.js';
 import { pickBestLegal, sameAction } from './choice.js';
 import { chooseLive } from './decision-battle.js';
+import { QUICK_WIN_SEARCH_ID } from '../engine/exact/search.js';
 import { DecideRequest, WorkerRequest, WorkerResponse } from './decision-messages.js';
 import { EngineName } from './engines.js';
 
@@ -68,7 +69,13 @@ async function decide(message: DecideRequest): Promise<void> {
   const started = Date.now();
   const routed = playerFor(message.battleId);
   try {
-    const picked = await chooseLive(routed.engine, message.position, message.legal, routed.player, message.searchTimeMs);
+    const player = routed.player
+      ? {
+        decide: routed.player.decide.bind(routed.player),
+        quickWins: routed.player.config.search.id === QUICK_WIN_SEARCH_ID,
+      }
+      : null;
+    const picked = await chooseLive(routed.engine, message.position, message.legal, player, message.searchTimeMs);
     const plain = picked.action.type === 'move'
       ? { type: 'move' as const, moveIndex: picked.action.moveIndex }
       : picked.action;

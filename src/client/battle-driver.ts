@@ -38,7 +38,7 @@ import {
   LadderGameRecord,
 } from './game-record.js';
 import { attributePopup } from './delivery.js';
-import { EXACT_1PLY, type ExactConfig } from '../engine/exact/search.js';
+import { EXACT_1PLY, EXACT_1PLY_QW, QUICK_WIN_SEARCH_ID, type ExactConfig } from '../engine/exact/search.js';
 import { ladderPolicy } from './ladder-engine.js';
 import { PredictionLog, PredictionScore } from './prediction.js';
 import { TurnForecast, forecastLine, hpFraction, hpFractionText } from './turn-forecast.js';
@@ -183,6 +183,7 @@ function choiceAlreadyLocked(reason: string): boolean {
  */
 export class BattleDriver extends EventEmitter {
   private readonly rooms = new Map<string, RoomState>();
+  private readonly quickWinPaths = new Map<string, boolean>();
   /** Room ids that already wrote a result. Later lines must not open them again. */
   private readonly closedRooms = new Set<string>();
   /** `setInference.id` for a config file. Null means the legacy tracker. */
@@ -464,7 +465,7 @@ export class BattleDriver extends EventEmitter {
       return;
     }
 
-    const legal = legalActionsForRequest(request, this.options.format);
+    const legal = legalActionsForRequest(request, this.options.format, { tera: this.usesQuickWins(room) });
     if (legal.length === 0) {
       room.log.write({
         type: 'turn',
@@ -626,7 +627,7 @@ export class BattleDriver extends EventEmitter {
           action: input.safe,
         });
       }
-      const prediction = this.forecastSafe(input.position, input.simChoice);
+      const prediction = this.forecastSafe(room, input.position, input.simChoice);
       const baseline = prediction && (room.ourSide === 'p1' || room.ourSide === 'p2')
         ? {
           ourSide: room.ourSide,
@@ -668,16 +669,34 @@ export class BattleDriver extends EventEmitter {
     }
   }
 
-  private forecastSafe(position: LivePosition, choice: string): TurnForecast | null {
+  private usesQuickWins(room: RoomState): boolean {
+    const file = room.assignment?.configPath;
+    if (!file) return false;
+    const cached = this.quickWinPaths.get(file);
+    if (cached !== undefined) return cached;
+    let quickWins = false;
     try {
-      const battle = buildDecisionBattle(position);
+      quickWins = loadConfig(file).config.search.id === QUICK_WIN_SEARCH_ID;
+    } catch {
+      quickWins = false;
+    }
+    this.quickWinPaths.set(file, quickWins);
+    return quickWins;
+  }
+
+  private forecastSafe(room: RoomState, position: LivePosition, choice: string): TurnForecast | null {
+    try {
+      const quickWins = this.usesQuickWins(room);
+      const battle = buildDecisionBattle(position, { quickWins });
       if (!battle) return null;
-      let config: ExactConfig = { ...EXACT_1PLY, samples: 1 };
-      try {
-        const spec = ladderPolicy(parseEngine(this.options.engineName));
-        if (spec.kind === 'exact') config = spec.config;
-      } catch {
-        // An unknown engine name still gets the champion's foe model, one draw.
+      let config: ExactConfig = quickWins ? { ...EXACT_1PLY_QW, samples: 1 } : { ...EXACT_1PLY, samples: 1 };
+      if (!quickWins) {
+        try {
+          const spec = ladderPolicy(parseEngine(this.options.engineName));
+          if (spec.kind === 'exact') config = spec.config;
+        } catch {
+          // An unknown engine name still gets the champion's foe model, one draw.
+        }
       }
       return forecastLine(battle, 'p1', choice, config);
     } catch {
