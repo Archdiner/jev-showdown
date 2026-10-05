@@ -1,4 +1,4 @@
-export const OPS_USAGE = `usage: npm run ops -- factory|gatekeeper|live|analyst|status|report|supervise|dry-run
+export const OPS_USAGE = `usage: npm run ops -- factory|gatekeeper|live|analyst|sentinel|scorecard|status|report|supervise|dry-run
   factory, gatekeeper, live, analyst, supervise accept --once
   live --local
       Start a local server on a free port, log in as localbot, and do not contact
@@ -15,6 +15,11 @@ export const OPS_USAGE = `usage: npm run ops -- factory|gatekeeper|live|analyst|
   analyst also tails logs/ladder and live-runs JSONL. --ladder-dir and --live-runs replace those defaults.
   Opponent priors use the foe's seat from ourSide or the |player| line. A scraped replay counts both players.
   report --daily is the plain-English day summary
+  sentinel [--once] [--json]
+      Run the reliability checks every 60s. --once exits non-zero when a P0 incident is open.
+      --ack ID, --fixing ID --pr URL, and --root-cause ID --text REASON move an incident.
+  scorecard [--since 24h] [--md]
+      One screen for the owner. Phantom 0-turn ties and disconnects are excluded.
 Facilities share the graph and the JSONL logs. They do not import each other.`;
 
 export function opsFlag(argv: string[], name: string): boolean {
