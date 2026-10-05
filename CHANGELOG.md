@@ -1,5 +1,22 @@
 # Changelog
 
+## Fitted team eval and selective depth-2 search
+
+The leaf score is no longer only HP and faints. `fitted-team` averages the 1v1 matchup of every remaining Pokémon (Sarantinos 2022), then adds speed control, hazard chip on each side unless the Pokémon holds Heavy-Duty Boots, status, boosts, whether Tera is still available, and how many healthy checks remain. The weights are a logistic regression fit on self-play (even seeds max-damage and sometimes Terastallize; odd seeds play a random legal choice). Seeds split 60% train, 20% dev, 20% held-out before the fit. Held-out was scored once, after the weights were frozen. The randbats generator covers 508 species. `eval-weights.json` is that fit.
+
+Dev (n=780): team log loss 0.5615, accuracy 70.5%. HP-only log loss 0.5536, accuracy 70.4%. Constant log loss 0.6931. Held-out (n=800): team log loss 0.6092, accuracy 65.3%. HP-only log loss 0.6255, accuracy 65.3%.
+
+`selective-depth2` scores every legal move at depth 1, then spends the remaining deadline on the top-N of those moves against the opponent's top-M replies. Damaging rolls are two buckets, KO and non-KO. A transposition table remembers finished nodes for that decision. Both pieces are config components (`fitted-team`, `selective-depth2`). `exactSearch` honors `evalMode: 'fitted'` and `selective`, so sampled-world search and the hybrid engine pass the same config.
+
+Info-honest bench, 60 pairs, sides swapped, 120 games, each policy sees only its public observation. Opponent is exact 1-ply (8 samples, HP eval). Invalid choices 0, crashes 0, view misses 0. Randbats generator species 508.
+
+| Policy | Result | Wilson 95% CI | p50 | p95 |
+| --- | --- | --- | --- | --- |
+| fitted 1-ply | 70W-50L-0T (58.3%) | 49.4–66.8% | 77ms | 126ms |
+| fitted depth-2 | 58W-62L-0T (48.3%) | 39.6–57.2% | 119ms | 313ms |
+
+A Revival Blessing follow-up now switches to a fainted teammate. The previous switch list offered a healthy Pokémon, which the sim rejects. The hidden-info battle copies the request's `reviving` flag, so the search and the real battle agree.
+
 ## Reliability sentinel
 
 `npm run ops -- sentinel` reads the ladder logs, ops heartbeats, circuits, drain files, and the process list every minute. Each broken invariant becomes an incident in `state/ops/incidents.jsonl` (folded into `state/ops/incidents.json`). A P0 is a game being lost or data being corrupted now. The incident stays open until the check is clear, and it is verified only after a 10 minute soak. `npm run ops -- scorecard` is the owner screen: uptime, open P0/P1, incidents opened and verified, MTTR, Elo, batch and variant records, and what the gate promoted or rejected. Phantom rows (`phantom: true`, or a 0-turn tie with end reason disconnect or unknown) are left out of those rates, and the files the numbers came from are named. The dashboard shows the same incidents and scorecard. `npm run ops -- sentinel --once --json` prints the current incidents as one JSON object and exits 1 when a P0 is open. `npm run ops -- scorecard --md --since <iso>` compares Elo, win rate, and record with the previous window of the same length. When a game row carries `invalidChoiceReasons`, those reasons are added to the invalid-choice incident. The bot's move choice is unchanged.
