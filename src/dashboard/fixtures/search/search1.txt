@@ -1,0 +1,3 @@
+[jevsearch] logged in as jevbot engine=search concurrency=1
+[ladder] 2/30 win vs X turns=21 invalid=0 crashes=0 fallbacks=0 elo=1073
+[ladder] 3/30 loss vs Y turns=18 invalid=0 crashes=0 fallbacks=1 elo=n/a
