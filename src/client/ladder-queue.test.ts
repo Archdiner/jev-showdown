@@ -136,4 +136,24 @@ describe('ladder concurrency', () => {
       jest.useRealTimers();
     }
   });
+
+  it('does not count a second start for a room that already has a result', () => {
+    const client = {
+      isReady: () => true,
+      isBlocked: () => false,
+      search: () => true,
+      cancelSearch: () => true,
+    } as unknown as ShowdownClient;
+    const queue = new LadderQueue(client, 'gen9randombattle', 3, () => {}, false);
+    const finished = 'battle-gen9randombattle-7038';
+    queue.noteBattle(finished);
+    queue.noteBattle('battle-gen9randombattle-7020');
+    expect(queue.activeBattles).toBe(2);
+    queue.noteEnd(finished);
+    queue.noteBattle(finished);
+    expect(queue.activeBattles).toBe(1);
+    queue.noteEnd('battle-gen9randombattle-7020');
+    queue.drain();
+    expect(queue.activeBattles).toBe(0);
+  });
 });

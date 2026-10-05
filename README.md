@@ -178,7 +178,7 @@ Concurrency is 1 unless you pass `--concurrency K` (absolute max 16). `--use-eng
 
 ### Graceful drain
 
-Use a drain to swap engines in the middle of a batch. The runner stops starting new ladder searches, lets games already in progress finish, writes `logs/ladder/summary.json` (`drained` and `drainReason`), and exits. It never sends `/forfeit`.
+Use a drain to swap engines in the middle of a batch. The runner stops starting new ladder searches, lets games already in progress finish, writes `logs/ladder/summary.json` (`drained` and `drainReason`), and exits. Live games are not forfeited. A battle room whose newest `|t:|` is more than 70 minutes old is forfeited when it is rejoined and does not count as in progress or against concurrency. A room with no `|t:|` stays live.
 
 At startup it prints the pid and run id. From another shell:
 
@@ -189,7 +189,7 @@ touch state/DRAIN
 touch live-runs/<runId>.drain
 ```
 
-Any one of those is enough. Delete `state/DRAIN` before the next run or the new process will drain immediately and not search. A second `SIGTERM` or `SIGUSR1` exits without waiting; that drops the socket and still does not send `/forfeit`. `SIGINT` disconnects immediately.
+Any one of those is enough. The first signal exits as soon as no game is in progress, which includes a runner whose only rooms were stale. Delete `state/DRAIN` before the next run or the new process will drain immediately and not search. A second `SIGTERM` or `SIGUSR1` exits without waiting; that drops the socket and does not forfeit a live game. `SIGINT` disconnects immediately.
 
 `ops live` should use the same `LiveDrain` (`src/client/drain.ts`): skip new `client.search()` calls while `isDraining`, call `cancelSearch()`, and return once no games are left.
 

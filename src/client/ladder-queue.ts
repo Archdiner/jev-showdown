@@ -36,6 +36,8 @@ export function parseUpdateSearch(line: string): SearchUpdate | null {
 
 export class LadderQueue {
   private readonly active = new Set<string>();
+  /** Rooms that already have a result. A later game_start must not count. */
+  private readonly finished = new Set<string>();
   private searching = false;
   private stopped = false;
   private draining = false;
@@ -90,7 +92,7 @@ export class LadderQueue {
   }
 
   noteBattle(roomId: string): void {
-    if (!roomId || this.active.has(roomId)) return;
+    if (!roomId || this.active.has(roomId) || this.finished.has(roomId)) return;
     this.active.add(roomId);
     this.searching = false;
     this.backoffMs = 1000;
@@ -98,6 +100,7 @@ export class LadderQueue {
   }
 
   noteEnd(roomId: string): void {
+    if (roomId) this.finished.add(roomId);
     this.active.delete(roomId);
   }
 
