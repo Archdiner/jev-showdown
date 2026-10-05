@@ -145,6 +145,7 @@ describe('ladder timer request', () => {
       decisions.push(sample);
     });
     const room = 'battle-gen9randombattle-1';
+    client.emit('line', room, '|init|battle');
     client.emit('line', room, '|player|p1|BotAlpha|bot|');
     client.emit('line', room, `|request|${JSON.stringify(request)}`);
     client.emit('line', room, '|inactive|Time left: 42 sec this turn | 140 sec total | 60 sec grace');

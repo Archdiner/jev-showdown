@@ -1,8 +1,28 @@
 import { WebSocketServer, type WebSocket } from 'ws';
 import { ShowdownClient } from './showdown-client.js';
-import { roomLines } from './protocol-frames.js';
+import { battleInitRooms, roomLines } from './protocol-frames.js';
 
 describe('batched room frames', () => {
+  it('reads each battle room id from its own |init|battle, not from search order', () => {
+    const payload = [
+      '>battle-gen9randombattle-2692982986',
+      '|init|battle',
+      '|player|p2|lilyfith|2|1400',
+      '|request|{"rqid":2}',
+      '>battle-gen9randombattle-2692982991',
+      '|init|battle',
+      '|player|p2|michaboo|2|1300',
+      '|request|{"rqid":4}',
+    ].join('\n');
+    expect(battleInitRooms(payload)).toEqual([
+      'battle-gen9randombattle-2692982986',
+      'battle-gen9randombattle-2692982991',
+    ]);
+    expect(battleInitRooms('>battle-gen9randombattle-1\n|init|battle|battle-gen9randombattle-2692982986')).toEqual([
+      'battle-gen9randombattle-2692982986',
+    ]);
+  });
+
   it('keeps each battle\'s lines on that battle', () => {
     const payload = [
       '>battle-gen9randombattle-7005',

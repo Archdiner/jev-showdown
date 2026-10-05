@@ -285,6 +285,7 @@ describe('BattleDriver prediction log', () => {
     const ended = new Promise<import('./game-record.js').LadderGameRecord>(resolve => driver.on('gameEnd', resolve));
     const room = 'battle-gen9randombattle-3';
     const request = JSON.parse(JSON.stringify(battle.p1.activeRequest));
+    socket.emit('line', room, '|init|battle');
     socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
     socket.emit('line', room, '|player|p2|Rival|2|1400');
     socket.emit('line', room, `|switch|p1a: ${our.species.name}|${our.species.name}, L${our.level}|${our.hp}/${our.maxhp}`);

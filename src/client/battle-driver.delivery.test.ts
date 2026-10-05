@@ -90,6 +90,7 @@ describe('ladder delivery and timers', () => {
     const { driver, socket, logDir, decisions } = harness(() => true);
     const room = 'battle-gen9randombattle-1';
     const done = ended(driver);
+    socket.emit('line', room, '|init|battle');
     socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
     socket.emit('line', room, '|player|p2|Rival|2|1400');
     socket.emit('line', room, '|inactive|BotAlpha has 2 seconds left.');
@@ -111,6 +112,7 @@ describe('ladder delivery and timers', () => {
     const { driver, socket, logDir, decisions } = harness(() => true);
     const room = 'battle-gen9randombattle-1';
     const done = ended(driver);
+    socket.emit('line', room, '|init|battle');
     socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
     socket.emit('line', room, '|player|p2|Rival|2|1400');
     socket.emit('line', room, '|inactive|BotAlpha has 2 seconds left.');
@@ -134,6 +136,7 @@ describe('ladder delivery and timers', () => {
     });
     const room = 'battle-gen9randombattle-1';
     const done = ended(driver);
+    socket.emit('line', room, '|init|battle');
     socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
     socket.emit('line', room, '|player|p2|Rival|2|1400');
     socket.emit('line', room, `|request|${request()}`);
@@ -153,6 +156,7 @@ describe('ladder delivery and timers', () => {
     const { driver, socket, logDir } = harness(() => true);
     const room = 'battle-gen9randombattle-1';
     const done = ended(driver);
+    socket.emit('line', room, '|init|battle');
     socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
     socket.emit('line', room, '|player|p2|Rival|2|1400');
     socket.emit('line', room, `|request|${request()}`);
@@ -179,8 +183,10 @@ describe('ladder delivery and timers', () => {
         if (left === 0) resolve();
       });
     });
+    socket.emit('line', first, '|init|battle');
     socket.emit('line', first, '|player|p1|BotAlpha|1|1100');
     socket.emit('line', first, '|player|p2|Rival|2|1400');
+    socket.emit('line', second, '|init|battle');
     socket.emit('line', second, '|player|p1|BotAlpha|1|1100');
     socket.emit('line', second, '|player|p2|Other|2|1200');
     socket.emit('popup', 'Battle timer is ON');
@@ -219,6 +225,7 @@ describe('ladder delivery and timers', () => {
         ],
       }],
     });
+    socket.emit('line', room, '|init|battle');
     socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
     socket.emit('line', room, '|player|p2|Rival|2|1400');
     socket.emit('line', room, `|request|${body}`);
@@ -257,6 +264,7 @@ describe('ladder delivery and timers', () => {
     const { driver, socket, logDir, sent } = harness(() => true);
     const room = 'battle-gen9randombattle-7005';
     const done = ended(driver);
+    socket.emit('line', room, '|init|battle');
     socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
     socket.emit('line', room, '|player|p2|Rival|2|1400');
     socket.emit('line', room, `|request|${request(2)}`);
@@ -318,6 +326,7 @@ describe('ladder delivery and timers', () => {
     });
     const room = 'battle-gen9randombattle-7005';
     const done = ended(driver);
+    socket.emit('line', room, '|init|battle');
     socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
     socket.emit('line', room, '|player|p2|Rival|2|1400');
     socket.emit('line', room, `|request|${request(2)}`);
@@ -329,6 +338,51 @@ describe('ladder delivery and timers', () => {
     expect(readLog(logDir, room).some(event => event.cause === 'stale-rqid' && event.rqid === 2)).toBe(true);
     socket.emit('line', room, '|win|BotAlpha');
     await done;
+    await driver.stop();
+  });
+
+  it('keys two battles that start together by each |init|battle room id', async () => {
+    const { driver, socket, logDir, sent } = harness(() => true);
+    const lily = 'battle-gen9randombattle-2692982986';
+    const micha = 'battle-gen9randombattle-2692982991';
+    const both = new Promise<void>(resolve => {
+      let left = 2;
+      driver.on('gameEnd', () => {
+        left -= 1;
+        if (left === 0) resolve();
+      });
+    });
+    const payload = [
+      `>${lily}`,
+      '|init|battle',
+      '|player|p1|BotAlpha|1|1100',
+      '|player|p2|lilyfith|2|1400',
+      `|request|${request(2)}`,
+      `>${micha}`,
+      '|init|battle',
+      '|player|p1|BotAlpha|1|1100',
+      '|player|p2|michaboo|2|1300',
+      `|request|${request(4)}`,
+      '>battle-gen9randombattle-not-started',
+      `|request|${request(9)}`,
+    ].join('\n');
+    for (const row of roomLines(payload)) socket.emit('line', row.roomid, row.line);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(sent).toEqual([
+      { roomId: lily, choice: 'move 1|2' },
+      { roomId: micha, choice: 'move 1|4' },
+    ]);
+    socket.emit('line', lily, '|win|Rival');
+    socket.emit('line', micha, '|win|Rival');
+    await both;
+    const games = fs.readFileSync(path.join(logDir, 'games.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>);
+    expect(games.map(game => game.replayId).sort()).toEqual([
+      'gen9randombattle-2692982986',
+      'gen9randombattle-2692982991',
+    ]);
+    expect(games.map(game => game.opponent).sort()).toEqual(['lilyfith', 'michaboo']);
+    expect(games.every(game => game.battleId === `battle-${game.replayId}`)).toBe(true);
+    expect(driver.roomCount()).toBe(0);
     await driver.stop();
   });
 
@@ -345,14 +399,15 @@ describe('ladder delivery and timers', () => {
     });
     const payload = [
       `>${older}`,
+      '|init|battle',
       '|player|p1|BotAlpha|1|1100',
       '|player|p2|Rival|2|1400',
       `|request|${request(2)}`,
       `>${newer}`,
+      '|init|battle',
       '|player|p1|BotAlpha|1|1100',
       '|player|p2|Other|2|1200',
       `|request|${request(5)}`,
-      '|init|battle',
     ].join('\n');
     for (const row of roomLines(payload)) socket.emit('line', row.roomid, row.line);
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -372,6 +427,7 @@ describe('ladder delivery and timers', () => {
       expect.objectContaining({ attribution: 'matched', battleId: newer, ambiguous: false }),
     ]);
     expect(olderLog.filter(event => event.type === 'game_start').map(event => event.battleId)).toEqual([older]);
+    socket.emit('line', older, '|init|battle');
     socket.emit('line', older, '|player|p1|BotAlpha|1|1100');
     socket.emit('line', older, `|request|${request(9)}`);
     await new Promise(resolve => setTimeout(resolve, 40));
@@ -390,6 +446,7 @@ describe('ladder delivery and timers', () => {
     const uploaded = (id: string) =>
       `|popup||html|<p>Your replay has been uploaded! https://replay.pokemonshowdown.com/${id}-vf14y87snr046p0x7g86l2ffrf1912epw</p>`;
     for (const room of [first, middle, latest]) {
+      socket.emit('line', room, '|init|battle');
       socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
       socket.emit('line', room, '|player|p2|Rival|2|1400');
     }

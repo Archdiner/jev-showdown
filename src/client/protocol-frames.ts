@@ -4,6 +4,30 @@ export interface RoomLine {
 }
 
 /**
+ * `|init|battle` starts a battle. The room id is the `>roomid` on that
+ * message. `|init|battle|battle-...` names the room on the line itself and
+ * wins over the framing room. Null means this line is not a battle init.
+ * An empty string means "use the framing room id".
+ */
+export function battleInitRoom(line: string): string | null {
+  if (line === '|init|battle') return '';
+  if (!line.startsWith('|init|battle|')) return null;
+  return line.slice('|init|battle|'.length).split('|')[0].trim();
+}
+
+/** Room id of every `|init|battle` in one frame. Search order is not consulted. */
+export function battleInitRooms(payload: string): string[] {
+  const ids: string[] = [];
+  for (const { roomid, line } of roomLines(payload)) {
+    const named = battleInitRoom(line);
+    if (named === null) continue;
+    const id = named.startsWith('battle-') ? named : roomid;
+    if (id.startsWith('battle-')) ids.push(id);
+  }
+  return ids;
+}
+
+/**
  * Split one websocket frame into room-scoped protocol lines.
  *
  * Showdown batches several rooms into a single frame. Each `>roomid` line
