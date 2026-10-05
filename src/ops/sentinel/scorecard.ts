@@ -3,7 +3,7 @@ import * as path from 'path';
 import { battleRowChoice, isDuplicateDisconnect } from '../../client/game-integrity.js';
 import { GraphDB } from '../../graph/db.js';
 import { degenerateAlert } from '../cycle.js';
-import { compareIncidents } from './incidents.js';
+import { compareIncidents, openP0 } from './incidents.js';
 import { actionable, type Incident, type IncidentEvent, type ObservedGame, type SentinelContext } from './types.js';
 
 export interface Scorecard {
@@ -16,6 +16,10 @@ export interface Scorecard {
   reliability: {
     uptime: number | null;
     uptimeDetail: string;
+    liveRunnerUptime: number | null;
+    liveRunnerDetail: string;
+    opsWorkerUptime: number | null;
+    opsWorkerDetail: string;
     openP0: number;
     openP1: number;
     soaking: number;
@@ -45,7 +49,7 @@ export interface Scorecard {
     regressions: string[];
     previous: WindowRecord & { start: number; end: number };
   };
-  openIncidents: Array<{ id: string; severity: string; status: string; count: number; title: string; detail: string }>;
+  openIncidents: Array<{ id: string; severity: string; status: string; count: number; title: string; detail: string; ref: string | null }>;
   omittedOpen: number;
   notes: string[];
 }
@@ -63,7 +67,7 @@ export interface WindowRecord {
   winRate: number | null;
 }
 
-export function buildScorecard(ctx: SentinelContext, incidents: Incident[], events: IncidentEvent[], sinceMs: number): Scorecard {
+export function buildScorecard(ctx: SentinelContext, incidents: Incident[], _events: IncidentEvent[], sinceMs: number): Scorecard {
   const since = ctx.now - sinceMs;
   const currentGames = gamesBetween(ctx.games, since, ctx.now + 60_000, true);
   const previousGames = gamesBetween(ctx.games, since - sinceMs, since, false);
@@ -75,16 +79,17 @@ export function buildScorecard(ctx: SentinelContext, incidents: Incident[], even
   const ladderRated = ratedLadder(counted);
   const previous = { ...windowRecord(previousCounted), start: since - sinceMs, end: since };
   const sources = sourceList(ctx);
-  const uptime = liveUptime(ctx, since);
-  const opened = events.filter(event => (event.type === 'opened' || event.type === 'reopened') && event.ts >= since).length;
-  const verifiedEvents = events.filter(event => event.type === 'verified' && event.ts >= since);
-  const mttrValues = verifiedEvents
-    .map(event => event.episodeOpenedAt === undefined ? null : event.ts - event.episodeOpenedAt)
+  const liveRunner = liveRunnerUptime(ctx, since);
+  const opsWorkers = opsWorkerUptime(ctx, since);
+  const opened = incidents.filter(item => item.firstSeen >= since && item.firstSeen <= ctx.now).length;
+  const verifiedIncidents = incidents.filter(item => item.verifiedAt !== null && item.verifiedAt >= since && item.verifiedAt <= ctx.now);
+  const mttrValues = verifiedIncidents
+    .map(item => item.verifiedAt === null ? null : item.verifiedAt - item.episodeOpenedAt)
     .filter((value): value is number => value !== null && value >= 0);
-  const open = incidents.filter(item => actionable(item.status)).sort(compareIncidents);
+  const open = incidents.filter(item => actionable(item.status) && item.inBaseline !== false).sort(compareIncidents);
   const listed = previewIncidents(open);
   const graph = readGraph(ctx, since);
-  const batches = batchRows(ctx, counted);
+  const batches = batchRows(ctx, countable(uniqueLadderGames(ctx, gamesBetween(ctx.games, since, ctx.now + 60_000, true))));
   const variants = variantRows(counted);
   const tally = tallyOf(counted);
   const notes = [
@@ -104,13 +109,17 @@ export function buildScorecard(ctx: SentinelContext, incidents: Incident[], even
     phantomsExcluded: phantoms.length,
     localExcluded: local.length,
     reliability: {
-      uptime: uptime.ratio,
-      uptimeDetail: uptime.detail,
-      openP0: open.filter(item => item.severity === 'P0').length,
+      uptime: liveRunner.ratio,
+      uptimeDetail: liveRunner.detail,
+      liveRunnerUptime: liveRunner.ratio,
+      liveRunnerDetail: liveRunner.detail,
+      opsWorkerUptime: opsWorkers.ratio,
+      opsWorkerDetail: opsWorkers.detail,
+      openP0: openP0(incidents),
       openP1: open.filter(item => item.severity === 'P1').length,
       soaking: incidents.filter(item => item.status === 'resolved').length,
       opened,
-      verified: verifiedEvents.length,
+      verified: verifiedIncidents.length,
       mttrMs: mttrValues.length ? mttrValues.reduce((sum, value) => sum + value, 0) / mttrValues.length : null,
       mttrDetail: mttrValues.length
         ? `mean time from episode open to verified, ${mttrValues.length} incident${mttrValues.length === 1 ? '' : 's'}`
@@ -144,6 +153,7 @@ export function buildScorecard(ctx: SentinelContext, incidents: Incident[], even
       count: item.count,
       title: item.title,
       detail: item.detail,
+      ref: item.ref,
     })),
     omittedOpen: open.length - listed.length,
     notes,
@@ -158,8 +168,10 @@ export function formatScorecard(card: Scorecard, style: 'text' | 'md' = 'text'):
   lines.push(`Phantoms excluded: ${card.phantomsExcluded}. ${card.phantomRule}. Counted games: ${card.progress.counted}. Local excluded: ${card.localExcluded}.`);
   lines.push('');
   lines.push(style === 'md' ? '## Reliability' : 'Reliability');
-  const uptime = card.reliability.uptime === null ? 'unknown' : pct(card.reliability.uptime);
-  lines.push(`  uptime     ${uptime}  ${card.reliability.uptimeDetail}`);
+  const liveRunner = card.reliability.liveRunnerUptime === null ? 'unknown' : pct(card.reliability.liveRunnerUptime);
+  const opsWorkers = card.reliability.opsWorkerUptime === null ? 'unknown' : pct(card.reliability.opsWorkerUptime);
+  lines.push(`  live runner  ${liveRunner}  ${card.reliability.liveRunnerDetail}`);
+  lines.push(`  ops workers  ${opsWorkers}  ${card.reliability.opsWorkerDetail}`);
   lines.push(`  open P0    ${card.reliability.openP0}`);
   lines.push(`  open P1    ${card.reliability.openP1}`);
   lines.push(`  opened     ${card.reliability.opened}   verified ${card.reliability.verified}   soaking ${card.reliability.soaking}`);
@@ -168,7 +180,8 @@ export function formatScorecard(card: Scorecard, style: 'text' | 'md' = 'text'):
   if (card.openIncidents.length) {
     lines.push('  open incidents:');
     for (const incident of card.openIncidents) {
-      lines.push(`    ${incident.severity} ${incident.status} x${incident.count} ${incident.title} — ${incident.detail}`);
+      const ref = incident.ref ? ` [${incident.ref}]` : '';
+      lines.push(`    ${incident.severity} ${incident.status} x${incident.count}${ref} ${incident.title} — ${incident.detail}`);
     }
     if (card.omittedOpen > 0) {
       const noun = card.omittedOpen === 1 ? 'incident' : 'incidents';
@@ -185,7 +198,7 @@ export function formatScorecard(card: Scorecard, style: 'text' | 'md' = 'text'):
   lines.push(`             source ${card.progress.eloSource}`);
   const rate = card.progress.winRate === null ? 'n/a' : pct(card.progress.winRate);
   lines.push(`  win rate   ${rate}  ${card.progress.wins}-${card.progress.losses}-${card.progress.ties} on ${card.progress.counted} games  target ${pct(card.progress.winTarget)}`);
-  lines.push(...priorLines(card));
+  for (const line of priorLines(card)) lines.push(line);
   lines.push('  batches');
   if (card.progress.batches.length === 0) lines.push('    none');
   for (const batch of card.progress.batches) {
@@ -343,12 +356,48 @@ function signedPoints(value: number): string {
   return rounded.toFixed(1);
 }
 
-function liveUptime(ctx: SentinelContext, since: number): { ratio: number | null; detail: string } {
+function liveRunnerUptime(ctx: SentinelContext, since: number): { ratio: number | null; detail: string } {
+  const file = path.join(ctx.layout.ladderLogDir, 'games.jsonl');
+  const windowMs = ctx.now - since;
+  const games = uniqueLadderGames(ctx, ctx.games).filter(game =>
+    !game.local
+    && !game.phantom
+    && game.ts !== null
+    && game.ts >= since
+    && game.ts <= ctx.now
+    && !abortedUnlabeled(ctx, game),
+  );
+  if (games.length === 0 || windowMs <= 0) {
+    return { ratio: null, detail: `no ladder games in ${file}` };
+  }
+  const groups = new Map<string, [number, number]>();
+  const labels: string[] = [];
+  for (const game of games) {
+    const id = batchId(game);
+    const ts = game.ts as number;
+    const span = groups.get(id);
+    if (!span) {
+      groups.set(id, [ts, ts]);
+      labels.push(id);
+    } else {
+      span[0] = Math.min(span[0], ts);
+      span[1] = Math.max(span[1], ts);
+    }
+  }
+  const intervals = [...groups.values()].filter(([from, to]) => to > from);
+  const up = mergeIntervals(intervals).reduce((sum, [from, to]) => sum + (to - from), 0);
+  return {
+    ratio: Math.min(1, up / windowMs),
+    detail: `games.jsonl play spans for ${labels.join(', ')}`,
+  };
+}
+
+function opsWorkerUptime(ctx: SentinelContext, since: number): { ratio: number | null; detail: string } {
   const beats = ctx.heartbeats
-    .filter(beat => beat.facility === 'live' && typeof beat.ts === 'number' && beat.ts >= since && beat.ts <= ctx.now)
+    .filter(beat => (beat.facility === 'factory' || beat.facility === 'gatekeeper' || beat.facility === 'live' || beat.facility === 'analyst') && typeof beat.ts === 'number' && beat.ts >= since && beat.ts <= ctx.now)
     .sort((a, b) => Number(a.ts) - Number(b.ts));
   if (beats.length === 0) {
-    return { ratio: null, detail: `no live heartbeats in the window (source ${ctx.layout.opsDir}/heartbeats.jsonl)` };
+    return { ratio: null, detail: `no ops worker heartbeats in the window (source ${ctx.layout.opsDir}/heartbeats.jsonl)` };
   }
   let up = 0;
   let down = 0;
@@ -367,26 +416,68 @@ function liveUptime(ctx: SentinelContext, since: number): { ratio: number | null
   const ratio = total === 0 ? null : up / total;
   return {
     ratio,
-    detail: `live heartbeats from the first beat in the window; a gap over ${Math.round(ctx.staleMs / 1000)}s counts as down. source ${ctx.layout.opsDir}/heartbeats.jsonl`,
+    detail: `ops worker heartbeats (factory, gatekeeper, live, analyst); a gap over ${Math.round(ctx.staleMs / 1000)}s counts as down. source ${ctx.layout.opsDir}/heartbeats.jsonl`,
   };
 }
 
+function uniqueLadderGames(ctx: SentinelContext, games: ObservedGame[]): ObservedGame[] {
+  const file = path.resolve(path.join(ctx.layout.ladderLogDir, 'games.jsonl'));
+  const seen = new Set<string>();
+  const out: ObservedGame[] = [];
+  for (const game of games) {
+    if (path.resolve(game.file) !== file) continue;
+    const id = game.battleId || `${game.file}:${game.line}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(game);
+  }
+  return out;
+}
+
+function mergeIntervals(intervals: Array<[number, number]>): Array<[number, number]> {
+  const ordered = [...intervals].sort((a, b) => a[0] - b[0]);
+  const merged: Array<[number, number]> = [];
+  for (const interval of ordered) {
+    const last = merged[merged.length - 1];
+    if (!last || interval[0] > last[1]) merged.push(interval);
+    else last[1] = Math.max(last[1], interval[1]);
+  }
+  return merged;
+}
+
+function abortedUnlabeled(ctx: SentinelContext, game: ObservedGame): boolean {
+  return Boolean(
+    ctx.runSummary
+    && ctx.runSummary.games === 0
+    && ctx.runSummary.gitSha
+    && game.gitSha === ctx.runSummary.gitSha
+    && !game.batchLabel
+    && !game.runId,
+  );
+}
+
+function batchId(game: ObservedGame): string {
+  if (game.batchLabel && game.runId) return `${game.batchLabel} ${game.runId}`;
+  return game.batchLabel || game.runId || game.gitSha || 'unlabeled';
+}
+
 function batchRows(ctx: SentinelContext, games: ObservedGame[]): Scorecard['progress']['batches'] {
-  const groups = new Map<string, ObservedGame[]>();
-  const anySha = games.some(game => game.gitSha);
   const ordered = [...games].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
-  if (anySha) {
-    for (const game of ordered) {
-      const id = game.gitSha ?? 'no-git';
-      const list = groups.get(id) ?? [];
-      list.push(game);
-      groups.set(id, list);
-    }
-  } else {
+  const named = ordered.some(game => game.batchLabel || game.runId);
+  const groups = new Map<string, ObservedGame[]>();
+  if (!named && !ordered.some(game => game.gitSha)) {
     for (let index = 0; index < ordered.length; index += ctx.batchSize) {
       const slice = ordered.slice(index, index + ctx.batchSize);
       groups.set(`batch ${index / ctx.batchSize + 1}`, slice);
     }
+    return [...groups.entries()].map(([id, rows]) => ({ id, ...tallyOf(rows) }));
+  }
+  for (const game of ordered) {
+    if (abortedUnlabeled(ctx, game)) continue;
+    const id = named ? batchId(game) : (game.gitSha ?? 'unlabeled');
+    const list = groups.get(id) ?? [];
+    list.push(game);
+    groups.set(id, list);
   }
   return [...groups.entries()].map(([id, rows]) => ({ id, ...tallyOf(rows) }));
 }

@@ -125,8 +125,8 @@ export const CHECKS: InvariantCheck[] = [
   {
     id: 'mixed-ratings',
     severity: 'P1',
-    title: 'Local and ladder ratings are in the same heartbeat or game series',
-    suggestedFix: 'Keep localbot and the public ladder in separate rating series. A mixed series moves the circuit breaker and the status line with a rating that is not the ladder.',
+    title: 'One row is both a local result and a ladder result',
+    suggestedFix: 'Keep localbot and the public ladder in separate rows. A row that is both moves the circuit breaker with a rating that is not the ladder. Separate local and ladder rows are not compared.',
     detect: mixedRatings,
   },
   {
@@ -139,15 +139,15 @@ export const CHECKS: InvariantCheck[] = [
   {
     id: 'timer-margin-null',
     severity: 'P2',
-    title: 'A played game has minTimerMarginSec null',
-    suggestedFix: 'Record the smallest seconds-left seen on our clock. A null margin hides timer losses.',
+    title: 'A played ladder game has minTimerMarginSec null',
+    suggestedFix: 'Record the smallest seconds-left seen on our clock. A null margin hides timer losses. Local games and battle-local rows are not the ladder clock.',
     detect: timerMarginNull,
   },
   {
     id: 'elo-null-on-forfeit',
     severity: 'P2',
     title: 'A forfeit game has eloAfter null',
-    suggestedFix: 'Copy the rating popup onto forfeit rows. A null eloAfter on a forfeit drops that game out of the rating series.',
+    suggestedFix: 'Copy the rating popup onto forfeit rows. A null eloAfter on a forfeit drops that game out of the rating series. A loss that stays at the 1000 floor stores eloAfter null on purpose.',
     detect: eloNullOnForfeit,
   },
   {
@@ -181,8 +181,8 @@ export const CHECKS: InvariantCheck[] = [
   {
     id: 'checkout-behind',
     severity: 'P2',
-    title: 'This checkout is behind origin/main',
-    suggestedFix: 'Fast-forward to origin/main before the next ladder session so the runner matches the code the gate tested.',
+    title: 'A checkout is behind origin/main',
+    suggestedFix: 'Fast-forward the ops checkout and the ladder checkout (LIVE_REPO_DIR, or the git root of LADDER_LOG_DIR) to origin/main before the next ladder session.',
     detect: checkoutBehind,
   },
   {
@@ -191,6 +191,13 @@ export const CHECKS: InvariantCheck[] = [
     title: 'A JSONL line is not an object',
     suggestedFix: 'Append one JSON object per line. A partial or text line is skipped by readers and hides the game that followed it.',
     detect: malformedLines,
+  },
+  {
+    id: 'stale-lock',
+    severity: 'P3',
+    title: 'A ladder account lock is held by a pid that is not running',
+    suggestedFix: 'Remove state/ladder-<userid>.lock when its pid is dead. A stale lock in the ops checkout or the live checkout (LIVE_REPO_DIR) blocks the next login on that tree.',
+    detect: staleLocks,
   },
   {
     id: 'genuine-game-dropped',
@@ -453,13 +460,18 @@ function duplicateLadderRunners(ctx: SentinelContext): CheckHit[] {
     }
     for (const run of ctx.runs) {
       if (run.local) continue;
-      if (!ctx.processes.some(proc => proc.pid === run.pid)) continue;
+      if (!pidIsAlive(ctx, run.pid)) continue;
       const account = (run.username || 'unscoped').toLowerCase();
       add(account, run.pid, { file: run.path, detail: `run ${run.runId} pid ${run.pid} username ${run.username ?? 'unset'}` });
     }
+    for (const lock of ctx.locks) {
+      if (lock.pid === null || !pidIsAlive(ctx, lock.pid)) continue;
+      const account = (lock.username || 'unscoped').toLowerCase();
+      add(account, lock.pid, { file: lock.path, detail: `${lock.checkout} checkout lock pid ${lock.pid}` });
+    }
   }
 
-  const turns = ctx.rows.filter(row => row.value && isChoiceRow(row.value) && inLookback(ctx, numberOf(row.value.ts)));
+  const turns = ctx.rows.filter(row => row.value && isPidBattleRow(row.value) && inLookback(ctx, numberOf(row.value.ts)));
   const byBattle = new Map<string, { pids: Set<number>; evidence: Evidence[]; account: string }>();
   for (const row of turns) {
     const value = row.value;
@@ -473,7 +485,8 @@ function duplicateLadderRunners(ctx: SentinelContext): CheckHit[] {
       account: accountFromFile(row.file) ?? (text(value.username) || 'unscoped').toLowerCase(),
     };
     if (pid !== null) bucket.pids.add(pid);
-    bucket.evidence.push({ file: row.file, line: row.line, detail: `pid ${pid ?? 'unset'} choice ${text(value.choice) ?? ''}` });
+    const kind = text(value.type) ?? text(value.kind) ?? text(value.schema) ?? 'row';
+    bucket.evidence.push({ file: row.file, line: row.line, detail: `pid ${pid ?? 'unset'} ${kind} ${text(value.choice) ?? ''}`.trim() });
     byBattle.set(battleId, bucket);
   }
   for (const [battleId, bucket] of byBattle) {
@@ -522,12 +535,17 @@ function choiceSentNotApplied(ctx: SentinelContext): CheckHit[] {
       if (!timerGame && !laterTimer) continue;
       if (turn !== null && turn > 1) continue;
       if (appliedAfter(rows, index)) continue;
-      if (!inLookback(ctx, numberOf(value.ts))) continue;
+      if (!inLookback(ctx, numberOf(value.ts)) || !admitted(ctx, numberOf(value.ts))) continue;
       const id = battleId || `${file}:${rows[index].line}`;
+      const game = ctx.games.find(item => item.battleId === battleId);
       hits.push({
         key: id,
         detail: `${id} logged sent=true and ended our-timer on turn ${turn ?? 1} without a move, switch, or later turn`,
         evidence: [{ file, line: rows[index].line, detail: `sent=true choice ${text(value.choice) ?? ''}` }],
+        at: numberOf(value.ts) ?? game?.ts ?? null,
+        gitSha: game?.gitSha ?? null,
+        runId: game?.runId ?? null,
+        battleId: battleId || id,
       });
     }
   }
@@ -537,11 +555,11 @@ function choiceSentNotApplied(ctx: SentinelContext): CheckHit[] {
 function phantomGames(ctx: SentinelContext): CheckHit[] {
   return recent(ctx)
     .filter(game => game.phantom)
-    .map(game => ({
-      key: game.battleId || `${game.file}:${game.line}`,
-      detail: `${game.battleId || game.file} is a 0-turn ${game.endReason ?? game.outcome} and is excluded from the scorecard record`,
-      evidence: [{ file: game.file, line: game.line, detail: `turns=0 endReason=${game.endReason ?? 'null'} outcome=${game.outcome ?? 'null'}` }],
-    }));
+    .map(game => fieldHit(
+      game,
+      game.battleId || `${game.file}:${game.line}`,
+      `is a 0-turn ${game.endReason ?? game.outcome} and is excluded from the scorecard record`,
+    ));
 }
 
 function crashOrFallback(ctx: SentinelContext): CheckHit[] {
@@ -593,11 +611,17 @@ function ghostRooms(ctx: SentinelContext): CheckHit[] {
 function drainPending(ctx: SentinelContext): CheckHit[] {
   const old = ctx.drains.filter(drain => ctx.now - drain.mtimeMs >= ctx.drainPendingMs);
   if (old.length === 0) return [];
-  return [{
-    key: 'pending',
-    detail: old.map(drain => `${drain.path} is ${Math.round((ctx.now - drain.mtimeMs) / 60000)} min old`).join('; '),
-    evidence: old.map(drain => ({ file: drain.path, detail: `mtime age ${Math.round((ctx.now - drain.mtimeMs) / 1000)}s` })),
-  }];
+  const byCheckout = new Map<string, typeof old>();
+  for (const drain of old) {
+    const list = byCheckout.get(drain.checkout) ?? [];
+    list.push(drain);
+    byCheckout.set(drain.checkout, list);
+  }
+  return [...byCheckout.entries()].map(([checkout, drains]) => ({
+    key: checkout,
+    detail: drains.map(drain => `${checkout} checkout ${drain.path} is ${Math.round((ctx.now - drain.mtimeMs) / 60000)} min old`).join('; '),
+    evidence: drains.map(drain => ({ file: drain.path, detail: `${checkout} checkout mtime age ${Math.round((ctx.now - drain.mtimeMs) / 1000)}s` })),
+  }));
 }
 
 function runnerExitUndrained(ctx: SentinelContext): CheckHit[] {
@@ -635,7 +659,7 @@ function runnerDown(ctx: SentinelContext): CheckHit[] {
   for (const run of ctx.runs) {
     if (run.local) continue;
     if (ctx.now - run.mtimeMs > ctx.lookbackMs) continue;
-    const alive = ctx.processes.some(proc => proc.pid === run.pid);
+    const alive = pidIsAlive(ctx, run.pid);
     if (alive) continue;
     if (ctx.summaryMtimeMs !== null && ctx.summaryMtimeMs >= run.mtimeMs) continue;
     hits.push({
@@ -810,32 +834,32 @@ function isEffectivelyPulled(state: { pulled?: boolean; cooldownUntil?: number }
 }
 
 function mixedRatings(ctx: SentinelContext): CheckHit[] {
-  const local: Evidence[] = [];
-  const ladder: Evidence[] = [];
+  const hits: CheckHit[] = [];
   for (const beat of ctx.heartbeats) {
     if (!inLookback(ctx, numberOf(beat.ts))) continue;
     const scope = text(beat.scope);
     const detail = text(beat.detail) ?? '';
-    const rated = /rating\s+\d/.test(detail) || typeof beat.rating === 'number';
-    if (!rated && scope !== 'local' && scope !== 'ladder') continue;
-    if (scope === 'local' || /\blocalbot\b|\bbotalpha\b|\bbotbravo\b|127\.0\.0\.1/i.test(detail)) {
-      local.push({ file: beat.file, line: beat.line, detail });
-    } else if (scope === 'ladder' || /\bladder\b|sim3\.psim\.us/i.test(detail)) {
-      ladder.push({ file: beat.file, line: beat.line, detail });
-    }
+    if (!contradicts(scope, text(beat.source), beat.localServer === true, beat.localServer === false, detail)) continue;
+    hits.push({
+      key: `${beat.file}:${beat.line}`,
+      detail: `one heartbeat is both local and ladder: ${detail || scope}`,
+      evidence: [{ file: beat.file, line: beat.line, detail: detail || scope || 'mixed' }],
+    });
   }
-  for (const game of recent(ctx)) {
-    if (game.eloAfter === null) continue;
-    const evidence = { file: game.file, line: game.line, detail: `${game.battleId} eloAfter=${game.eloAfter}` };
-    if (game.local) local.push(evidence);
-    else if (game.ladder) ladder.push(evidence);
+  for (const row of ctx.rows) {
+    const value = row.value;
+    if (!value || !inLookback(ctx, numberOf(value.ts))) continue;
+    const detail = `${text(value.detail) ?? ''} ${text(value.username) ?? ''} ${text(value.battleId) ?? ''}`.trim();
+    if (!contradicts(text(value.scope), text(value.source), value.localServer === true || value.local === true, value.localServer === false, detail)) continue;
+    if (!isGameRowValue(value) && text(value.facility) !== null) continue;
+    const battle = text(value.battleId) ?? `${row.file}:${row.line}`;
+    hits.push({
+      key: battle,
+      detail: `${battle} is both a local row and a ladder row`,
+      evidence: [{ file: row.file, line: row.line, detail }],
+    });
   }
-  if (local.length === 0 || ladder.length === 0) return [];
-  return [{
-    key: 'mixed',
-    detail: 'a local rating and a ladder rating are in the same lookback window',
-    evidence: [local[0], ladder[0]],
-  }];
+  return dedupeHits(hits);
 }
 
 function replayUnconfirmed(ctx: SentinelContext): CheckHit[] {
@@ -846,13 +870,19 @@ function replayUnconfirmed(ctx: SentinelContext): CheckHit[] {
 
 function timerMarginNull(ctx: SentinelContext): CheckHit[] {
   return recentReal(ctx)
-    .filter(game => (game.turns ?? 0) > 0 && game.minTimerMarginSec === null)
+    .filter(game => (game.turns ?? 0) > 0 && game.minTimerMarginSec === null && !isLocalGame(game))
     .map(game => fieldHit(game, game.battleId || String(game.line), 'minTimerMarginSec null'));
 }
 
 function eloNullOnForfeit(ctx: SentinelContext): CheckHit[] {
   return recentReal(ctx)
-    .filter(game => (game.endReason === 'our-forfeit' || game.endReason === 'opponent-forfeit') && game.eloAfter === null)
+    .filter(game => {
+      if (game.endReason !== 'our-forfeit' && game.endReason !== 'opponent-forfeit') return false;
+      if (game.eloAfter !== null) return false;
+      // #57 stores eloAfter null when a loss stays at the 1000 floor (before === after).
+      if (game.eloBefore === 1000) return false;
+      return true;
+    })
     .map(game => fieldHit(game, game.battleId || String(game.line), `eloAfter null on ${game.endReason}`));
 }
 
@@ -868,11 +898,7 @@ function requiredFieldsNull(ctx: SentinelContext): CheckHit[] {
     if (!game.format) missing.push('format');
     if (game.turns === null) missing.push('turns');
     if (missing.length === 0) continue;
-    hits.push({
-      key: game.battleId || `${game.file}:${game.line}`,
-      detail: `${game.battleId || game.file} missing ${missing.join(', ')}`,
-      evidence: [{ file: game.file, line: game.line, detail: missing.join(', ') }],
-    });
+    hits.push(fieldHit(game, game.battleId || `${game.file}:${game.line}`, `missing ${missing.join(', ')}`));
   }
   return hits;
 }
@@ -956,12 +982,27 @@ function winRateBatch(ctx: SentinelContext): CheckHit[] {
 }
 
 function checkoutBehind(ctx: SentinelContext): CheckHit[] {
-  if (ctx.git.behind === null || ctx.git.behind <= 0) return [];
-  return [{
-    key: ctx.git.ref,
-    detail: ctx.git.detail,
-    evidence: [{ file: ctx.layout.cwd, detail: ctx.git.detail }],
-  }];
+  const hits: CheckHit[] = [];
+  for (const checkout of ctx.checkouts) {
+    if (checkout.git.behind === null || checkout.git.behind <= 0) continue;
+    hits.push({
+      key: checkout.role,
+      detail: `${checkout.role} checkout ${checkout.dir}: ${checkout.git.detail}`,
+      evidence: [{ file: checkout.dir, detail: `${checkout.role} checkout ${checkout.git.detail}` }],
+    });
+  }
+  return hits;
+}
+
+function staleLocks(ctx: SentinelContext): CheckHit[] {
+  if (!ctx.processesScanned) return [];
+  return ctx.locks
+    .filter(lock => lock.pid === null || !pidIsAlive(ctx, lock.pid))
+    .map(lock => ({
+      key: `${lock.checkout}:${path.basename(lock.path)}`,
+      detail: `${lock.checkout} checkout ${lock.path} pid ${lock.pid ?? 'unset'} is not running`,
+      evidence: [{ file: lock.path, detail: `${lock.checkout} checkout ${lock.dir} pid ${lock.pid ?? 'unset'}` }],
+    }));
 }
 
 function malformedLines(ctx: SentinelContext): CheckHit[] {
@@ -986,19 +1027,16 @@ function invalidChoices(ctx: SentinelContext): CheckHit[] {
     seen.add(key);
     const count = game.invalid > 0 ? `invalidChoices=${game.invalid}` : 'invalidChoiceReasons present with invalidChoices=0';
     const detail = reasons.length ? `${count} reasons: ${reasons.join('; ')}` : count;
-    hits.push({
-      key,
-      detail: `${game.battleId || game.file} ${detail}`,
-      evidence: [
-        { file: game.file, line: game.line, detail },
-        ...reasons.map(reason => ({ file: game.file, line: game.line, detail: reason })),
-      ],
-    });
+    const hit = fieldHit(game, key, detail);
+    for (const reason of reasons) {
+      hit.evidence.push({ file: game.file, line: game.line, detail: reason });
+    }
+    hits.push(hit);
   }
   for (const [battleId, reasons] of fromRows) {
     if (!battleId || seen.has(battleId) || reasons.length === 0) continue;
     const row = ctx.rows.find(item => {
-      if (!item.value || !inLookback(ctx, numberOf(item.value.ts))) return false;
+      if (!item.value || !inLookback(ctx, numberOf(item.value.ts)) || !admitted(ctx, numberOf(item.value.ts))) return false;
       const id = text(item.value.battleId) ?? text(item.value.id);
       return id === battleId;
     });
@@ -1011,6 +1049,10 @@ function invalidChoices(ctx: SentinelContext): CheckHit[] {
         { file: row.file, line: row.line, detail: reasons.join('; ') },
         ...reasons.map(reason => ({ file: row.file, line: row.line, detail: reason })),
       ],
+      at: numberOf(row.value?.ts),
+      battleId,
+      gitSha: text(row.value?.gitSha),
+      runId: text(row.value?.runId),
     });
   }
   return hits;
@@ -1020,7 +1062,7 @@ function reasonsOnRows(ctx: SentinelContext): Map<string, string[]> {
   const out = new Map<string, string[]>();
   for (const row of ctx.rows) {
     if (!row.value || !Object.prototype.hasOwnProperty.call(row.value, 'invalidChoiceReasons')) continue;
-    if (!inLookback(ctx, numberOf(row.value.ts))) continue;
+    if (!inLookback(ctx, numberOf(row.value.ts)) || !admitted(ctx, numberOf(row.value.ts))) continue;
     const battleId = text(row.value.battleId) ?? text(row.value.id) ?? '';
     const reasons = invalidChoiceReasonsOf(row.value.invalidChoiceReasons);
     if (!reasons.length) continue;
@@ -1051,11 +1093,15 @@ function fieldHit(game: ObservedGame, key: string, detail: string): CheckHit {
     key,
     detail: `${game.battleId || game.file} ${detail}`,
     evidence: [{ file: game.file, line: game.line, detail }],
+    at: game.ts,
+    gitSha: game.gitSha,
+    runId: game.runId,
+    battleId: game.battleId || key,
   };
 }
 
 function recent(ctx: SentinelContext): ObservedGame[] {
-  return ctx.games.filter(game => inLookback(ctx, game.ts));
+  return ctx.games.filter(game => inLookback(ctx, game.ts) && admitted(ctx, game.ts));
 }
 
 function recentReal(ctx: SentinelContext): ObservedGame[] {
@@ -1065,6 +1111,35 @@ function recentReal(ctx: SentinelContext): ObservedGame[] {
 function inLookback(ctx: SentinelContext, ts: number | null): boolean {
   if (ts === null) return true;
   return ts >= ctx.now - ctx.lookbackMs && ts <= ctx.now + 60_000;
+}
+
+function admitted(ctx: SentinelContext, ts: number | null): boolean {
+  if (ctx.baselineMs === null) return true;
+  if (ts === null) return false;
+  return ts >= ctx.baselineMs;
+}
+
+function pidIsAlive(ctx: SentinelContext, pid: number): boolean {
+  if (ctx.processes.some(proc => proc.pid === pid)) return true;
+  return ctx.pidAlive(pid);
+}
+
+function isLocalGame(game: ObservedGame): boolean {
+  if (game.local) return true;
+  if (game.battleId.startsWith('battle-local')) return true;
+  return game.file.endsWith('live-games.jsonl');
+}
+
+function contradicts(
+  scope: string | null,
+  source: string | null,
+  localFlag: boolean,
+  ladderFlag: boolean,
+  detail: string,
+): boolean {
+  const localish = localFlag || scope === 'local' || source === 'local' || /\blocalbot\b|\bbotalpha\b|\bbotbravo\b|127\.0\.0\.1/i.test(detail);
+  const ladderish = ladderFlag || scope === 'ladder' || source === 'ladder' || /\bladder\b|sim3\.psim\.us/i.test(detail);
+  return localish && ladderish;
 }
 
 function freshPids(ctx: SentinelContext, facility: string): Set<number> {
@@ -1109,6 +1184,21 @@ function accountFromFile(file: string): string | null {
 function isChoiceRow(value: Record<string, unknown>): boolean {
   const kind = text(value.type) ?? text(value.kind);
   return kind === 'turn' || kind === 'choice-delivery' || kind === 'choice';
+}
+
+function isPidBattleRow(value: Record<string, unknown>): boolean {
+  if (isChoiceRow(value)) return true;
+  return isGameRowValue(value);
+}
+
+function isGameRowValue(value: Record<string, unknown>): boolean {
+  const schema = text(value.schema);
+  const kind = text(value.kind);
+  const type = text(value.type);
+  if (schema === 'jev.ladder-game.v1') return true;
+  if (kind === 'ladder-game' || kind === 'live-game') return true;
+  if (type === 'result' || type === 'game') return true;
+  return false;
 }
 
 function sentTrue(value: Record<string, unknown>): boolean {

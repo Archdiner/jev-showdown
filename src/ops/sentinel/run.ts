@@ -1,10 +1,11 @@
+import * as os from 'os';
 import * as path from 'path';
 import { beat } from '../heartbeat.js';
 import type { OpsPaths } from '../paths.js';
 import { CHECKS } from './checks.js';
+import { clockGames, splitHits } from './episodes.js';
 import {
   countSeverity,
-  foldIncidents,
   incidentStore,
   loadIncidents,
   openP0,
@@ -12,7 +13,7 @@ import {
   reconcile,
   writeIncidents,
 } from './incidents.js';
-import { loadContext, type LoadOptions } from './load.js';
+import { gitTopLevel, loadContext, type LoadOptions } from './load.js';
 import { buildScorecard, formatScorecard, parseSince } from './scorecard.js';
 import { DEFAULTS, type CheckHit, type InvariantCheck, type Layout, type SentinelContext } from './types.js';
 
@@ -32,15 +33,35 @@ export function collectHits(ctx: SentinelContext): Array<{ check: InvariantCheck
   return found;
 }
 
-export function scanOnce(layout: Layout, options: LoadOptions & { soakMs?: number; heartbeat?: boolean } = {}): ScanResult {
-  const ctx = loadContext(layout, options);
+export function scanOnce(
+  layout: Layout,
+  options: LoadOptions & { soakMs?: number; heartbeat?: boolean; since?: string; maxEventBytes?: number; episodePassGames?: number; episodePassMs?: number } = {},
+): ScanResult {
+  const now = options.now ?? Date.now();
+  const baselineMs = options.baselineMs !== undefined
+    ? options.baselineMs
+    : options.since
+      ? parseBaseline(options.since, now)
+      : undefined;
+  const ctx = loadContext(layout, { ...options, now, baselineMs });
   const store = incidentStore(layout.opsDir);
   const prior = loadIncidents(store);
   const hits = collectHits(ctx);
   const soakMs = options.soakMs ?? DEFAULTS.soakMs;
-  const events = reconcile(prior, hits, ctx.now, soakMs);
-  const incidents = foldIncidents([...readEvents(store.eventsPath), ...events]);
-  writeIncidents(store, events, incidents, soakMs, ctx.now);
+  const split = splitHits(hits, ctx.baselineMs);
+  const { events, incidents } = reconcile(prior, {
+    continuous: split.continuous,
+    groups: split.groups,
+    clock: {
+      now: ctx.now,
+      baselineMs: ctx.baselineMs,
+      passGames: options.episodePassGames ?? DEFAULTS.episodePassGames,
+      passMs: options.episodePassMs ?? DEFAULTS.episodePassMs,
+      games: clockGames(ctx.games),
+      runnerAlive: ctx.runs.some(run => !run.local && (ctx.processes.some(proc => proc.pid === run.pid) || ctx.pidAlive(run.pid))),
+    },
+  }, ctx.now, soakMs);
+  writeIncidents(store, events, incidents, soakMs, ctx.now, options.maxEventBytes ?? DEFAULTS.maxEventBytes);
   if (options.heartbeat) {
     const paths = heartbeatPaths(layout.opsDir);
     beat(paths, 'sentinel', 'ok', `open P0=${openP0(incidents)} P1=${countSeverity(incidents, 'P1')}`);
@@ -61,13 +82,40 @@ export function scanOnce(layout: Layout, options: LoadOptions & { soakMs?: numbe
   };
 }
 
+/** Absolute cutoff. A duration is measured back from `now`. An ISO timestamp is that instant. */
+export function parseBaseline(value: string, now: number): number {
+  const trimmed = value.trim();
+  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/.exec(trimmed);
+  if (match) {
+    const amount = Number(match[1]);
+    const unit = match[2];
+    const scale = unit === 'ms' ? 1 : unit === 's' ? 1000 : unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000;
+    return now - amount * scale;
+  }
+  const absolute = Date.parse(trimmed);
+  if (Number.isFinite(absolute)) return absolute;
+  throw new Error(`--since must look like 24h, 7d, 30m, or an ISO timestamp (got ${value})`);
+}
+
 export async function runSentinel(
   layout: Layout,
-  options: LoadOptions & { once?: boolean; json?: boolean; soakMs?: number; intervalMs?: number } = {},
+  options: LoadOptions & {
+    once?: boolean;
+    json?: boolean;
+    soakMs?: number;
+    intervalMs?: number;
+    since?: string;
+    scans?: number;
+    maxEventBytes?: number;
+    episodePassGames?: number;
+    episodePassMs?: number;
+  } = {},
 ): Promise<number> {
+  const scans = options.scans ?? (options.once ? 1 : Number.POSITIVE_INFINITY);
   let code = 0;
-  do {
-    const result = scanOnce(layout, { ...options, heartbeat: true, now: options.once ? options.now : Date.now() });
+  for (let index = 0; index < scans; index++) {
+    const now = options.now ?? Date.now();
+    const result = scanOnce(layout, { ...options, heartbeat: true, now });
     if (options.json) {
       const incidents = loadIncidents(incidentStore(layout.opsDir));
       console.log(JSON.stringify({
@@ -79,9 +127,9 @@ export async function runSentinel(
       console.log(result.line);
     }
     code = result.openP0 > 0 ? 1 : 0;
-    if (options.once) return code;
+    if (index + 1 >= scans) return code;
     await new Promise(resolve => setTimeout(resolve, options.intervalMs ?? DEFAULTS.intervalMs));
-  } while (!options.once);
+  }
   return code;
 }
 
@@ -101,14 +149,31 @@ export function layoutFromEnv(cwd = process.cwd(), env: NodeJS.ProcessEnv = proc
     : path.resolve(opsDir) === path.resolve(cwd, 'state', 'ops')
       ? path.join(cwd, 'state', 'graph.db')
       : path.join(opsDir, 'graph.db');
+  const ladderLogDir = env.LADDER_LOG_DIR ? path.resolve(cwd, env.LADDER_LOG_DIR) : path.join(cwd, 'logs', 'ladder');
   return {
     cwd,
+    liveRepoDir: liveCheckout(cwd, ladderLogDir, env),
     opsDir,
-    ladderLogDir: env.LADDER_LOG_DIR ? path.resolve(cwd, env.LADDER_LOG_DIR) : path.join(cwd, 'logs', 'ladder'),
+    ladderLogDir,
     liveRunsDir: env.LIVE_RUNS_DIR ? path.resolve(cwd, env.LIVE_RUNS_DIR) : path.join(cwd, 'live-runs'),
     dataDir: env.JEV_DATA_DIR ? path.resolve(cwd, env.JEV_DATA_DIR) : path.join(cwd, 'data'),
     graphDb,
   };
+}
+
+/** Explicit `LIVE_REPO_DIR`, otherwise the git root of `LADDER_LOG_DIR` when that root is not the ops cwd. */
+function liveCheckout(cwd: string, ladderLogDir: string, env: NodeJS.ProcessEnv): string | null {
+  const explicit = env.LIVE_REPO_DIR ? expandHome(env.LIVE_REPO_DIR, cwd) : null;
+  const found = explicit ?? gitTopLevel(ladderLogDir);
+  if (!found) return null;
+  if (path.resolve(found) === path.resolve(cwd)) return null;
+  return found;
+}
+
+function expandHome(value: string, cwd: string): string {
+  if (value === '~') return os.homedir();
+  if (value.startsWith('~/')) return path.join(os.homedir(), value.slice(2));
+  return path.resolve(cwd, value);
 }
 
 function heartbeatPaths(root: string): OpsPaths {

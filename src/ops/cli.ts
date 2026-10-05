@@ -12,7 +12,7 @@ import { statusReport } from './status.js';
 import { supervise } from './supervisor.js';
 import { startLocalServer } from './local-server.js';
 import { OPS_USAGE, opsFlag, opsNumber, opsValue } from './args.js';
-import { acknowledge, incidentStore, markFixing, recordRootCause } from './sentinel/incidents.js';
+import { acknowledge, acknowledgeMatching, incidentStore, linkIncident, markFixing, recordRootCause, resolveMatching } from './sentinel/incidents.js';
 import { layoutFromEnv, renderScorecard, runSentinel } from './sentinel/run.js';
 import { defaultGameLogs, runRepair } from './sentinel.js';
 
@@ -65,6 +65,35 @@ async function main(): Promise<void> {
     await runAnalyst(paths, { once: flag('once'), replay: opt('replay'), ladderDirs: extra.length ? extra : undefined });
     return;
   }
+  if (command === 'incidents') {
+    const action = process.argv[3];
+    const layout = layoutFromEnv();
+    const store = incidentStore(layout.opsDir);
+    if (action === 'link') {
+      const id = process.argv[4];
+      const ref = process.argv[5];
+      if (!id || !ref) throw new Error('usage: npm run ops -- incidents link <id> <ref>');
+      const error = linkIncident(store, id, ref);
+      if (error) throw new Error(error);
+      console.log(`linked ${id} ${ref}`);
+      return;
+    }
+    if (action === 'ack' || action === 'resolve') {
+      const reason = opt('reason') ?? '';
+      const beforeRaw = opt('before');
+      const sha = opt('sha');
+      const before = beforeRaw ? Date.parse(beforeRaw) : undefined;
+      if (beforeRaw && !Number.isFinite(before)) throw new Error(`--before ${beforeRaw} is not an ISO timestamp`);
+      const result = action === 'ack'
+        ? acknowledgeMatching(store, { before, sha }, reason)
+        : resolveMatching(store, { before, sha }, reason);
+      if (result.error) throw new Error(result.error);
+      console.log(`${action === 'ack' ? 'acknowledged' : 'resolved'} ${result.ids.length} incident${result.ids.length === 1 ? '' : 's'}`);
+      for (const id of result.ids) console.log(id);
+      return;
+    }
+    throw new Error('usage: npm run ops -- incidents ack|resolve --before <iso> --reason <text> | --sha <sha> | incidents link <id> <ref>');
+  }
   if (command === 'sentinel') {
     const layout = layoutFromEnv();
     const store = incidentStore(layout.opsDir);
@@ -86,6 +115,7 @@ async function main(): Promise<void> {
       json: flag('json'),
       soakMs: num('soak-ms'),
       intervalMs: num('interval-ms'),
+      since: opt('since') ?? process.env.SENTINEL_SINCE,
     });
     if (flag('once')) process.exitCode = code;
     return;
