@@ -33,62 +33,75 @@ export function readEvents(file: string): IncidentEvent[] {
 }
 
 export function foldIncidents(events: IncidentEvent[]): Incident[] {
+  return applyEvents([], events);
+}
+
+/** Fold `events` onto an existing snapshot. Does not re-read the event log. */
+export function applyEvents(prior: Incident[], events: IncidentEvent[]): Incident[] {
   const byId = new Map<string, Incident>();
-  for (const event of events) {
-    if (!event.incidentId || !event.checkId) continue;
-    const current = byId.get(event.incidentId);
-    if (event.type === 'opened') {
-      if (current) continue;
-      byId.set(event.incidentId, incidentFrom(event, event.ts));
-      continue;
-    }
-    if (!current) continue;
-    if (event.type === 'updated') {
-      current.lastSeen = event.ts;
-      current.count = event.count ?? current.count;
-      current.evidence = event.evidence ?? current.evidence;
-      current.detail = event.detail ?? current.detail;
-      current.severity = event.severity ?? current.severity;
-      current.title = event.title || current.title;
-      continue;
-    }
-    if (event.type === 'reopened') {
-      current.status = 'open';
-      current.lastSeen = event.ts;
-      current.count = event.count ?? current.count + 1;
-      current.evidence = event.evidence ?? current.evidence;
-      current.detail = event.detail ?? current.detail;
-      current.episodeOpenedAt = event.episodeOpenedAt ?? event.ts;
-      current.clearSince = null;
-      current.resolvedAt = null;
-      current.verifiedAt = null;
-      continue;
-    }
-    if (event.type === 'acknowledged' && current.status === 'open') {
-      current.status = 'acknowledged';
-      continue;
-    }
-    if (event.type === 'fixing' && (current.status === 'open' || current.status === 'acknowledged')) {
-      current.status = 'fixing';
-      current.pr = event.pr ?? current.pr;
-      continue;
-    }
-    if (event.type === 'resolved' && actionable(current.status)) {
-      current.status = 'resolved';
-      current.clearSince = event.clearSince ?? event.ts;
-      current.resolvedAt = event.ts;
-      continue;
-    }
-    if (event.type === 'verified' && current.status === 'resolved') {
-      current.status = 'verified';
-      current.verifiedAt = event.ts;
-      continue;
-    }
-    if (event.type === 'root-cause') {
-      current.rootCause = event.rootCause ?? current.rootCause;
-    }
-  }
+  for (const incident of prior) byId.set(incident.id, copyIncident(incident));
+  for (const event of events) applyEvent(byId, event);
   return [...byId.values()].sort(compareIncidents);
+}
+
+function copyIncident(incident: Incident): Incident {
+  const evidence = Array.isArray(incident.evidence) ? incident.evidence.map(item => ({ ...item })) : [];
+  return { ...incident, evidence };
+}
+
+function applyEvent(byId: Map<string, Incident>, event: IncidentEvent): void {
+  if (!event.incidentId || !event.checkId) return;
+  const current = byId.get(event.incidentId);
+  if (event.type === 'opened') {
+    if (current) return;
+    byId.set(event.incidentId, incidentFrom(event, event.ts));
+    return;
+  }
+  if (!current) return;
+  if (event.type === 'updated') {
+    current.lastSeen = event.ts;
+    current.count = event.count ?? current.count;
+    current.evidence = event.evidence ?? current.evidence;
+    current.detail = event.detail ?? current.detail;
+    current.severity = event.severity ?? current.severity;
+    current.title = event.title || current.title;
+    return;
+  }
+  if (event.type === 'reopened') {
+    current.status = 'open';
+    current.lastSeen = event.ts;
+    current.count = event.count ?? current.count + 1;
+    current.evidence = event.evidence ?? current.evidence;
+    current.detail = event.detail ?? current.detail;
+    current.episodeOpenedAt = event.episodeOpenedAt ?? event.ts;
+    current.clearSince = null;
+    current.resolvedAt = null;
+    current.verifiedAt = null;
+    return;
+  }
+  if (event.type === 'acknowledged' && current.status === 'open') {
+    current.status = 'acknowledged';
+    return;
+  }
+  if (event.type === 'fixing' && (current.status === 'open' || current.status === 'acknowledged')) {
+    current.status = 'fixing';
+    current.pr = event.pr ?? current.pr;
+    return;
+  }
+  if (event.type === 'resolved' && actionable(current.status)) {
+    current.status = 'resolved';
+    current.clearSince = event.clearSince ?? event.ts;
+    current.resolvedAt = event.ts;
+    return;
+  }
+  if (event.type === 'verified' && current.status === 'resolved') {
+    current.status = 'verified';
+    current.verifiedAt = event.ts;
+    return;
+  }
+  if (event.type === 'root-cause') {
+    current.rootCause = event.rootCause ?? current.rootCause;
+  }
 }
 
 export function reconcile(
@@ -173,7 +186,37 @@ export function writeIncidents(store: IncidentStore, events: IncidentEvent[], in
 }
 
 export function loadIncidents(store: IncidentStore): Incident[] {
+  const snapshot = readIncidentSnapshot(store.statePath);
+  if (snapshot) return snapshot;
   return foldIncidents(readEvents(store.eventsPath));
+}
+
+function readIncidentSnapshot(file: string): Incident[] | null {
+  if (!fs.existsSync(file)) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const incidents = (parsed as { incidents?: unknown }).incidents;
+  if (!Array.isArray(incidents)) return null;
+  const out: Incident[] = [];
+  for (const item of incidents) {
+    if (!isSnapshotIncident(item)) return null;
+    out.push(item);
+  }
+  return out.sort(compareIncidents);
+}
+
+function isSnapshotIncident(value: unknown): value is Incident {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const row = value as Incident;
+  return typeof row.id === 'string'
+    && typeof row.checkId === 'string'
+    && (row.severity === 'P0' || row.severity === 'P1' || row.severity === 'P2' || row.severity === 'P3')
+    && typeof row.status === 'string';
 }
 
 export function acknowledge(store: IncidentStore, incidentId: string, now = Date.now()): string | null {
@@ -229,7 +272,7 @@ function transition(
     rootCause: next.rootCause ?? incident.rootCause,
     episodeOpenedAt: incident.episodeOpenedAt,
   };
-  const folded = foldIncidents([...readEvents(store.eventsPath), event]);
+  const folded = applyEvents(incidents, [event]);
   writeIncidents(store, [event], folded, 0, now);
   return null;
 }

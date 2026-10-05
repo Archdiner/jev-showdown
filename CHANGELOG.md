@@ -1,5 +1,11 @@
 # Changelog
 
+## Sentinel scans stay bounded
+
+`npm run ops -- sentinel` died once a single JSONL log passed about 123,000 lines. `collectRows` did `rows.push(...readLogFile(file))`, and that spread throws `RangeError: Maximum call stack size exceeded` (measured on Node 22.14.0: 123,120 lines load, 123,121 throws, at `load.ts:348`). Each scan also parsed every ops JSONL from the start, including the sentinel's own `incidents.jsonl`.
+
+A scan now keeps the lookback tail of each input log (at most 8MB), skips `incidents.jsonl`, and reads current incidents from `incidents.json`. A thrown scan writes an error heartbeat and exits nonzero, so `ops status` shows sentinel as `error`.
+
 ## Closed loop reads ladder losses and finishes SPRT
 
 A live loss was reviewed from the per-battle JSONL as if it were a self-play `>start` log. Those files are turn and result events. The result row does not embed the protocol, and a short `log` that already contains `|` hid the replay. With nothing to classify, every loss became critical turn 0, class `other`, which is the one variant `eval-term: preservation`. Mining then skipped with "no >start input and no |request|". The analyst now reads the turn choice and the request object stored on that row, and appends a `|request|` line when the replay does not already have one. New ladder turns store that request object. The champion policy is unchanged.

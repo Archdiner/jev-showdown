@@ -515,11 +515,11 @@ When `state/graph.db` exists (`GRAPH_DB` overrides it), `/api/status` uses the s
 
 Cloud agents are not loaded yet. Expected file: `state/cloud-agents.json` with `version`, `updatedAt`, and `agents[]` of `id`, `name`, `status`, `branch`, `pr`, `prUrl`.
 
-The same page has an Incidents panel and a Scorecard panel. Incidents come from `state/ops/incidents.json`, which `npm run ops -- sentinel` folds out of the append-only `state/ops/incidents.jsonl`. The scorecard is the same text as `npm run ops -- scorecard`.
+The same page has an Incidents panel and a Scorecard panel. Incidents come from `state/ops/incidents.json`, which the sentinel rewrites each scan. `incidents.jsonl` is the append-only event history and is not loaded back in as scan input. The scorecard is the same text as `npm run ops -- scorecard`.
 
 ## Reliability sentinel
 
-`npm run ops -- sentinel` is a fifth long-running process next to factory, gatekeeper, live, and analyst. It does not change the move. Every 60 seconds it reads the ladder logs, the ops files, the data file, and the process list, and it records each broken invariant as an incident. The process list is `/proc` on Linux. When `/proc` is missing (macOS), the same list comes from `ps -axww`. If that listing fails, checks that need live pids stay quiet instead of treating every runner as dead. The undrained-exit check reads runner logs and `summary.json` and does not need a process list.
+`npm run ops -- sentinel` is a fifth long-running process next to factory, gatekeeper, live, and analyst. It does not change the move. Every 60 seconds it reads the ladder logs, the ops files, the data file, and the process list, and it records each broken invariant as an incident. Each JSONL input is the lookback tail (at most 8MB from the end of the file), not the whole log. `incidents.jsonl` is skipped. The process list is `/proc` on Linux. When `/proc` is missing (macOS), the same list comes from `ps -axww`. If that listing fails, checks that need live pids stay quiet instead of treating every runner as dead. The undrained-exit check reads runner logs and `summary.json` and does not need a process list. A scan that throws writes an error heartbeat, prints `sentinel crashed:`, and exits nonzero. `npm run ops -- status` and the dashboard then show sentinel as `error`.
 
 ```bash
 npm run ops -- sentinel              # loop every 60s

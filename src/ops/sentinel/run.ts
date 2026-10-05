@@ -3,8 +3,8 @@ import { beat } from '../heartbeat.js';
 import type { OpsPaths } from '../paths.js';
 import { CHECKS } from './checks.js';
 import {
+  applyEvents,
   countSeverity,
-  foldIncidents,
   incidentStore,
   loadIncidents,
   openP0,
@@ -39,7 +39,7 @@ export function scanOnce(layout: Layout, options: LoadOptions & { soakMs?: numbe
   const hits = collectHits(ctx);
   const soakMs = options.soakMs ?? DEFAULTS.soakMs;
   const events = reconcile(prior, hits, ctx.now, soakMs);
-  const incidents = foldIncidents([...readEvents(store.eventsPath), ...events]);
+  const incidents = applyEvents(prior, events);
   writeIncidents(store, events, incidents, soakMs, ctx.now);
   if (options.heartbeat) {
     const paths = heartbeatPaths(layout.opsDir);
@@ -67,7 +67,13 @@ export async function runSentinel(
 ): Promise<number> {
   let code = 0;
   do {
-    const result = scanOnce(layout, { ...options, heartbeat: true, now: options.once ? options.now : Date.now() });
+    let result: ScanResult;
+    try {
+      result = scanOnce(layout, { ...options, heartbeat: true, now: options.once ? options.now : Date.now() });
+    } catch (err) {
+      noteSentinelCrash(layout, err);
+      throw err;
+    }
     if (options.json) {
       const incidents = loadIncidents(incidentStore(layout.opsDir));
       console.log(JSON.stringify({
@@ -92,6 +98,23 @@ export function renderScorecard(layout: Layout, options: LoadOptions & { since?:
   const sinceMs = parseSince(options.since, DEFAULTS.lookbackMs, now);
   const card = buildScorecard(ctx, loadIncidents(store), readEvents(store.eventsPath), sinceMs);
   return formatScorecard(card, options.markdown ? 'md' : 'text');
+}
+
+/** One line for the error heartbeat and stderr. Stack traces stay on the thrown error. */
+export function sentinelCrashDetail(err: unknown): string {
+  const text = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  const oneLine = text.replace(/\s+/g, ' ').trim();
+  return oneLine.length > 400 ? `${oneLine.slice(0, 397)}...` : oneLine;
+}
+
+function noteSentinelCrash(layout: Layout, err: unknown): void {
+  const detail = sentinelCrashDetail(err);
+  try {
+    beat(heartbeatPaths(layout.opsDir), 'sentinel', 'error', detail);
+  } catch {
+    // The stderr line is the record when the ops directory cannot be written.
+  }
+  console.error(`sentinel crashed: ${detail}`);
 }
 
 export function layoutFromEnv(cwd = process.cwd(), env: NodeJS.ProcessEnv = process.env): Layout {
