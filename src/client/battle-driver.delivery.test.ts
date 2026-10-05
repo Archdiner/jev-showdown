@@ -35,7 +35,10 @@ function request(rqid = 2) {
   });
 }
 
-function harness(choose: (roomId?: string, choice?: string) => boolean) {
+function harness(
+  choose: (roomId?: string, choice?: string) => boolean,
+  options: { action?: Action; choiceWatchMs?: number } = {},
+) {
   const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-delivery-'));
   let decisions = 0;
   const sent: Array<{ roomId: string; choice: string }> = [];
@@ -61,12 +64,13 @@ function harness(choose: (roomId?: string, choice?: string) => boolean) {
       async stop() { /* unused */ },
       async decide() {
         decisions += 1;
-        return { action: MOVE, score: 1, timeMs: 1, fallback: false };
+        return { action: options.action ?? MOVE, score: 1, timeMs: 1, fallback: false };
       },
     } as unknown as DecisionClient,
     logDir,
     decisionTimeoutMs: 1000,
     deliveryRetryMs: 5,
+    choiceWatchMs: options.choiceWatchMs,
     settleMs: 0,
   });
   return { driver, socket, logDir, sent, decisions: () => decisions };
@@ -194,6 +198,58 @@ describe('ladder delivery and timers', () => {
       expect.objectContaining({ ambiguous: false, attribution: 'matched', battleId: second }),
     ]);
     expect(driver.roomCount()).toBe(0);
+    await driver.stop();
+  });
+
+  it('resends a turn-1 choice when no request or turn follows the send', async () => {
+    const room = 'battle-gen9randombattle-2692976066';
+    const move: Action = { type: 'move', moveIndex: 2 };
+    const { driver, socket, logDir, sent } = harness(() => true, { action: move, choiceWatchMs: 50 });
+    const done = ended(driver);
+    const body = JSON.stringify({
+      rqid: 3,
+      side: {
+        id: 'p1',
+        pokemon: [{ ident: 'p1: A', details: 'A', condition: '100/100', active: true }],
+      },
+      active: [{
+        moves: [
+          { move: 'Tackle', id: 'tackle', pp: 35, maxpp: 35, target: 'normal', disabled: false },
+          { move: 'Growl', id: 'growl', pp: 40, maxpp: 40, target: 'normal', disabled: false },
+        ],
+      }],
+    });
+    socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
+    socket.emit('line', room, '|player|p2|Rival|2|1400');
+    socket.emit('line', room, `|request|${body}`);
+    await new Promise(resolve => setTimeout(resolve, 45));
+    expect(sent).toEqual([{ roomId: room, choice: 'move 2|3' }]);
+    socket.emit('line', room, '|turn|1');
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(sent).toEqual([
+      { roomId: room, choice: 'move 2|3' },
+      { roomId: room, choice: 'move 2|3' },
+    ]);
+    socket.emit('line', room, '|win|BotAlpha');
+    await done;
+    const deliveries = readLog(logDir, room).filter(event => event.type === 'choice-delivery');
+    expect(deliveries[0]).toMatchObject({
+      sent: true,
+      cause: 'sent',
+      rqid: 3,
+      choice: 'move 2|3',
+      intendedRoomId: room,
+      sentRoomId: room,
+    });
+    expect(deliveries[1]).toMatchObject({
+      sent: true,
+      cause: 'unconfirmed',
+      rqid: 3,
+      choice: 'move 2|3',
+      retry: 1,
+      intendedRoomId: room,
+      sentRoomId: room,
+    });
     await driver.stop();
   });
 

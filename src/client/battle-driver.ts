@@ -76,6 +76,8 @@ interface RoomState {
   requestTimer?: NodeJS.Timeout;
   finalizeTimer?: NodeJS.Timeout;
   deliveryTimer?: NodeJS.Timeout;
+  /** Fires when a sent choice gets no request and no later turn. */
+  choiceWatchTimer?: NodeJS.Timeout;
 }
 
 export interface BattleDriverOptions {
@@ -95,13 +97,20 @@ export interface BattleDriverOptions {
   localServer?: boolean;
   /** Delay between choice-delivery retries. Tests use a few milliseconds. */
   deliveryRetryMs?: number;
+  /**
+   * After `/choose` returns true, resend if this many milliseconds pass with
+   * no new `|request|` and no later `|turn|`. Tests use a few milliseconds.
+   */
+  choiceWatchMs?: number;
   /** How long to wait for a replay popup. Tests use 0. */
   settleMs?: number;
 }
 
 const DELIVERY_ATTEMPTS = 3;
-/** Resends of one choice while the turn clock ticks and the turn does not advance. */
-const WATCHDOG_RESENDS = 8;
+/** Silence after a sent choice before the same choice is sent again. */
+const CHOICE_WATCH_MS = 8000;
+/** Enough 8s resends to cover a 150s turn that the server never acknowledges. */
+const WATCHDOG_RESENDS = 20;
 
 /**
  * One user's battle loop: protocol state, request reconciliation,
@@ -144,6 +153,7 @@ export class BattleDriver extends EventEmitter {
       if (room.requestTimer) clearTimeout(room.requestTimer);
       if (room.finalizeTimer) clearTimeout(room.finalizeTimer);
       if (room.deliveryTimer) clearTimeout(room.deliveryTimer);
+      this.clearChoiceWatch(room);
       if (!room.finalized) {
         if (!room.ended) room.disconnected = true;
         await this.finalize(room);
@@ -180,7 +190,7 @@ export class BattleDriver extends EventEmitter {
 
     if (line.startsWith('|turn|')) {
       room.turns = Number(line.slice('|turn|'.length)) || room.turns;
-      if (room.unconfirmed && room.turns !== room.unconfirmed.turn) room.unconfirmed = null;
+      if (this.turnSettledChoice(room)) this.dropUnconfirmed(room);
     }
 
     if (line.startsWith('|inactive|') || line.startsWith('|inactiveoff|')) {
@@ -236,7 +246,7 @@ export class BattleDriver extends EventEmitter {
     }
 
     if (line.startsWith('|request|')) {
-      room.unconfirmed = null;
+      this.dropUnconfirmed(room);
       room.secondsLeft = null;
       const raw = line.slice('|request|'.length);
       if (!raw) return;
@@ -526,10 +536,13 @@ export class BattleDriver extends EventEmitter {
     if (this.stopped || room.finalized || room.ended) return;
     if (!this.rqidCurrent(room, rqid)) {
       room.pendingDelivery = null;
+      this.dropUnconfirmed(room);
       room.log.write({
         type: 'choice-delivery',
         kind: 'choice-delivery',
         battleId: room.roomId,
+        intendedRoomId: room.roomId,
+        sentRoomId: null,
         rqid,
         choice,
         sent: false,
@@ -540,23 +553,24 @@ export class BattleDriver extends EventEmitter {
       });
       return;
     }
+    const intendedRoomId = room.roomId;
     if (!this.options.client.isReady()) {
-      this.failDelivery(room, choice, rqid, action, preview, attempt, 'socket-closed', null, source, watchdogResends);
+      this.failDelivery(room, choice, rqid, action, preview, attempt, 'socket-closed', null, source, watchdogResends, null);
       return;
     }
     let sent = false;
     try {
-      sent = this.options.client.choose(room.roomId, choice);
+      sent = this.options.client.choose(intendedRoomId, choice);
     } catch (err) {
       if (this.stopped) return;
       room.crashes += 1;
       const message = `send failed: ${safeError(err)}`;
       room.log.write({ type: 'crash', kind: 'crash', battleId: room.roomId, message });
-      this.failDelivery(room, choice, rqid, action, preview, attempt, 'send-threw', message, source, watchdogResends);
+      this.failDelivery(room, choice, rqid, action, preview, attempt, 'send-threw', message, source, watchdogResends, intendedRoomId);
       return;
     }
     if (!sent) {
-      this.failDelivery(room, choice, rqid, action, preview, attempt, 'socket-closed', null, source, watchdogResends);
+      this.failDelivery(room, choice, rqid, action, preview, attempt, 'socket-closed', null, source, watchdogResends, intendedRoomId);
       return;
     }
     if (rqid !== null) room.answered.add(rqid);
@@ -569,10 +583,13 @@ export class BattleDriver extends EventEmitter {
       turn: room.turns,
       resends: source === 'watchdog' ? watchdogResends : 0,
     };
+    this.armChoiceWatch(room);
     room.log.write({
       type: 'choice-delivery',
       kind: 'choice-delivery',
       battleId: room.roomId,
+      intendedRoomId,
+      sentRoomId: intendedRoomId,
       rqid,
       choice,
       sent: true,
@@ -597,6 +614,7 @@ export class BattleDriver extends EventEmitter {
     serverLine: string | null,
     source: 'choose' | 'watchdog' = 'choose',
     watchdogResends = 0,
+    sentRoomId: string | null = null,
   ): void {
     const exhausted = attempt + 1 >= DELIVERY_ATTEMPTS;
     room.choiceDeliveryFailures += 1;
@@ -604,6 +622,8 @@ export class BattleDriver extends EventEmitter {
       type: 'choice-delivery',
       kind: 'choice-delivery',
       battleId: room.roomId,
+      intendedRoomId: room.roomId,
+      sentRoomId,
       rqid,
       choice,
       sent: false,
@@ -625,15 +645,15 @@ export class BattleDriver extends EventEmitter {
   }
 
   /**
-   * `/choose` returned true and the turn has not moved. The next clock line
-   * for us means the server still has not applied that choice, so send the
-   * same string, including the same rqid, to this room again.
+   * `/choose` returned true and nothing from the server has shown the choice
+   * was applied. Send the same string, including the same rqid, to this room
+   * again. Turn 1 is included: a choice sent before `|turn|2` is still pending.
    */
   private resendUnconfirmed(room: RoomState): void {
     const pending = room.unconfirmed;
     if (!pending || room.ended || room.finalized || this.stopped) return;
-    if (room.turns !== pending.turn) {
-      room.unconfirmed = null;
+    if (this.turnSettledChoice(room)) {
+      this.dropUnconfirmed(room);
       return;
     }
     if (room.pendingDelivery !== null || room.deliveryTimer) return;
@@ -641,6 +661,42 @@ export class BattleDriver extends EventEmitter {
     const resends = pending.resends + 1;
     pending.resends = resends;
     this.deliver(room, pending.choice, pending.rqid, room.lastChoice, false, 0, 'watchdog', resends);
+  }
+
+  /**
+   * `|turn|N` confirms a choice only once the battle has moved past it.
+   * A move sent before `|turn|1` is still turn 1: that line starts the turn,
+   * it does not mean the server applied the move. Team preview is the
+   * exception, because `|turn|1` is what shows the preview choice landed.
+   */
+  private turnSettledChoice(room: RoomState): boolean {
+    const pending = room.unconfirmed;
+    if (!pending) return false;
+    if (pending.choice.startsWith('team ')) return room.turns !== pending.turn;
+    if (pending.turn < 1) return room.turns > 1;
+    return room.turns !== pending.turn;
+  }
+
+  /** A new `|request|` or a later `|turn|` means this choice is no longer pending. */
+  private dropUnconfirmed(room: RoomState): void {
+    room.unconfirmed = null;
+    this.clearChoiceWatch(room);
+  }
+
+  private armChoiceWatch(room: RoomState): void {
+    this.clearChoiceWatch(room);
+    if (!room.unconfirmed || room.ended || room.finalized || this.stopped) return;
+    const delay = this.options.choiceWatchMs ?? CHOICE_WATCH_MS;
+    room.choiceWatchTimer = setTimeout(() => {
+      room.choiceWatchTimer = undefined;
+      this.resendUnconfirmed(room);
+    }, delay);
+  }
+
+  private clearChoiceWatch(room: RoomState): void {
+    if (!room.choiceWatchTimer) return;
+    clearTimeout(room.choiceWatchTimer);
+    room.choiceWatchTimer = undefined;
   }
 
   private rqidCurrent(room: RoomState, rqid: number | null): boolean {
@@ -660,6 +716,8 @@ export class BattleDriver extends EventEmitter {
         type: 'choice-delivery',
         kind: 'choice-delivery',
         battleId: room.roomId,
+        intendedRoomId: room.roomId,
+        sentRoomId: null,
         rqid,
         choice: room.lastChoiceText,
         sent: false,
@@ -687,6 +745,8 @@ export class BattleDriver extends EventEmitter {
       type: 'choice-delivery',
       kind: 'choice-delivery',
       battleId: room.roomId,
+      intendedRoomId: room.roomId,
+      sentRoomId: null,
       rqid,
       choice: room.lastChoiceText,
       sent: false,
@@ -714,6 +774,8 @@ export class BattleDriver extends EventEmitter {
       type: 'choice-delivery',
       kind: 'choice-delivery',
       battleId: room.roomId,
+      intendedRoomId: room.roomId,
+      sentRoomId: null,
       rqid,
       choice: room.lastChoiceText,
       sent: false,
@@ -729,6 +791,7 @@ export class BattleDriver extends EventEmitter {
     room.ended = true;
     if (room.requestTimer) clearTimeout(room.requestTimer);
     if (room.deliveryTimer) clearTimeout(room.deliveryTimer);
+    this.dropUnconfirmed(room);
     if (line.startsWith('|win|')) room.winner = line.slice('|win|'.length).trim();
     try {
       this.options.client.saveReplay(room.roomId);
