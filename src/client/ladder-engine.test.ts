@@ -96,12 +96,14 @@ describe('ladder engine factory', () => {
     const steered = legal[legal.length - 1];
     const steeredChoice = steered.type === 'switch' ? `switch ${steered.switchIndex}` : `move ${steered.moveIndex}`;
     const fromConfig = await chooseLive('search', position, legal, {
-      decide: async () => ({ choice: steeredChoice, scores: [{ choice: steeredChoice, score: 3 }] }),
+      player: {
+        decide: async () => ({ choice: steeredChoice, scores: [{ choice: steeredChoice, score: 3 }] }),
+      },
     });
     expect(fromConfig.action).toEqual(steered);
     expect(fromConfig.score).toBe(3);
     await expect(chooseLive('search', position, legal, {
-      decide: async () => ({ choice: 'move 99' }),
+      player: { decide: async () => ({ choice: 'move 99' }) },
     })).rejects.toThrow(/not legal/);
   });
 

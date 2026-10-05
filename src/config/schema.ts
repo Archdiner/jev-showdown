@@ -61,6 +61,11 @@ export const SearchParamsSchema = z.object({
   variancePenalty: z.number().nonnegative().default(0),
   opponentModel: z.enum(['max-damage', 'uniform']).default('max-damage'),
   evalMode: z.enum(['hp', 'full']).default('hp'),
+  /**
+   * Fill unrevealed foe sets from randbats on the hidden-info path.
+   * Absent stays off, so the champion hash does not change.
+   */
+  foePriors: z.boolean().optional(),
 }).strict();
 export type SearchParams = z.infer<typeof SearchParamsSchema>;
 

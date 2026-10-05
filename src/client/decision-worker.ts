@@ -65,7 +65,20 @@ async function decide(message: DecideRequest): Promise<void> {
   const started = Date.now();
   const routed = playerFor(message.battleId);
   try {
-    const picked = await chooseLive(routed.engine, message.position, message.legal, routed.player);
+    // Priors stay off unless the ladder flag set useLoadedPriors, or this
+    // battle's config sets search.params.foePriors. A tight budget still skips
+    // them. The labeled champion then searches the battle chooseLive built.
+    const fromConfig = routed.player?.config.search.params.foePriors === true;
+    const position = message.position
+      ? {
+          ...message.position,
+          useLoadedPriors: message.position.useLoadedPriors === true || fromConfig,
+        }
+      : undefined;
+    const picked = await chooseLive(routed.engine, position, message.legal, {
+      budgetMs: message.searchTimeMs,
+      player: routed.player,
+    });
     const known = message.legal.some(candidate => sameAction(candidate, picked.action));
     if (!known) {
       send({

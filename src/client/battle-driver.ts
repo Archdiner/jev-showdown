@@ -140,6 +140,8 @@ export interface BattleDriverOptions {
   choiceWatchMs?: number;
   /** How long to wait for a replay popup. Tests use 0. */
   settleMs?: number;
+  /** Fill hidden foe sets from randbats. Off unless the ladder run opts in. */
+  foePriors?: boolean;
   /**
    * Config for this battle. Absent keeps the process config.
    * The same driver, timer, and choice watchdog serve every config.
@@ -684,7 +686,10 @@ export class BattleDriver extends EventEmitter {
   }
 
   private livePosition(room: RoomState, request: any): LivePosition {
-    return livePositionFromClient(room.battle, request, room.ourSide === 'p2' ? 'p2' : 'p1');
+    return {
+      ...livePositionFromClient(room.battle, request, room.ourSide === 'p2' ? 'p2' : 'p1'),
+      useLoadedPriors: this.options.foePriors === true,
+    };
   }
 
   private reconcile(room: RoomState, request: any): StateMismatch[] {

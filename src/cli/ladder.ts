@@ -84,6 +84,7 @@ interface LadderOptions {
   ab: string[];
   check: boolean;
   help: boolean;
+  foePriors: boolean;
 }
 
 function parseArgs(argv: string[]): LadderOptions {
@@ -116,6 +117,7 @@ function parseArgs(argv: string[]): LadderOptions {
     ab: [],
     check: false,
     help: false,
+    foePriors: false,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -156,6 +158,7 @@ function parseArgs(argv: string[]): LadderOptions {
     else if (arg === '--rollback') opts.rollback = true;
     else if (arg === '--ab') opts.ab.push(next());
     else if (arg === '--check') opts.check = true;
+    else if (arg === '--foe-priors') opts.foePriors = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -205,6 +208,7 @@ Real ladder, from a residential or university network (this process never stores
   SHOWDOWN_USERNAME=bot SHOWDOWN_PASSWORD=secret npm run ladder -- --games 10 --format gen9randombattle --engine max-damage --concurrency 1
 
 Engines: max-damage (default; @smogon/calc maxDamageChoice), search (exact 1-ply, the gate champion; exact is an alias), or grok (search + LLM prior, concurrency 1).
+--foe-priors fills unrevealed foe moves, items, abilities, and teammates from randbats. The default search does not.
 --labeled-champion loads the gatekeeper's active champion at batch start and plays that file for every game in the batch. It stays off unless you pass it.
 --rollback plays the builtin policy for --engine even when a champion label is valid.
 A missing label, a file whose hash no longer matches the label, or two active champions rolls back to that builtin policy and logs the reason.
@@ -307,6 +311,7 @@ async function makePlayer(input: {
     onBattleFault: input.route ? (battleId, fault) => input.route!.noteFault(battleId, fault) : undefined,
     onGame: input.route ? record => input.route!.noteGame(record) : undefined,
     localServer: input.local,
+    foePriors: input.opts.foePriors,
     settleMs: input.local ? 400 : 8000,
   });
   const queue = new LadderQueue(client, input.formatId, input.opts.concurrency, message => {

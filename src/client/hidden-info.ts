@@ -5,6 +5,7 @@ import { Battle as SimBattle } from '@pkmn/sim';
 import type { SideId } from '../engine/exact/battle-utils.js';
 import { buildDecisionBattle } from './decision-battle.js';
 import { livePositionFromClient, type ViewerSide } from './live-position.js';
+import type { RandbatsStats } from '../types/index.js';
 
 const gens = new Generations(Dex);
 
@@ -77,12 +78,26 @@ function replayClient(log: readonly string[], side: ViewerSide, request: unknown
  * p1 of the returned battle is the deciding side. `move N` and `switch N`
  * match that side's request on the real battle.
  */
-export function ladderDecisionBattle(battle: SimBattle, side: SideId): SimBattle | null {
+export interface LadderViewOptions {
+  /** Fill unrevealed foe slots from the loaded randbats table. */
+  useLoadedPriors?: boolean;
+  /** Explicit table. Used by tests and by a caller that already loaded stats. */
+  speciesStats?: RandbatsStats;
+}
+
+export function ladderDecisionBattle(
+  battle: SimBattle,
+  side: SideId,
+  options?: LadderViewOptions,
+): SimBattle | null {
   const request = battle.getSide(side).activeRequest;
   if (!request || request.wait || request.teamPreview) return null;
   const client = replayClient(battle.log, side, request);
   try {
-    return buildDecisionBattle(livePositionFromClient(client, request, side));
+    const position = livePositionFromClient(client, request, side);
+    if (options?.speciesStats) position.speciesStats = options.speciesStats;
+    if (options?.useLoadedPriors) position.useLoadedPriors = true;
+    return buildDecisionBattle(position);
   } catch {
     return null;
   } finally {

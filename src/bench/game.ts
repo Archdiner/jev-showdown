@@ -246,7 +246,9 @@ async function chooseSeen(
   if (legal.length === 1 && legal[0] === 'default') {
     return { choice: 'default', ms: 0, configId: player.id };
   }
-  const viewed = ladderDecisionBattle(battle, side);
+  const viewed = ladderDecisionBattle(battle, side, {
+    useLoadedPriors: player.bot?.config.search.params.foePriors === true,
+  });
   if (!viewed) return { choice: legal[0] || 'default', ms: 0, configId: player.id, viewMiss: true };
   return choose(player, viewed, 'p1', rng, gameId, seed);
 }

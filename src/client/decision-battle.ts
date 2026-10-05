@@ -1,7 +1,12 @@
 import { Battle, Dex, PRNG, PokemonSet } from '@pkmn/sim';
-import { Action } from '../types/index.js';
+import { Action, RandbatsStats } from '../types/index.js';
 import { decide } from '../engine/exact/policies.js';
-import { legalChoices } from '../engine/exact/battle-utils.js';
+import { legalChoices, type SideId } from '../engine/exact/battle-utils.js';
+import {
+  completeFoeTeam,
+  FOE_PRIOR_MIN_BUDGET_MS,
+  loadedSpeciesStats,
+} from '../engine/foe-prior.js';
 import { EngineName } from './engines.js';
 import { sameAction } from './choice.js';
 import { ladderPolicy } from './ladder-engine.js';
@@ -26,6 +31,10 @@ export interface FoeMon {
   moves: string[];
   boosts?: StatBoosts;
   fainted?: boolean;
+  /** Revealed tera, used only to narrow the role posterior. */
+  teraType?: string;
+  /** Teammate that has not switched in. The set is the species prior. */
+  placeholder?: boolean;
 }
 
 /**
@@ -38,6 +47,22 @@ export interface LivePosition {
   foeBench: FoeMon[];
   ourBoosts?: StatBoosts;
   weather?: string;
+  /**
+   * Randbats role table. When set, unrevealed moves, items, and abilities
+   * are filled from it and unseen teammates become placeholders.
+   */
+  speciesStats?: RandbatsStats;
+  /** Use the table the decision worker loaded, instead of `speciesStats`. */
+  useLoadedPriors?: boolean;
+  /** Keep the revealed-only foe even when a table is available. */
+  modelHidden?: boolean;
+}
+
+export interface DecisionBuildOptions {
+  /** Skip the prior when the caller has less than {@link FOE_PRIOR_MIN_BUDGET_MS}. */
+  budgetMs?: number;
+  /** Labeled champion. When set, it chooses on the battle this function built. */
+  player?: LiveConfigPlayer | null;
 }
 
 const WEATHER: Record<string, string> = {
@@ -159,6 +184,31 @@ function knownFoes(position: LivePosition): FoeMon[] {
   return [position.foeActive, ...position.foeBench].filter((mon): mon is FoeMon => !!mon?.species);
 }
 
+function priorsEnabled(position: LivePosition, budgetMs?: number): boolean {
+  if (position.modelHidden === false) return false;
+  if (budgetMs != null && budgetMs < FOE_PRIOR_MIN_BUDGET_MS) return false;
+  return position.speciesStats != null || position.useLoadedPriors === true;
+}
+
+function speciesTable(position: LivePosition): RandbatsStats | null {
+  if (position.speciesStats) return position.speciesStats;
+  if (position.useLoadedPriors) return loadedSpeciesStats();
+  return null;
+}
+
+/** Revealed foes, with hidden sets filled in when a prior table is available. */
+function modeledFoes(position: LivePosition, budgetMs?: number): FoeMon[] {
+  const known = knownFoes(position);
+  if (!priorsEnabled(position, budgetMs)) return known;
+  const stats = speciesTable(position);
+  if (!stats) return known;
+  try {
+    return completeFoeTeam(known, stats) as FoeMon[];
+  } catch {
+    return known;
+  }
+}
+
 function foeSets(foes: FoeMon[]): { sets: PokemonSet[]; kept: FoeMon[] } {
   const sets: PokemonSet[] = [];
   const kept: FoeMon[] = [];
@@ -183,11 +233,11 @@ function foeSets(foes: FoeMon[]): { sets: PokemonSet[]; kept: FoeMon[] } {
  * A @pkmn/sim battle whose `move N` / `switch N` indexes match the live request.
  * Slot 0 is the active pokemon. That is the same indexing the server uses.
  */
-export function buildDecisionBattle(position: LivePosition): Battle | null {
+export function buildDecisionBattle(position: LivePosition, options?: DecisionBuildOptions): Battle | null {
   const request = position.request;
   if (!request || request.wait || request.teamPreview) return null;
   const ours = ourSets(request);
-  const foe = foeSets(knownFoes(position));
+  const foe = foeSets(modeledFoes(position, options?.budgetMs));
   if (!ours || foe.sets.length === 0) return null;
 
   try {
@@ -267,22 +317,190 @@ export interface LiveConfigPlayer {
  * `max-damage` runs maxDamageChoice. A labeled champion, when passed,
  * chooses through that bot instead. The action is one of `legal`.
  */
+async function chooseFrom(
+  engine: EngineName,
+  position: LivePosition,
+  legal: Action[],
+  options?: DecisionBuildOptions,
+): Promise<{ action: Action; score: number | null } | null> {
+  const battle = buildDecisionBattle(position, options);
+  if (!battle) return null;
+  const decision = options?.player
+    ? await options.player.decide({ battle, side: 'p1' })
+    : await decide(ladderPolicy(engine), battle, 'p1', new PRNG([1, 2, 3, 4] as any));
+  const action = actionFromChoice(decision.choice);
+  if (!action || !legal.some(candidate => sameAction(candidate, action))) return null;
+  const score = decision.scores?.find(row => row.choice === decision.choice)?.score ?? null;
+  return { action, score };
+}
+
 export async function chooseLive(
   engine: EngineName,
   position: LivePosition | undefined,
   legal: Action[],
-  player?: LiveConfigPlayer | null,
+  options?: DecisionBuildOptions,
 ): Promise<{ action: Action; score: number | null }> {
   if (!position) throw new Error('missing live position');
-  const battle = buildDecisionBattle(position);
-  if (!battle) throw new Error('could not build a sim battle');
-  const decision = player
-    ? await player.decide({ battle, side: 'p1' })
-    : await decide(ladderPolicy(engine), battle, 'p1', new PRNG([1, 2, 3, 4] as any));
-  const action = actionFromChoice(decision.choice);
-  if (!action || !legal.some(candidate => sameAction(candidate, action))) {
-    throw new Error(`engine returned a choice that is not legal (${decision.choice})`);
+  const picked = await chooseFrom(engine, position, legal, options);
+  if (picked) return { action: picked.action, score: picked.score };
+  // A richer foe that fails to build, or a choice the request rejects, plays
+  // the revealed-only battle instead of the max-damage legal fallback.
+  if (position.modelHidden !== false && (position.speciesStats || position.useLoadedPriors)) {
+    const revealed = await chooseFrom(engine, {
+      ...position,
+      modelHidden: false,
+      useLoadedPriors: false,
+      speciesStats: undefined,
+    }, legal, options);
+    if (revealed) return { action: revealed.action, score: revealed.score };
   }
-  const score = decision.scores?.find(row => row.choice === decision.choice)?.score ?? null;
-  return { action, score };
+  const battle = buildDecisionBattle({ ...position, modelHidden: false });
+  if (!battle) throw new Error('could not build a sim battle');
+  throw new Error('engine returned a choice that is not legal');
+}
+
+/** Live explore arm. Factory and gatekeeper turn the same switch on with search.params.foePriors. */
+export const FOE_PRIORS_VARIANT = 'foe-priors';
+
+export function foePriorsEnabled(flag: boolean | undefined, variantId?: string): boolean {
+  return flag === true || variantId === FOE_PRIORS_VARIANT;
+}
+
+/**
+ * `gen9customgame` battles are the ones `buildDecisionBattle` already built.
+ * Filling them again would read a fresh sim log and drop the revealed moves.
+ * A real random battle, or a server input log, still gets a hidden copy here.
+ */
+export function foePriorsApplyInDecide(
+  battle: Battle,
+  flag: boolean | undefined,
+  variantId?: string,
+): boolean {
+  if (!foePriorsEnabled(flag, variantId)) return false;
+  return battle.format?.id !== 'gen9customgame';
+}
+
+/**
+ * What a full sim battle has revealed in its log, shaped like a ladder position.
+ * The search still sees our real request. Unrevealed foe slots stay empty.
+ */
+export function revealedLivePosition(battle: Battle, side: SideId): LivePosition {
+  const foeId: SideId = side === 'p1' ? 'p2' : 'p1';
+  const seen = new Map<string, { species: string; level: number; moves: string[]; ability?: string; item?: string }>();
+  const speciesOf = new Map<string, string>();
+  for (const line of battle.log) {
+    if (!line.startsWith('|')) continue;
+    const parts = line.split('|');
+    const cmd = parts[1];
+    if (cmd === 'switch' || cmd === 'drag' || cmd === 'replace') {
+      const who = protocolWho(parts[2] || '');
+      if (!who) continue;
+      const details = parts[3] || '';
+      const species = details.split(',')[0]?.trim() || who.nickname;
+      const levelMatch = details.match(/L(\d+)/);
+      speciesOf.set(`${who.side}:${who.nickname}`, species);
+      const mon = seenMon(seen, species, levelMatch ? Number(levelMatch[1]) : 80);
+      mon.species = species;
+      if (levelMatch) mon.level = Number(levelMatch[1]);
+      continue;
+    }
+    if (cmd === 'move') {
+      const who = protocolWho(parts[2] || '');
+      const move = parts[3] || '';
+      if (!who || !move || move === 'Recharge') continue;
+      const species = speciesOf.get(`${who.side}:${who.nickname}`) || who.nickname;
+      const mon = seenMon(seen, species, 80);
+      if (!mon.moves.includes(move)) mon.moves.push(move);
+      continue;
+    }
+    if (cmd === '-ability') {
+      const who = protocolWho(parts[2] || '');
+      if (!who || !parts[3]) continue;
+      const species = speciesOf.get(`${who.side}:${who.nickname}`) || who.nickname;
+      seenMon(seen, species, 80).ability = parts[3];
+      continue;
+    }
+    if (cmd === '-item' || cmd === '-enditem') {
+      const who = protocolWho(parts[2] || '');
+      if (!who || !parts[3]) continue;
+      const species = speciesOf.get(`${who.side}:${who.nickname}`) || who.nickname;
+      seenMon(seen, species, 80).item = parts[3];
+    }
+  }
+
+  const foeSide = battle.getSide(foeId);
+  const ourSide = battle.getSide(side);
+  const active = foeSide.active[0];
+  const snap = (mon: typeof active, reveal: { moves: string[]; ability?: string; item?: string } | undefined) => {
+    if (!mon) return null;
+    return {
+      species: mon.species.name,
+      level: mon.level,
+      hp: mon.hp,
+      maxhp: mon.maxhp,
+      status: mon.status || undefined,
+      ability: reveal?.ability,
+      item: reveal?.item,
+      moves: reveal?.moves ? [...reveal.moves] : [],
+      boosts: {
+        atk: mon.boosts.atk,
+        def: mon.boosts.def,
+        spa: mon.boosts.spa,
+        spd: mon.boosts.spd,
+        spe: mon.boosts.spe,
+      },
+      fainted: mon.fainted || mon.hp <= 0,
+    };
+  };
+  const foeActive = active ? snap(active, seen.get(active.species.name)) : null;
+  const foeBench = foeSide.pokemon
+    .filter(mon => mon && mon !== active)
+    .map(mon => {
+      const reveal = seen.get(mon.species.name);
+      if (!reveal) return null;
+      return snap(mon, reveal);
+    })
+    .filter((mon): mon is NonNullable<typeof mon> => !!mon);
+  const ours = ourSide.active[0];
+  return {
+    request: battle.getSide(side).activeRequest,
+    foeActive,
+    foeBench,
+    ourBoosts: ours ? {
+      atk: ours.boosts.atk,
+      def: ours.boosts.def,
+      spa: ours.boosts.spa,
+      spd: ours.boosts.spd,
+      spe: ours.boosts.spe,
+    } : undefined,
+    weather: battle.field.weather ? String(battle.field.weather) : undefined,
+    speciesStats: undefined,
+  };
+}
+
+/** Hidden-info copy. Our side is p1 so `move N` matches the live request. Null keeps the real battle. */
+export function battleWithFoePriors(battle: Battle, side: SideId, stats: RandbatsStats): Battle | null {
+  const position = revealedLivePosition(battle, side);
+  if (!position.request) return null;
+  position.speciesStats = stats;
+  return buildDecisionBattle(position);
+}
+
+function seenMon(
+  seen: Map<string, { species: string; level: number; moves: string[]; ability?: string; item?: string }>,
+  species: string,
+  level: number,
+): { species: string; level: number; moves: string[]; ability?: string; item?: string } {
+  const existing = seen.get(species);
+  if (existing) return existing;
+  const created = { species, level, moves: [] as string[] };
+  seen.set(species, created);
+  return created;
+}
+
+function protocolWho(ident: string): { side: SideId; nickname: string } | null {
+  const side: SideId | null = ident.startsWith('p2') ? 'p2' : ident.startsWith('p1') ? 'p1' : null;
+  if (!side) return null;
+  const nickname = ident.split(':').slice(1).join(':').trim() || ident;
+  return { side, nickname };
 }
