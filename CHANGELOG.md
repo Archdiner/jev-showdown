@@ -40,6 +40,12 @@ Unit tests write sets and stats under `JEV_DATA_DIR` (a temp directory) and set 
 
 Unit tests clear `VERCEL_AI_GATEWAY_KEY`, `AI_GATEWAY_API_KEY`, `XAI_API_KEY`, `OPENAI_API_KEY`, `CEREBRAS_API_KEY`, and `POSTHOG_API_KEY`, and replace `fetch` with a stub that throws. A test fails if any attempt was recorded, including when the caller catches the error.
 
+## A finished game is recorded when the previous owner is gone
+
+A ladder restart that Showdown rejoined onto the in-flight rooms, and a local server whose room ids started again at `battle-local-1`, were both dropped. The recorder treated any other pid on the battle id as contamination (`non-owning-process`) and did not write the row. The owner pid was already dead, so `games.jsonl` skipped real games and the Elo chain and the batch record jumped. On the local server the same id was a new game, so every game after a restart was dropped and the live circuit never saw it.
+
+The claim still blocks a second client that is alive in that room. A dead pid does not. A pid that is alive but is not a ladder or ops client, and belongs to another run, is a recycled pid and does not block. The ops local server puts its run id in the room (`battle-local-<run>-<n>`), so a restart cannot collide with the previous life. A bare `battle-local-<n>` is stored with the run appended. The sentinel check `genuine-game-dropped` is P1 when a `non-owning-process` row names an owner that is not alive or a different run, or when finished heartbeats and progress lines outnumber the rows written. It uses `process.kill(pid, 0)` and `ps`, not `/proc`.
+
 ## The live breaker cannot idle the only champion
 
 A loss streak no longer pulls the champion. Five losses is normal variance for a config winning about 20% of games, and pulling the only approved config made `ops live` exit every cycle with `every approved config is pulled`. The champion stays schedulable. A streak that is unlikely at that config's baseline win rate flags a regression, and if a distinct previous champion exists the live worker plays that one. A challenger is pulled only when its own streak crosses that same baseline threshold (or its ladder rating drops), then returns after a 30 minute cooldown. Local games and ladder games keep separate counters in `circuits.json`, so a local loss cannot add to the ladder streak. `npm run ops -- sentinel` raises P1 when live reports that skip or when every approved config in a scope is pulled. The check does not read `/proc`.

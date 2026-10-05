@@ -427,7 +427,7 @@ export class BattleDriver extends EventEmitter {
       assignment,
     };
     this.rooms.set(roomId, room);
-    claimBattle(this.options.logDir, roomId);
+    claimBattle(this.options.logDir, roomId, process.pid, { runId: this.options.runId });
     this.options.client.trackRoom(roomId);
     this.options.decisions.openBattle(
       roomId,

@@ -5,7 +5,26 @@ import { ensureGenerators, teamsForSeed } from '../engine/exact/battle-utils.js'
 export interface LocalServer {
   url: string;
   port: number;
+  /** New on every `startLocalServer` call. Room ids include it, so a restart does not reuse `battle-local-1`. */
+  runId: string;
   close: () => Promise<void>;
+}
+
+let localServerRuns = 0;
+
+/** Unique for this process start. Path-safe, no dashes, so it can sit inside a room id. */
+export function createLocalServerRun(): string {
+  localServerRuns += 1;
+  return `${Date.now().toString(36)}${process.pid.toString(36)}${localServerRuns.toString(36)}`;
+}
+
+/**
+ * Room id for one battle on this server life.
+ * `battle-local-1` collides the next time the process starts. The run token does not.
+ */
+export function localRoomName(serverRun: string, seq: number): string {
+  const run = serverRun.replace(/[^a-z0-9]/gi, '') || 'run';
+  return `battle-local-${run}-${seq}`;
 }
 
 /**
@@ -19,6 +38,7 @@ export async function startLocalServer(port = 0): Promise<LocalServer> {
   await new Promise<void>(resolve => wss.once('listening', () => resolve()));
   const address = wss.address();
   if (!address || typeof address === 'string') throw new Error('local server has no port');
+  const runId = createLocalServerRun();
   let seq = 0;
 
   wss.on('connection', socket => {
@@ -37,7 +57,7 @@ export async function startLocalServer(port = 0): Promise<LocalServer> {
       }
       if (text.includes('/search')) {
         seq += 1;
-        void startBattle(socket, rooms, username, seq, () => {
+        void startBattle(socket, rooms, username, localRoomName(runId, seq), seq, () => {
           games += 1;
           return { games, bump: (won: boolean | null) => {
             const before = rating;
@@ -58,6 +78,7 @@ export async function startLocalServer(port = 0): Promise<LocalServer> {
   return {
     url: `ws://127.0.0.1:${address.port}/showdown/websocket`,
     port: address.port,
+    runId,
     close: () => new Promise(resolve => wss.close(() => resolve())),
   };
 }
@@ -66,10 +87,10 @@ function startBattle(
   socket: WebSocket,
   rooms: Map<string, ReturnType<typeof BattleStreams.getPlayerStreams>>,
   username: string,
+  room: string,
   seq: number,
   account: () => { games: number; bump: (won: boolean | null) => { before: number; after: number } },
 ): void {
-  const room = `battle-local-${seq}`;
   const stream = new BattleStreams.BattleStream({ keepAlive: false });
   const players = BattleStreams.getPlayerStreams(stream);
   rooms.set(room, players);

@@ -555,6 +555,7 @@ P0 is losing games or corrupting data now. P1 is the loop or visibility broken. 
 | degenerate-loop | P1 | Three passes queue nothing, every mine fails, every loss is one variant, or every challenger result is the same |
 | analyst-log-dir | P1 | Analyst process has no `LADDER_LOG_DIR` and its default dirs have no game JSONL while the ladder log dir does |
 | circuits-all-pulled | P1 | ops live reports every approved config is pulled, or circuits.json has every approved config pulled |
+| genuine-game-dropped | P1 | A finished game was dropped because a dead pid or another run owned the battle id, or finished heartbeats and progress lines outnumber the rows written. Liveness is `process.kill(pid, 0)` and `ps`, not `/proc` |
 | mixed-ratings | P1 | A local rating and a ladder rating in the same lookback window |
 | replay-unconfirmed | P2 | Public game with `replayUrl` null and `replayStatus` `unconfirmed` |
 | timer-margin-null | P2 | A played game with `minTimerMarginSec` null |
@@ -590,6 +591,8 @@ Unit tests do not call the network. Provider keys are cleared and `fetch` throws
 ## Ladder game records
 
 Every finished battle appends one JSON object. The ladder client writes `logs/ladder/games.jsonl` (or `--log-dir`). `ops live` writes the same fields to `state/ops/live-games.jsonl` (`source` is `ops`, plus `configPath`, `inputLog`, `log`, and `variantId` when a Thompson arm was drawn). The ladder per-battle file also stores this object as its `result` row, with `type: "result"` added by the battle log. `logs/` is gitignored. The stdout line is unchanged (`turns`, `invalid`, `crashes`, `fallbacks`, `elo`).
+
+The recorder claims the room in `battle-claims.jsonl` when it opens. A second process that is still a live ladder or ops client in that room does not append; the attempt is `games.contamination.jsonl` with reason `non-owning-process`. A dead owner, or a pid from another run that is no longer a client, does not block the process that played the battle to the end. Liveness is `process.kill(pid, 0)` (EPERM counts as alive) and `ps -p PID -o command=`, which work on macOS. The ops local server names rooms `battle-local-<run>-<n>` so a restart does not reuse `battle-local-1`. A bare `battle-local-<n>` stored by an older server is recorded as `battle-local-<n>--<run>`. The protocol room and the replay filename stay the id the server sent.
 
 Schema id: `jev.ladder-game.v1`. `kind` is `ladder-game`. `source` is `ladder` or `ops`.
 
