@@ -119,6 +119,15 @@ export class ShowdownClient extends EventEmitter {
     return this.send(`${roomId}|/choose ${choice}`);
   }
 
+  /**
+   * Ask the server to run the inactivity timer for this battle.
+   * Same `/timer on` the official client sends. Does not send `/forfeit`.
+   * If a timer is already running, the server only records another requester.
+   */
+  enableBattleTimer(roomId: string): boolean {
+    return this.send(`${roomId}|/timer on`);
+  }
+
   saveReplay(roomId: string): boolean {
     return this.send(`${roomId}|/savereplay`);
   }
