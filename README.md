@@ -237,6 +237,12 @@ Percentiles are nearest-rank: sort the samples and take index `ceil(p/100 * n) -
 | `throttleEvents` | Search rejections in the run |
 | `concurrency` | Configured limit |
 
+`--ramp` raises concurrency one game at a time toward `--concurrency` (search starts at 3, max-damage at 4) while decisions stay healthy, and steps back when they do not. Without `--ramp`, the run stays at `--concurrency`.
+
+New searches pause when the rolling p95 decision latency exceeds the engine threshold (800ms for 1-ply search, where a healthy p99 is about 190ms; 60s for Grok), when any active turn has less than the safety margin left on Showdown's timer (15s for search), or when Showdown throttles a search. They resume after the latency and timer recover and the throttle cooldown ends. Games already in progress are not cancelled and the client never sends `/forfeit`.
+
+`ops live` should call `ConcurrencyGovernor.allowsNewSearch(active)` before `client.search()`, `recordDecision` with latency and seconds left, and `recordThrottle` on a rejected search.
+
 **Bot Account Best Practices:**
 - Use a clearly labeled bot account (e.g., username ending in "Bot")
 - Set profile to indicate it's a bot
