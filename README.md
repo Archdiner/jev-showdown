@@ -191,6 +191,52 @@ Any one of those is enough. Delete `state/DRAIN` before the next run or the new 
 
 `ops live` should use the same `LiveDrain` (`src/client/drain.ts`): skip new `client.search()` calls while `isDraining`, call `cancelSearch()`, and return once no games are left.
 
+Each run also appends `logs/ladder/metrics.jsonl` (one JSON object per line) next to the per-battle logs.
+
+### Live metrics JSONL
+
+`v` is the schema version (`1`). Every line also has `ts` (unix ms), `runId`, and `engine`.
+
+Percentiles are nearest-rank: sort the samples and take index `ceil(p/100 * n) - 1`. An empty sample list is `null`.
+
+`decision` — one per turn, after the choice is chosen:
+
+| Field | Meaning |
+| --- | --- |
+| `battleId`, `turn` | Room id and turn |
+| `latencyMs` | Wall-clock time spent choosing |
+| `secondsLeft` | Showdown turn timer, seconds, or `null` if the server has not said |
+| `fallback` | True when the engine choice was replaced |
+| `concurrency` | Configured simultaneous-game limit for the run |
+
+`game` — one per finished battle:
+
+| Field | Meaning |
+| --- | --- |
+| `battleId`, `turns`, `outcome` | `win`, `loss`, or `tie` |
+| `decisions` | Decision samples in that battle |
+| `latencyP50Ms`, `latencyP95Ms`, `latencyP99Ms` | Nearest-rank latency |
+| `minTimerMarginSec` | Smallest `secondsLeft` seen, or `null` |
+| `throttleEvents` | Search rejections while this battle was open |
+
+`throttle` — Showdown rejected a ladder search (not "already searching"):
+
+| Field | Meaning |
+| --- | --- |
+| `message` | Popup text |
+| `concurrency` | Configured limit |
+
+`run` — one line when the process finishes:
+
+| Field | Meaning |
+| --- | --- |
+| `games`, `requested` | Finished games and the `--games` target |
+| `decisions` | Decision samples in the run |
+| `latencyP50Ms`, `latencyP95Ms`, `latencyP99Ms` | Run-wide nearest-rank latency |
+| `minTimerMarginSec` | Smallest timer reading in the run |
+| `throttleEvents` | Search rejections in the run |
+| `concurrency` | Configured limit |
+
 **Bot Account Best Practices:**
 - Use a clearly labeled bot account (e.g., username ending in "Bot")
 - Set profile to indicate it's a bot
