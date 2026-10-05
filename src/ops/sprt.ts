@@ -54,3 +54,10 @@ export function tallySide(games: SideGame[], id: string): SideTally {
 export function liveProposalAllowed(wins: number, losses: number, invalid: number): boolean {
   return invalid === 0 && sprt(wins, losses) === 'promote';
 }
+
+/** Paired games a challenger may play before an inconclusive SPRT is handed to the gatekeeper. */
+export function sprtMaxGames(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.OPS_SPRT_MAX_GAMES);
+  if (!Number.isFinite(raw) || raw < 2) return 1200;
+  return Math.floor(raw);
+}

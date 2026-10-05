@@ -415,6 +415,8 @@ describe('scorecard', () => {
     expect(text).toContain('1-13-0 on 14 games');
     expect(text).not.toContain('eloAfter 999');
     expect(text).toContain('7.1%');
+    expect(text).toContain('queued 0');
+    expect(text).toContain('loop health');
     const markdown = formatScorecard(card, 'md');
     expect(markdown.startsWith('# jev scorecard')).toBe(true);
   });

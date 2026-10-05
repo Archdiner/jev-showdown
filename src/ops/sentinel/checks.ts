@@ -1,7 +1,7 @@
 import * as path from 'path';
 import { checkGameInvariants } from '../../client/game-integrity.js';
 import { percentile } from '../../client/live-metrics.js';
-import { foldCycle, stallAlert } from '../cycle.js';
+import { degenerateAlert, foldCycle, stallAlert } from '../cycle.js';
 import { invalidChoiceReasonsOf } from './games.js';
 import { defaultAnalystDirs, listGameJsonl } from '../ingest.js';
 import type { CheckHit, Evidence, InvariantCheck, ObservedGame, ProcessSnapshot, SentinelContext } from './types.js';
@@ -99,6 +99,13 @@ export const CHECKS: InvariantCheck[] = [
     title: 'Losses were reviewed and nothing was queued for 15 minutes',
     suggestedFix: 'Each live loss must enqueue a hypothesis variant or a mined position, or append a skip reason to state/ops/dispositions.jsonl. The factory reads open Hypothesis nodes and hypotheses.json on idle. Restart the analyst and the factory so a backlog is claimed. Do not delete analyst-seen.json.',
     detect: improvementStall,
+  },
+  {
+    id: 'degenerate-loop',
+    severity: 'P1',
+    title: 'The improvement loop is repeating one result',
+    suggestedFix: 'Read turn rows and request objects from the per-battle JSONL (not only >start/|request|), resume SPRT-continue jobs until accept/reject or OPS_SPRT_MAX_GAMES, and do not treat a done job as queued.',
+    detect: degenerateLoop,
   },
   {
     id: 'analyst-log-dir',
@@ -206,6 +213,18 @@ export const CHECKS: InvariantCheck[] = [
     detect: ctx => integrityHits(ctx, 'null-required-field'),
   },
 ];
+
+function degenerateLoop(ctx: SentinelContext): CheckHit[] {
+  const rows = ctx.rows.filter(row => path.basename(row.file) === 'cycle.jsonl' && row.value && inLookback(ctx, numberOf(row.value.ts)));
+  const alert = degenerateAlert(rows.map(row => row.value));
+  if (!alert) return [];
+  const file = rows[0]?.file ?? path.join(ctx.layout.opsDir, 'cycle.jsonl');
+  return [{
+    key: 'degenerate-loop',
+    detail: alert.message,
+    evidence: [{ file, detail: alert.message }],
+  }];
+}
 
 function improvementStall(ctx: SentinelContext): CheckHit[] {
   const rows = ctx.rows.filter(row => path.basename(row.file) === 'cycle.jsonl' && row.value);
