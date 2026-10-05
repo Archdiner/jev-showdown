@@ -5,7 +5,7 @@ import { fallbackChoice, LadderSession } from '../config/adapters.js';
 import { buildBot } from '../config/bot.js';
 import { resolveConcurrencyLimit } from '../client/concurrency-config.js';
 import { countableGameRows, loadContaminationFlags } from '../client/game-integrity.js';
-import { appendGameRecord, buildLadderGameRecord, currentGitSha, factsFromTranscript, recordedElo } from '../client/game-record.js';
+import { appendGameRecord, buildLadderGameRecord, currentGitSha, factsFromTranscript, recordBattleId, recordedElo } from '../client/game-record.js';
 import { currentHostname, readBatchLabel } from '../client/run-stamp.js';
 import {
   defaultLadderRunDirs,
@@ -207,6 +207,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
   }
   if (!server) throw new Error('ops live has no server');
   const runId = `${Date.now()}`;
+  const localServerRun = local ? (ownedServer?.runId ?? runId) : null;
   const batchLabel = readBatchLabel();
   const hostname = currentHostname();
   beat(paths, 'live', 'ok', `${local ? 'local' : 'public'} ${server} user ${username} run ${runId}`);
@@ -382,7 +383,7 @@ export async function runLive(opts: LiveOptions): Promise<LiveSummary> {
         const text = lines.join('\n');
         const record = buildLadderGameRecord({
           startedAt: watched?.startedAt ?? Date.now(),
-          battleId: room,
+          battleId: recordBattleId(room, localServerRun),
           format: 'gen9randombattle',
           username,
           opponent: facts.opponent,

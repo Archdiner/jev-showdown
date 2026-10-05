@@ -417,6 +417,11 @@ async function playSeries(
       player.queue.noteEnd(summary.battleId);
       series.noteActivity();
       if (summary.phantom || summary.contaminated) {
+        if (summary.contaminated) {
+          console.log(
+            `[ladder] run=${summary.runId} ${summary.battleId} finished ${summary.outcome} not-recorded reason=${summary.contaminationReason ?? 'contaminated'}`,
+          );
+        }
         series.checkClose();
         return;
       }

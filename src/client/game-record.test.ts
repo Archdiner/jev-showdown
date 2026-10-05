@@ -24,6 +24,7 @@ import {
   TIMER_REASON_UNOBSERVED,
   claimBattle,
   publicReplayUrl,
+  recordBattleId,
   LadderGameInput,
 } from './game-record.js';
 import { replayMatchesRoom } from './showdown-client.js';
@@ -425,10 +426,12 @@ describe('ladder game records', () => {
   it('does not let a second process append another row for the same battle', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-owner-'));
     const battleId = 'battle-gen9randombattle-2692985848';
-    expect(claimBattle(dir, battleId, 100).owned).toBe(true);
+    const alive = () => true;
+    expect(claimBattle(dir, battleId, 100, { runId: 'batch-12', alive }).owned).toBe(true);
     const intruder = buildLadderGameRecord(input({
       battleId,
       pid: 53856,
+      runId: 'batch-13',
       turns: 4,
       winner: null,
       lines: ['|turn|4'],
@@ -437,15 +440,19 @@ describe('ladder game records', () => {
     }));
     expect(intruder.outcome).toBe('tie');
     expect(intruder.endReason).toBe('disconnect');
-    expect(appendGameRecord(dir, intruder)).toMatchObject({ written: false, reason: 'non-owning-process' });
+    expect(appendGameRecord(dir, intruder, 'games.jsonl', { alive, liveClient: () => true })).toMatchObject({
+      written: false,
+      reason: 'non-owning-process',
+    });
     const owner = buildLadderGameRecord(input({
       battleId,
       pid: 100,
+      runId: 'batch-12',
       winner: 'Jxjdndnd',
       lines: ['|win|Jxjdndnd'],
       opponent: 'Jxjdndnd',
     }));
-    expect(appendGameRecord(dir, owner).reason).toBe('appended');
+    expect(appendGameRecord(dir, owner, 'games.jsonl', { alive, liveClient: () => true }).reason).toBe('appended');
     const lines = fs.readFileSync(path.join(dir, 'games.jsonl'), 'utf8').trim().split('\n');
     expect(lines).toHaveLength(1);
     expect(JSON.parse(lines[0]).outcome).toBe('loss');
@@ -453,6 +460,113 @@ describe('ladder game records', () => {
     const flags = fs.readFileSync(path.join(dir, 'games.contamination.jsonl'), 'utf8');
     expect(flags).toContain('non-owning-process');
     expect(flags).toContain('53856');
+  });
+
+  it('records a battle a dead owner claimed and a new process finished', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-dead-owner-'));
+    const battleId = 'battle-gen9randombattle-2693017811';
+    expect(claimBattle(dir, battleId, 35079, { runId: 'batch-12' }).owned).toBe(true);
+    const finished = buildLadderGameRecord(input({
+      battleId,
+      pid: 42482,
+      runId: 'batch-13',
+      winner: 'BotAlpha',
+      lines: ['|win|BotAlpha'],
+    }));
+    const alive = (pid: number) => pid === 42482;
+    expect(appendGameRecord(dir, finished, 'games.jsonl', { alive })).toMatchObject({
+      written: true,
+      reason: 'appended',
+    });
+    const lines = fs.readFileSync(path.join(dir, 'games.jsonl'), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]).pid).toBe(42482);
+    expect(JSON.parse(lines[0]).runId).toBe('batch-13');
+    expect(fs.existsSync(path.join(dir, 'games.contamination.jsonl'))).toBe(false);
+  });
+
+  it('records battle-local-N again after a local server restart', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-local-reuse-'));
+    const alive = (pid: number) => pid === 46500;
+    const previous = buildLadderGameRecord(input({
+      battleId: 'battle-local-1',
+      pid: 46500,
+      runId: 'server-a',
+      localServer: true,
+      localReplayPath: '/tmp/replay-a.log',
+    }));
+    expect(appendGameRecord(dir, previous, 'games.jsonl', { alive }).reason).toBe('appended');
+    const restarted = recordBattleId('battle-local-1', 'server-b');
+    expect(restarted).not.toBe('battle-local-1');
+    expect(restarted.startsWith('battle-local-1--')).toBe(true);
+    const next = buildLadderGameRecord(input({
+      battleId: restarted,
+      pid: 41939,
+      runId: 'server-b',
+      localServer: true,
+      localReplayPath: '/tmp/replay-b.log',
+      winner: 'Rival',
+      lines: ['|win|Rival'],
+    }));
+    expect(appendGameRecord(dir, next, 'games.jsonl', { alive: () => true }).reason).toBe('appended');
+    const lines = fs.readFileSync(path.join(dir, 'games.jsonl'), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines.map(line => JSON.parse(line).battleId)).toEqual(['battle-local-1', restarted]);
+    expect(fs.existsSync(path.join(dir, 'games.contamination.jsonl'))).toBe(false);
+  });
+
+  it('keeps one row when two live clients share the room, even across run ids', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-live-pair-'));
+    const battleId = 'battle-gen9randombattle-2693017822';
+    const ownership = { alive: () => true, liveClient: () => true as boolean | null };
+    expect(claimBattle(dir, battleId, 35079, { runId: 'batch-12', ...ownership }).owned).toBe(true);
+    const intruder = buildLadderGameRecord(input({
+      battleId,
+      pid: 42482,
+      runId: 'batch-13',
+      turns: 4,
+      winner: null,
+      lines: ['|turn|4'],
+      disconnected: true,
+    }));
+    expect(appendGameRecord(dir, intruder, 'games.jsonl', ownership)).toMatchObject({
+      written: false,
+      reason: 'non-owning-process',
+    });
+    const owner = buildLadderGameRecord(input({
+      battleId,
+      pid: 35079,
+      runId: 'batch-12',
+      winner: 'BotAlpha',
+      lines: ['|win|BotAlpha'],
+    }));
+    expect(appendGameRecord(dir, owner, 'games.jsonl', ownership).reason).toBe('appended');
+    const lines = fs.readFileSync(path.join(dir, 'games.jsonl'), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]).pid).toBe(35079);
+    const flags = fs.readFileSync(path.join(dir, 'games.contamination.jsonl'), 'utf8').trim().split('\n');
+    expect(flags).toHaveLength(1);
+    expect(flags[0]).toContain('non-owning-process');
+    expect(flags[0]).toContain('42482');
+    expect(flags[0]).toContain('batch-12');
+  });
+
+  it('does not let a recycled pid from another run block the finisher', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-pid-reuse-'));
+    const battleId = 'battle-gen9randombattle-2693017811';
+    expect(claimBattle(dir, battleId, 35079, { runId: 'batch-12' }).owned).toBe(true);
+    const finished = buildLadderGameRecord(input({
+      battleId,
+      pid: 42482,
+      runId: 'batch-13',
+      winner: 'BotAlpha',
+      lines: ['|win|BotAlpha'],
+    }));
+    expect(appendGameRecord(dir, finished, 'games.jsonl', {
+      alive: () => true,
+      liveClient: () => false,
+    }).reason).toBe('appended');
+    expect(fs.existsSync(path.join(dir, 'games.contamination.jsonl'))).toBe(false);
   });
 });
 

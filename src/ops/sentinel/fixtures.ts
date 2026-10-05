@@ -227,6 +227,19 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     fs.utimesSync(file, drainAt, drainAt);
   }
 
+  fs.writeFileSync(path.join(ladder, 'games.contamination.jsonl'), `${JSON.stringify({
+    schema: 'jev.game-contamination.v1',
+    battleId: 'battle-gen9randombattle-2693017811',
+    pid: 42482,
+    ownerPid: 2147483646,
+    ownerRunId: 'batch-12',
+    runId: 'batch-13',
+    ts: now - 1000,
+    reason: 'non-owning-process',
+    exclude: true,
+    note: 'owner pid 2147483646 run batch-12',
+  })}\n`);
+
   fs.writeFileSync(path.join(runs, 'search10.log'), [
     '[ladder] pid=4242 run=10',
     '[ladder] 25/30 win vs foe turns=20 invalid=0 crashes=0 fallbacks=0 elo=1400',
