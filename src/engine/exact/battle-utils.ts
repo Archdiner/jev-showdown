@@ -52,13 +52,20 @@ export function legalChoices(battle: Battle, sideId: SideId): string[] {
   return choices;
 }
 
+function battleSnapshot(battle: Battle): string {
+  // The protocol log grows every turn and is copied into every search node.
+  // Choices do not read it. Dropping it keeps late-game turns inside the 2s cap.
+  const state = battle.toJSON() as { log?: unknown };
+  state.log = [];
+  return JSON.stringify(state);
+}
+
 export function cloneBattle(battle: Battle): Battle {
-  const snap = JSON.stringify(battle.toJSON());
-  return Battle.fromJSON(JSON.parse(snap));
+  return Battle.fromJSON(JSON.parse(battleSnapshot(battle)));
 }
 
 export function snapshot(battle: Battle): string {
-  return JSON.stringify(battle.toJSON());
+  return battleSnapshot(battle);
 }
 
 export function cloneFromSnapshot(snap: string): Battle {
