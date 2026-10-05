@@ -18,6 +18,7 @@
     "replays:download": "tsx src/cli/download-replays.ts",
     "analyze": "tsx src/cli/analyze-losses.ts",
     "llm:smoke": "tsx src/llm/smoke.ts",
+    "jev:eval": "tsx src/cli/jev-eval.ts",
     "llm:review": "tsx src/llm/review-cli.ts",
     "benchmark": "tsx src/cli/benchmark.ts",
     "export-replays": "tsx src/cli/export-replays.ts",

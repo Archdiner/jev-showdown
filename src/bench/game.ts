@@ -3,10 +3,12 @@ import { PolicySpec, decide } from '../engine/exact/policies.js';
 import { PokemonSet } from '@pkmn/sim';
 import {
   SideId,
+  isPlayableChoice,
   legalChoices,
   safeChoose,
   startRandomBattle,
 } from '../engine/exact/battle-utils.js';
+import { absorb, emptyTotals, type JevTotals } from '../llm/jev-solo/stats.js';
 
 export interface GameJob {
   index: number;
@@ -29,6 +31,8 @@ export interface GameResult {
   error?: string;
   p1TurnTimes: number[];
   p2TurnTimes: number[];
+  p1Jev?: JevTotals;
+  p2Jev?: JevTotals;
   decisions?: Array<{ side: SideId; turn: number; choice: string; scores?: Array<{ choice: string; score: number }> }>;
 }
 
@@ -46,6 +50,8 @@ export async function runGame(job: GameJob): Promise<GameResult> {
     crashed: false,
     p1TurnTimes: [],
     p2TurnTimes: [],
+    p1Jev: job.p1.kind === 'jev-solo' ? emptyTotals() : undefined,
+    p2Jev: job.p2.kind === 'jev-solo' ? emptyTotals() : undefined,
     decisions: job.logDecisions ? [] : undefined,
   };
 
@@ -65,7 +71,8 @@ export async function runGame(job: GameJob): Promise<GameResult> {
       if (p1Legal.length) {
         const decision = await decide(job.p1, battle, 'p1', rng);
         result.p1TurnTimes.push(decision.ms);
-        if (!p1Legal.includes(decision.choice)) result.p1Invalid++;
+        if (decision.trace && result.p1Jev) absorb(result.p1Jev, decision.trace);
+        if (!isPlayableChoice(decision.choice, p1Legal)) result.p1Invalid++;
         const ok = safeChoose(battle, 'p1', decision.choice);
         if (!ok) result.p1Invalid++;
         if (job.logDecisions && result.decisions && result.winner === 'tie') {
@@ -75,7 +82,8 @@ export async function runGame(job: GameJob): Promise<GameResult> {
       if (!battle.ended && p2Legal.length) {
         const decision = await decide(job.p2, battle, 'p2', rng);
         result.p2TurnTimes.push(decision.ms);
-        if (!p2Legal.includes(decision.choice)) result.p2Invalid++;
+        if (decision.trace && result.p2Jev) absorb(result.p2Jev, decision.trace);
+        if (!isPlayableChoice(decision.choice, p2Legal)) result.p2Invalid++;
         const ok = safeChoose(battle, 'p2', decision.choice);
         if (!ok) result.p2Invalid++;
       }

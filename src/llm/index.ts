@@ -13,4 +13,6 @@ export {
   resolveReviewerModel,
 } from './models.js';
 export { DEFAULT_BLEND_CONFIG } from './types.js';
+export { JevSoloEngine, loadJevSoloConfig } from './jev-solo/index.js';
+export { CONTEXT_BLOCK_IDS, META_CANDIDATES } from './context/index.js';
 export type { BlendConfig, BlendMode, BlendOutcome, CandidateSearch, ScoredAction } from './types.js';

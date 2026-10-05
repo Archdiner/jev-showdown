@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { budgetSearchMs, clampConcurrency, MAX_LADDER_CONCURRENCY, parseEngine } from './engines.js';
 import { isAlreadySearching, isSearchRejection, LadderQueue, parseUpdateSearch } from './ladder-queue.js';
 import type { ShowdownClient } from './showdown-client.js';
@@ -19,6 +20,8 @@ describe('ladder concurrency', () => {
   it('names the live engines', () => {
     expect(parseEngine('search')).toBe('search');
     expect(parseEngine('maxdamage')).toBe('max-damage');
+    expect(parseEngine('jev')).toBe('jev');
+    expect(parseEngine('jev-solo')).toBe('jev');
     expect(() => parseEngine('stockfish')).toThrow(/Unknown engine/);
   });
 

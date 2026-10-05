@@ -10,7 +10,7 @@ import { BattleDriver, GameSummary } from '../client/battle-driver.js';
 import { DecisionClient } from '../client/decision-client.js';
 import { startLocalServer } from '../client/local-server.js';
 import { safeError, toID } from '../client/ids.js';
-import { clampConcurrency, EngineName, MAX_LADDER_CONCURRENCY, parseEngine } from '../client/engines.js';
+import { clampConcurrency, EngineName, isJevEngine, MAX_LADDER_CONCURRENCY, parseEngine } from '../client/engines.js';
 import { LadderQueue } from '../client/ladder-queue.js';
 
 interface LadderOptions {
@@ -27,6 +27,7 @@ interface LadderOptions {
   logDir: string;
   engine: EngineName;
   opponentEngine: EngineName | null;
+  configPath: string;
   concurrency: number;
   check: boolean;
   help: boolean;
@@ -47,11 +48,13 @@ function parseArgs(argv: string[]): LadderOptions {
     logDir: 'logs/ladder',
     engine: 'max-damage',
     opponentEngine: null,
+    configPath: '',
     concurrency: 1,
     check: false,
     help: false,
   };
 
+  let engineSet = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => {
@@ -71,7 +74,11 @@ function parseArgs(argv: string[]): LadderOptions {
     else if (arg === '--search-ms') opts.searchMs = Number(next());
     else if (arg === '--decision-ms') opts.decisionMs = Number(next());
     else if (arg === '--log-dir') opts.logDir = next();
-    else if (arg === '--engine') opts.engine = parseEngine(next());
+    else if (arg === '--engine') {
+      opts.engine = parseEngine(next());
+      engineSet = true;
+    }
+    else if (arg === '--config') opts.configPath = next();
     else if (arg === '--opponent-engine') opts.opponentEngine = parseEngine(next());
     else if (arg === '--concurrency') opts.concurrency = clampConcurrency(Number(next()));
     else if (arg === '--check') opts.check = true;
@@ -80,6 +87,10 @@ function parseArgs(argv: string[]): LadderOptions {
 
   if (!Number.isFinite(opts.games) || opts.games < 1) {
     throw new Error('--games must be a positive number');
+  }
+  if (opts.configPath) {
+    process.env.JEV_SOLO_CONFIG = path.resolve(opts.configPath);
+    if (!engineSet) opts.engine = 'jev';
   }
   return opts;
 }
@@ -96,7 +107,9 @@ Preflight (log in, print named/locked and the current rating, exit):
 Real ladder, from a residential or university network (this process never stores the password):
   SHOWDOWN_USERNAME=bot SHOWDOWN_PASSWORD=secret npm run ladder -- --games 10 --format gen9randombattle --engine max-damage --concurrency 1
 
-Engines: max-damage (default; won a local head-to-head) or search (Bot.selectAction).
+Engines: max-damage (default), search (exact 1-ply via Bot.selectAction), or jev (pure Jev, legality fallback only).
+  npm run ladder -- --local --games 4 --engine jev
+  npm run ladder -- --config experiments/jev-solo/config.json --local --games 4
 --concurrency K keeps up to K battles on one login (default 1, max ${MAX_LADDER_CONCURRENCY}).
 A proxy lock, ban, or ‽/! name exits immediately and does not reconnect.
 
@@ -137,7 +150,7 @@ async function makePlayer(input: {
   const decisions = new DecisionClient({
     config,
     engine: input.engine,
-    timeoutMs: input.opts.decisionMs ?? (input.local ? 1500 : 12000),
+    timeoutMs: input.opts.decisionMs ?? (isJevEngine(input.engine) ? 8000 : input.local ? 1500 : 12000),
     workers: input.opts.concurrency,
   });
   const client = new ShowdownClient({
@@ -155,7 +168,7 @@ async function makePlayer(input: {
     engineName: input.engine,
     decisions,
     logDir: input.opts.logDir,
-    decisionTimeoutMs: input.opts.decisionMs ?? (input.local ? 1500 : 12000),
+    decisionTimeoutMs: input.opts.decisionMs ?? (isJevEngine(input.engine) ? 8000 : input.local ? 1500 : 12000),
     replayDir: path.join(input.opts.logDir, 'replays'),
   });
   const queue = new LadderQueue(client, input.formatId, input.opts.concurrency, message => {

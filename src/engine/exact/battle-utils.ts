@@ -121,10 +121,17 @@ export function hpEval(battle: Battle, sideId: SideId): number {
   return score;
 }
 
+/** A tera variant is playable when the plain move is legal. The champion's legal set stays unchanged. */
+export function isPlayableChoice(choice: string, legal: string[]): boolean {
+  if (legal.includes(choice)) return true;
+  if (choice.endsWith(' terastallize')) return legal.includes(choice.replace(/ terastallize$/, ''));
+  return false;
+}
+
 export function safeChoose(battle: Battle, sideId: SideId, choice: string): boolean {
   const legal = legalChoices(battle, sideId);
   if (legal.length === 0) return true;
-  const pick = legal.includes(choice) ? choice : legal[0];
+  const pick = isPlayableChoice(choice, legal) ? choice : legal[0];
   try {
     if (battle.choose(sideId, pick)) return pick === choice;
   } catch {

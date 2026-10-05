@@ -1,5 +1,13 @@
 # Changelog
 
+## Jev can play the ladder by itself
+
+`npm run ladder -- --engine jev` (or `--config experiments/jev-solo/config.json`) sends every legal move, Tera variant, and switch to Jev and plays the action Jev picks. If the call fails or names an illegal option, the turn uses the first legal choice. Search does not get a veto, and that fallback is not the max-damage heuristic.
+
+The prompt is built from swappable blocks (sides, sets, damage, incoming hits, speed, field, history, switch prior, win conditions, situation-matched principles). The switch prior is the top-rated replay rate: 23.1% of decisions, 32.3% on turn 1. Principles come from `state/meta/guidance.json`. The same folder is where the strategist agent reads meta notes, so there is one copy.
+
+Screening against max-damage and exact 1-ply is `npm run jev:eval -- screen --games 100`. It refuses to start unless `VERCEL_AI_GATEWAY_KEY` is set, so a missing key is not reported as a Jev result.
+
 ## Exact 1-ply search promoted
 
 The old 3-ply search was not looking at the live battle. It built a fresh one. After a knockout the live request is a switch, and the copy still asked both players for a move. The switch was rejected. Every rejection was scored as a loss, so the search was grading crashes instead of HP. Cloning the live battle and scoring HP fraction plus faints fixes that.

@@ -108,6 +108,19 @@ export function strictLegalActions(request: any): Action[] {
   return actions;
 }
 
+/** Tera variants for jev-solo. Other engines keep the list they already built. */
+export function expandTeraActions(legal: Action[], request: any): Action[] {
+  const active = request?.active?.[0];
+  if (!active?.canTerastallize || isForceSwitch(request)) return legal;
+  const extra: Action[] = [];
+  for (const action of legal) {
+    if (action.type === 'move' && !action.terastallize && isMoveLegal(request, action.moveIndex, true)) {
+      extra.push({ type: 'move', moveIndex: action.moveIndex, terastallize: true });
+    }
+  }
+  return extra.length > 0 ? [...legal, ...extra] : legal;
+}
+
 /**
  * Legal actions for the engine. Starts from the format helper, then drops
  * anything the live request would reject.

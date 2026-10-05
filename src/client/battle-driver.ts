@@ -12,6 +12,7 @@ import { DecisionClient } from './decision-client.js';
 import { OpponentTracker } from './opponent-tracker.js';
 import { GameLog, openGameLog } from './game-log.js';
 import {
+  expandTeraActions,
   formatChoice,
   isWaitRequest,
   legalActionsForRequest,
@@ -20,6 +21,8 @@ import {
   sanitizeAction,
   teamPreviewChoice,
 } from './choice.js';
+import { isJevEngine } from './engines.js';
+import { applyClientBattle } from '../llm/context/live.js';
 import { alignToRequest, cloneGameState, mismatchData, overlayProtocol } from './tracked-state.js';
 import { safeError, toID } from './ids.js';
 
@@ -260,7 +263,9 @@ export class BattleDriver extends EventEmitter {
       return;
     }
 
-    const legal = legalActionsForRequest(request, this.options.format);
+    const baseLegal = legalActionsForRequest(request, this.options.format);
+    const jev = isJevEngine(this.options.engineName);
+    const legal = jev ? expandTeraActions(baseLegal, request) : baseLegal;
     if (legal.length === 0) {
       room.log.write({
         type: 'turn',
@@ -285,6 +290,11 @@ export class BattleDriver extends EventEmitter {
     const state = this.options.format.buildGameState(request, tracking);
     state.turn = room.battle.turn || state.turn;
     if (room.ourSide) state.playerId = room.ourSide;
+    if (jev) {
+      state.recentLines = room.lines.slice(-48);
+      if (room.ourSide) applyClientBattle(state, room.battle, room.ourSide);
+    }
+    const hedge = () => (jev ? legal[0] : pickBestLegal(state, legal));
     room.snapshot = cloneGameState(state);
     room.lastLegal = legal;
     room.retries = 0;
@@ -299,7 +309,7 @@ export class BattleDriver extends EventEmitter {
     try {
       if (tightTimer) {
         decision = {
-          action: pickBestLegal(state, legal),
+          action: hedge(),
           score: null as number | null,
           timeMs: 0,
           fallback: true,
@@ -313,7 +323,7 @@ export class BattleDriver extends EventEmitter {
       room.crashes += 1;
       room.log.write({ type: 'crash', battleId: room.roomId, message: safeError(err) });
       decision = {
-        action: pickBestLegal(state, legal),
+        action: hedge(),
         score: null as number | null,
         timeMs: 0,
         fallback: true,
@@ -323,7 +333,7 @@ export class BattleDriver extends EventEmitter {
 
     if (room.ended || (rqid !== null && room.answered.has(rqid))) return;
 
-    const safe = sanitizeAction(decision.action, request, legal) ?? pickBestLegal(state, legal);
+    const safe = sanitizeAction(decision.action, request, legal) ?? hedge();
     const adjusted = !sameAction(safe, decision.action);
     if (decision.fallback || adjusted) {
       room.fallbacks += 1;

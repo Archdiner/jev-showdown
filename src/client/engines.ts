@@ -4,15 +4,20 @@ import { damageEvaluator } from '../engine/damage-evaluator.js';
 /** Official Showdown rejects a 6th simultaneous game. */
 export const MAX_LADDER_CONCURRENCY = 5;
 
-export type EngineName = 'search' | 'max-damage';
+export type EngineName = 'search' | 'max-damage' | 'jev';
 
-export const ENGINE_NAMES: EngineName[] = ['search', 'max-damage'];
+export const ENGINE_NAMES: EngineName[] = ['search', 'max-damage', 'jev'];
 
 export function parseEngine(name: string): EngineName {
   const id = name.trim().toLowerCase();
   if (id === 'search' || id === 'robust' || id === 'champion') return 'search';
   if (id === 'max-damage' || id === 'maxdamage' || id === 'maxdamage-v1') return 'max-damage';
-  throw new Error(`Unknown engine "${name}". Use search or max-damage.`);
+  if (id === 'jev' || id === 'jev-solo') return 'jev';
+  throw new Error(`Unknown engine "${name}". Use search, max-damage, or jev.`);
+}
+
+export function isJevEngine(name: string): boolean {
+  return name === 'jev' || name === 'jev-solo';
 }
 
 export function clampConcurrency(value: number): number {

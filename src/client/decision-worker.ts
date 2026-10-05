@@ -6,7 +6,8 @@ import { dataLoader } from '../data/data-loader.js';
 import { Action, BotConfig, GameState } from '../types/index.js';
 import { pickBestLegal, sameAction } from './choice.js';
 import { DecideRequest, WorkerRequest, WorkerResponse } from './decision-messages.js';
-import { EngineName, freshConfig, maxDamageAction } from './engines.js';
+import { EngineName, freshConfig, isJevEngine, maxDamageAction } from './engines.js';
+import { JevSoloEngine, loadJevSoloConfig } from '../llm/jev-solo/index.js';
 
 if (!parentPort) {
   throw new Error('decision-worker must be started as a worker thread');
@@ -18,6 +19,7 @@ interface IsolatedEngine {
   selectAction(state: GameState, legal: Action[]): Promise<Action>;
   getLastEngineError(): string | null;
   getLastDecision(): { evaluation: { score: number } } | undefined;
+  consumeFallback?(): string | null;
 }
 
 interface BattleEngine {
@@ -44,6 +46,11 @@ async function init(config: BotConfig, engine: EngineName): Promise<void> {
 async function openBattle(battleId: string): Promise<void> {
   if (battles.has(battleId) || !baseConfig) return;
   const config = freshConfig(baseConfig, baseConfig.searchTimeMs);
+  if (isJevEngine(engineName)) {
+    battles.set(battleId, { config, engine: new JevSoloEngine(loadJevSoloConfig()) });
+    return;
+  }
+
   if (engineName === 'max-damage') {
     battles.set(battleId, {
       config,
@@ -84,9 +91,10 @@ async function decide(message: DecideRequest): Promise<void> {
   const started = Date.now();
   try {
     const action = await held.engine.selectAction(message.state, message.legal);
+    const prechosen = held.engine.consumeFallback?.() ?? null;
     const engineError = held.engine.getLastEngineError();
     const known = message.legal.some(candidate => sameAction(candidate, action));
-    if (engineError || !known) {
+    if ((engineError || !known) && !prechosen) {
       send({
         type: 'decision',
         id: message.id,
@@ -105,15 +113,18 @@ async function decide(message: DecideRequest): Promise<void> {
       action,
       score: held.engine.getLastDecision()?.evaluation.score ?? null,
       timeMs: Date.now() - started,
-      fallback: false,
+      fallback: !!prechosen,
+      reason: prechosen || undefined,
     });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     let action = message.legal[0];
-    try {
-      action = pickBestLegal(message.state, message.legal);
-    } catch {
-      // legal[0] is still a request-checked choice
+    if (!isJevEngine(engineName)) {
+      try {
+        action = pickBestLegal(message.state, message.legal);
+      } catch {
+        // legal[0] is still a request-checked choice
+      }
     }
     send({
       type: 'decision',

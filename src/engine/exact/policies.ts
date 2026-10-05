@@ -3,17 +3,22 @@ import { Action } from '../../types/index.js';
 import { SideId, legalChoices } from './battle-utils.js';
 import { maxDamageChoice } from './max-damage.js';
 import { EXACT_1PLY, ExactConfig, ScoredChoice, battleToState, exactSearch } from './search.js';
+import { jevSoloOnBattle } from '../../llm/jev-solo/engine.js';
+import { loadJevSoloConfig, type JevSoloConfig } from '../../llm/jev-solo/config.js';
+import type { JevTrace } from '../../llm/jev-solo/stats.js';
 
 export type PolicySpec =
   | { kind: 'random' }
   | { kind: 'maxdamage' }
   | { kind: 'exact'; config: ExactConfig }
-  | { kind: 'legacy' };
+  | { kind: 'legacy' }
+  | { kind: 'jev-solo'; config: JevSoloConfig };
 
 export interface Decision {
   choice: string;
   ms: number;
   scores?: ScoredChoice[];
+  trace?: JevTrace;
 }
 
 export async function decide(spec: PolicySpec, battle: Battle, side: SideId, rng: PRNG): Promise<Decision> {
@@ -35,6 +40,11 @@ export async function decide(spec: PolicySpec, battle: Battle, side: SideId, rng
   if (spec.kind === 'legacy') {
     const choice = await legacyChoice(battle, side, legal);
     return { choice, ms: Date.now() - started };
+  }
+
+  if (spec.kind === 'jev-solo') {
+    const decision = await jevSoloOnBattle({ battle, side, config: spec.config });
+    return { choice: decision.choice, ms: Date.now() - started, trace: decision.trace };
   }
 
   const trace = exactSearch(battle, side, spec.config);
@@ -88,6 +98,9 @@ export function specFromId(id: string): PolicySpec {
     case 'exact-1ply':
     case 'challenger-exact-1ply':
       return { kind: 'exact', config: EXACT_1PLY };
+    case 'jev':
+    case 'jev-solo':
+      return { kind: 'jev-solo', config: loadJevSoloConfig() };
     default:
       if (id.startsWith('exact:')) {
         const [, depth, model, evalMode] = id.split(':');
