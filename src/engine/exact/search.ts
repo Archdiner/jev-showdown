@@ -100,7 +100,12 @@ function evaluate(battle: Battle, sideId: SideId, config: ExactConfig): number {
     return battle.winner === me.name ? 1000 : -1000;
   }
   if (config.evalMode === 'full') {
-    return fullEvaluator.evaluate(battleToState(battle, sideId)).score;
+    // Material is weighted by about 100, so a big lead outscores the
+    // ±1000 terminal and search will refuse a winning move. Divide by
+    // that weight so one mon of HP is O(1) and a finished game always wins.
+    const raw = fullEvaluator.evaluate(battleToState(battle, sideId)).score;
+    const unit = fullEvaluator.getWeights().material || 1;
+    return raw / unit;
   }
   return hpEval(battle, sideId);
 }
