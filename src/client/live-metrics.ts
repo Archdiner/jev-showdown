@@ -138,7 +138,12 @@ export class LiveMetrics {
     this.games.delete(game.battleId);
   }
 
-  finish(input: { games: number; requested: number }): void {
+  finish(input: {
+    games: number;
+    requested: number;
+    endReason?: string;
+    drainRequested?: boolean;
+  }): void {
     this.write({
       type: 'run',
       games: input.games,
@@ -150,6 +155,8 @@ export class LiveMetrics {
       minTimerMarginSec: this.minTimer,
       throttleEvents: this.throttles,
       concurrency: this.context.concurrency,
+      ...(input.endReason ? { endReason: input.endReason } : {}),
+      ...(input.drainRequested !== undefined ? { drainRequested: input.drainRequested } : {}),
       ...(this.context.ab ? { ab: this.context.ab } : {}),
     });
   }

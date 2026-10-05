@@ -1,0 +1,13 @@
+name: selective-depth2
+extends: ../champion.yaml
+evaluator:
+  id: fitted-team
+search:
+  id: selective-depth2
+  params:
+    depth: 2
+    topN: 3
+    topM: 2
+    timeBudgetMs: 400
+    rollGrouping: ko
+    samples: 1

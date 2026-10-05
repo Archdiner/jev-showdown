@@ -1,5 +1,28 @@
 # Changelog
 
+## A ladder batch no longer dies on a wall-clock deadline
+
+`./run-live.sh --games 30 --engine search --concurrency 3` used to set a timer of 3 minutes per wave of games (30 minutes for that batch). When the timer fired it rejected the batch, printed `Timed out after N/M games`, and exited. Games still on the ladder were left without a client. Showdown's disconnect timer then forfeited them about a minute later. Real games plus queue time are longer than 3 minutes each, so a 30-game batch at concurrency 3 hit this on essentially every run.
+
+The runner now has no deadline while battles are moving. A turn, a request, a search update, or a finished game resets an idle window (`--idle-ms`, default 20 minutes). If nothing moves for that long, the runner stops queueing new games and lets the ones already open finish, then exits. The summary and the log say `endReason=completed`, `endReason=drained`, or `endReason=stalled`. A stall is still a failure (exit code 1). A drain you requested is not.
+
+The sentinel flags both the old `Timed out after` line and a batch that ends `stalled` or `timeout` as P1 (`runner-exit-undrained`). On a Mac, where `/proc` does not exist, the process list comes from `ps`.
+
+## Fitted team eval and selective depth-2 search
+
+The leaf score is no longer only HP and faints. `fitted-team` averages the 1v1 matchup of every remaining Pokémon (Sarantinos 2022), then adds speed control, hazard chip on each side unless the Pokémon holds Heavy-Duty Boots, status, boosts, whether Tera is still available, and how many healthy checks remain. The weights are a logistic regression fit on self-play (even seeds max-damage and sometimes Terastallize; odd seeds play a random legal choice). Seeds split 60% train, 20% dev, 20% held-out before the fit. Held-out was scored once, after the weights were frozen. The randbats generator covers 508 species. `eval-weights.json` is that fit.
+
+Dev (n=780): team log loss 0.5615, accuracy 70.5%. HP-only log loss 0.5536, accuracy 70.4%. Constant log loss 0.6931. Held-out (n=800): team log loss 0.6092, accuracy 65.3%. HP-only log loss 0.6255, accuracy 65.3%.
+
+`selective-depth2` scores every legal move at depth 1, then spends the remaining deadline on the top-N of those moves against the opponent's top-M replies. Damaging rolls are two buckets, KO and non-KO. A transposition table remembers finished nodes for that decision. Both pieces are config components (`fitted-team`, `selective-depth2`). `exactSearch` honors `evalMode: 'fitted'`, `selective`, a leaf override, and an inner rollout deadline only when the caller sets them. Champion, weighted, and the other existing configs do not, so their scores stay the same.
+
+Info-honest bench, 60 pairs, sides swapped, 120 games, each policy sees only its public observation. Opponent is exact 1-ply (8 samples, HP eval). Invalid choices 0, crashes 0, view misses 0. Randbats generator species 508.
+
+| Policy | Result | Wilson 95% CI | p50 | p95 |
+| --- | --- | --- | --- | --- |
+| fitted 1-ply | 70W-50L-0T (58.3%) | 49.4–66.8% | 77ms | 126ms |
+| fitted depth-2 | 58W-62L-0T (48.3%) | 39.6–57.2% | 119ms | 313ms |
+
 ## Cosmetic formes and Revival Blessing switches
 
 `@smogon/calc` has no entry for a cosmetic forme such as Gastrodon-East, so damage for that Pokémon came back as zero. `speciesForCalc` maps a cosmetic forme to the base species and leaves a forme the calc already lists, such as Ogerpon-Wellspring, unchanged. `calcMon` uses that name.
@@ -21,6 +44,10 @@ Showdown's opening clock is 150 seconds. A game that ends before any `|inactive|
 ## Live losses reach the factory
 
 A ladder loss used to write a hypothesis and then stop. Per-battle logs have no `>start` input log, so position mining returned nothing and no factory job was enqueued. The same generic fallback text for every loss never became a self-play variant. Each reviewed loss now queues a challenger for that mechanism or eval term, or a mined position when the log can be reconstructed, or a line in `state/ops/dispositions.jsonl` saying why it was skipped. The factory claims open hypotheses, including `state/meta/hypotheses.json` rows, and plays them against max-damage. `npm run ops -- status` prints the cycle counts. The sentinel check `improvement-stall` is a P1 when losses were reviewed and nothing was queued for 15 minutes.
+
+## Exact 1-ply uses Tera, skips immune locks, and fills a hidden foe
+
+Archinder's public gen9randombattle replays (62 games on 2026-10-05) were 21-41. The account never Terastallized. It also clicked immunities, including a Choice lock, and set up into KOs the revealed board did not show. The champion constant `EXACT_1PLY` is unchanged. Those three fixes live on `EXACT_1PLY_QW` (`configs/exact-1ply-qw.yaml`, search id `exact-1ply-qw`): search `move N terastallize`, demote an immune or Choice-locked attack and a status move that dies before it acts, and give an incomplete foe one randbats set. Shared helpers take that path only when the caller asks for it. An info-honest 200-game screen against `EXACT_1PLY` (hidden ladder view, seed 1, sides swapped) was 115-85, Wilson 95% CI [50.6%, 64.1%], with 0 invalid moves. The taxonomy is in `docs/ladder-loss-taxonomy.md`.
 
 ## Live opponent beliefs
 
@@ -106,7 +133,6 @@ Each live turn now records what the search assumed and, once the protocol catche
 The per-battle JSONL `turn` row gains `prediction` (`jev.turn-forecast.v1`): the foe's modal reply, both actions as move ids or `switch:<species>`, HP fractions before and after, damage dealt and taken, whether each active was expected to faint, and who was expected to move first. Damage and KOs are the mean of that reply across the search's sample count, capped at eight draws (eight for the champion, one draw for max-damage). That rollout happens after `/choose`.
 
 When the next request or the battle result arrives, a `prediction_error` row (`jev.prediction-error.v1`) records the actual action, damage, KOs, and speed order, plus match flags and absolute damage error. The finished game's `jev.ladder-game.v1` row gains `calibration` when at least one turn was compared: foe-action accuracy, damage MAE both ways, KO misses, and speed-order misses. The dashboard shows those totals as a Sim calibration panel. `npm run calibration -- --log-dir logs/ladder` prints the same report from the JSONL, and fills a missing error row from `prediction` plus the replay log when the two still line up.
-
 ## Rating and GXE stay null when the server omits them
 
 The ladder rating parser now reads GXE from the HTML popup `(GXE: …)` and from a `|rating|elo|gxe` line. If that number is not there, `gxe` is null. A missing rating stays null. The client does not fill in 1000 or 50. Each parsed update is a `rating` event in the per-battle JSONL, and the game `result` copies Elo before/after, GXE, and `gxeSource`. `ops live` writes the same nulls on its live-game row and does not feed a stand-in Elo into the circuit breaker.

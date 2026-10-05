@@ -5,6 +5,7 @@ import { pidAlive as processAlive } from '../../client/ladder-run.js';
 import { observeGames } from './games.js';
 import {
   DEFAULTS,
+  type BatchEndSignal,
   type CheckoutStatus,
   type DrainFile,
   type GitStatus,
@@ -30,11 +31,11 @@ export interface LoadOptions {
   winMargin?: number;
   batchSize?: number;
   /**
-   * False skips /proc. The process list is then empty and checks that need
-   * live pids stay quiet. Tests pass `processes` with the default true.
+   * False skips the process list. Checks that need live pids stay quiet.
+   * Tests pass `processes` with the default true.
    */
   scanProcesses?: boolean;
-  /** When set, this list is the process snapshot and /proc is not read. */
+  /** When set, this list is the process snapshot. /proc and ps are not read. */
   processes?: ProcessSnapshot[];
   /** When set, git is not invoked for the ops checkout. */
   git?: GitStatus;
@@ -50,10 +51,22 @@ export interface LoadOptions {
 }
 
 export function loadContext(layout: Layout, options: LoadOptions = {}): SentinelContext {
+<<<<<<< HEAD
   const processesScanned = options.scanProcesses !== false;
   const processes = !processesScanned ? [] : (options.processes ?? scanProcesses());
   const pidAlive = options.pidAlive
     ?? (options.processes ? (pid: number) => options.processes?.some(proc => proc.pid === pid) ?? false : processAlive);
+=======
+  const now = options.now ?? Date.now();
+  const lookbackMs = options.lookbackMs ?? DEFAULTS.lookbackMs;
+  const snapshot = options.scanProcesses === false
+    ? { processes: [] as ProcessSnapshot[], scanned: false }
+    : options.processes
+      ? { processes: options.processes, scanned: true }
+      : snapshotProcesses({ procRoot: '/proc' });
+  const processesScanned = snapshot.scanned;
+  const processes = snapshot.processes;
+>>>>>>> origin/main
   const rows = collectRows(layout);
   const speciesPath = path.join(layout.dataDir, 'gen9-stats.json');
   const species = readSpecies(speciesPath);
@@ -64,7 +77,7 @@ export function loadContext(layout: Layout, options: LoadOptions = {}): Sentinel
   return {
     now,
     layout,
-    lookbackMs: options.lookbackMs ?? DEFAULTS.lookbackMs,
+    lookbackMs,
     staleMs: options.staleMs ?? DEFAULTS.staleMs,
     drainPendingMs: options.drainPendingMs ?? DEFAULTS.drainPendingMs,
     speciesMin: options.speciesMin ?? DEFAULTS.speciesMin,
@@ -89,14 +102,21 @@ export function loadContext(layout: Layout, options: LoadOptions = {}): Sentinel
     speciesPath,
     speciesError: species.error,
     drains: findDrains(layout),
+<<<<<<< HEAD
     locks: findLocks(layout),
     runs,
     runSummary: readSummary(summaryPath),
     summaryMtimeMs: mtimeIfExists(summaryPath),
+=======
+    runs: findRuns(layout.liveRunsDir),
+    summaryMtimeMs: mtimeIfExists(path.join(layout.ladderLogDir, 'summary.json')),
+    batchEnds: collectBatchEnds(layout, rows, now, lookbackMs),
+>>>>>>> origin/main
     decisionSamples: decisionSamples(rows),
   };
 }
 
+<<<<<<< HEAD
 const MONTHS: Record<string, number> = {
   Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
   Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
@@ -119,10 +139,82 @@ export function parsePs(text: string): ProcessSnapshot[] {
       startedAt: parseLstart(match[4]),
       cmd,
     });
+=======
+const LADDER_CMD = /src\/cli\/ladder\.ts|src\/ops\/cli\.ts|run-live\.sh/;
+const TIMED_OUT_LINE = /Timed out after (\d+)\/(\d+) games/;
+const STALLED_LINE = /stalled after (\d+)\/(\d+) games/;
+
+export interface ProcessScanInput {
+  /** Directory shaped like /proc. Missing on macOS. */
+  procRoot?: string;
+  /** Process table text. Used when `procRoot` does not exist. */
+  readTable?: () => string;
+}
+
+/**
+ * Linux reads /proc. macOS has no /proc, so the same snapshot comes from `ps`.
+ * A failed listing is `scanned: false` so a dead process list is not treated as
+ * every runner having exited.
+ */
+export function snapshotProcesses(input: ProcessScanInput = {}): { processes: ProcessSnapshot[]; scanned: boolean } {
+  const root = input.procRoot ?? '/proc';
+  if (fs.existsSync(root)) return { processes: scanProc(root), scanned: true };
+  const readTable = input.readTable ?? readProcessTable;
+  try {
+    return { processes: parseProcessTable(readTable()), scanned: true };
+  } catch {
+    return { processes: [], scanned: false };
+  }
+}
+
+export function scanProcesses(input: ProcessScanInput = {}): ProcessSnapshot[] {
+  return snapshotProcesses(input).processes;
+}
+
+/** `ps -axww -o pid=,command=` rows. Works on macOS and Linux. */
+export function parseProcessTable(text: string): ProcessSnapshot[] {
+  const out: ProcessSnapshot[] = [];
+  for (const line of text.split('\n')) {
+    const match = line.match(/^\s*(\d+)\s+(.*\S)\s*$/);
+    if (!match) continue;
+    const cmd = match[2].trim();
+    if (!LADDER_CMD.test(cmd)) continue;
+    out.push({ pid: Number(match[1]), cmd });
   }
   return out;
 }
 
+function scanProc(root: string): ProcessSnapshot[] {
+  const out: ProcessSnapshot[] = [];
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(root);
+  } catch {
+    return [];
+  }
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    const pid = Number(name);
+    let cmd = '';
+    try {
+      cmd = fs.readFileSync(path.join(root, name, 'cmdline'), 'utf8').replace(/\0/g, ' ').trim();
+    } catch {
+      continue;
+    }
+    if (!cmd || !LADDER_CMD.test(cmd)) continue;
+    let env: Record<string, string> | undefined;
+    try {
+      env = parseEnviron(fs.readFileSync(path.join(root, name, 'environ')));
+    } catch {
+      env = undefined;
+    }
+    out.push({ pid, cmd, env });
+>>>>>>> origin/main
+  }
+  return out;
+}
+
+<<<<<<< HEAD
 export function relevantProcess(cmd: string): boolean {
   return /src\/cli\/ladder\.ts|src\/ops\/cli\.ts|run-live\.sh/.test(cmd);
 }
@@ -168,6 +260,138 @@ export function gitTopLevel(dir: string): string | null {
   } catch {
     return null;
   }
+=======
+function readProcessTable(): string {
+  return execFileSync('ps', ['-axww', '-o', 'pid=,command='], {
+    encoding: 'utf8',
+    timeout: 8000,
+    maxBuffer: 8 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+function collectBatchEnds(layout: Layout, rows: LogRow[], now: number, lookbackMs: number): BatchEndSignal[] {
+  const signals: BatchEndSignal[] = [];
+  const summaryPath = path.join(layout.ladderLogDir, 'summary.json');
+  const summary = readSummaryEnd(summaryPath, now, lookbackMs);
+  if (summary) signals.push(summary);
+  for (const row of rows) {
+    const signal = runRowEnd(row, now, lookbackMs);
+    if (signal) signals.push(signal);
+  }
+  for (const file of listLogFiles(layout.ladderLogDir).concat(listLogFiles(layout.liveRunsDir))) {
+    signals.push(...readLogEnds(file, now, lookbackMs));
+  }
+  return signals;
+}
+
+function readSummaryEnd(file: string, now: number, lookbackMs: number): BatchEndSignal | null {
+  const when = mtimeIfExists(file);
+  if (when === null || now - when > lookbackMs || when > now + 60_000) return null;
+  let parsed: Record<string, unknown>;
+  try {
+    const value = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    parsed = value as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const reason = batchReason(parsed.endReason);
+  if (!reason) return null;
+  const games = typeof parsed.games === 'number' ? parsed.games : '?';
+  const requested = typeof parsed.requested === 'number' ? parsed.requested : '?';
+  return {
+    file,
+    endReason: reason,
+    detail: `summary endReason=${reason} games=${games}/${requested}`,
+  };
+}
+
+function runRowEnd(row: LogRow, now: number, lookbackMs: number): BatchEndSignal | null {
+  const value = row.value;
+  if (!value) return null;
+  const type = value.type ?? value.kind;
+  if (type !== 'run' && type !== 'ladder-batch') return null;
+  const ts = typeof value.ts === 'number' ? value.ts : null;
+  if (ts !== null && (ts < now - lookbackMs || ts > now + 60_000)) return null;
+  const reason = batchReason(value.endReason);
+  if (!reason) return null;
+  const games = typeof value.games === 'number' ? value.games : '?';
+  const requested = typeof value.requested === 'number' ? value.requested : '?';
+  return {
+    file: row.file,
+    line: row.line,
+    endReason: reason,
+    detail: `${String(type)} endReason=${reason} games=${games}/${requested}`,
+  };
+}
+
+function batchReason(value: unknown): 'stalled' | 'timeout' | null {
+  if (value === 'stalled' || value === 'timeout') return value;
+  return null;
+}
+
+function readLogEnds(file: string, now: number, lookbackMs: number): BatchEndSignal[] {
+  const when = mtimeIfExists(file);
+  if (when === null || now - when > lookbackMs || when > now + 60_000) return [];
+  let text = '';
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return [];
+  }
+  const signals: BatchEndSignal[] = [];
+  const lines = text.split('\n');
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    const timedOut = line.match(TIMED_OUT_LINE);
+    if (timedOut) {
+      signals.push({
+        file,
+        line: index + 1,
+        endReason: 'undrained-timeout',
+        detail: `Timed out after ${timedOut[1]}/${timedOut[2]} games with no drain`,
+      });
+    }
+    const stalled = line.match(STALLED_LINE);
+    if (stalled) {
+      signals.push({
+        file,
+        line: index + 1,
+        endReason: 'stalled',
+        detail: `stalled after ${stalled[1]}/${stalled[2]} games`,
+      });
+    }
+  }
+  return signals;
+}
+
+function listLogFiles(dir: string): string[] {
+  if (!dir || !fs.existsSync(dir)) return [];
+  const found: string[] = [];
+  const walk = (current: string) => {
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && entry.name.endsWith('.log')) found.push(full);
+    }
+  };
+  try {
+    const stat = fs.statSync(dir);
+    if (stat.isFile()) return dir.endsWith('.log') ? [dir] : [];
+  } catch {
+    return [];
+  }
+  walk(dir);
+  return found;
+>>>>>>> origin/main
 }
 
 export function readGit(cwd: string): GitStatus {

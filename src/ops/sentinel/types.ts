@@ -111,6 +111,18 @@ export interface LockSnapshot {
   host: string | null;
 }
 
+/**
+ * A batch that died on the old wall-clock reject, or that ended `stalled` / `timeout`.
+ * Game-level end reasons (`ko`, `our-timer`) are not batch ends.
+ */
+export interface BatchEndSignal {
+  file: string;
+  line?: number;
+  /** `stalled` and `timeout` are batch ends. `undrained-timeout` is the reject path that did not drain. */
+  endReason: 'stalled' | 'timeout' | 'undrained-timeout';
+  detail: string;
+}
+
 export interface RunMeta {
   path: string;
   mtimeMs: number;
@@ -199,6 +211,8 @@ export interface SentinelContext {
   runs: RunMeta[];
   runSummary: RunSummary | null;
   summaryMtimeMs: number | null;
+  /** Batch-level stall or undrained timeout signals inside the lookback. No process list required. */
+  batchEnds: BatchEndSignal[];
   decisionSamples: Array<{ file: string; line: number; ms: number }>;
 }
 
