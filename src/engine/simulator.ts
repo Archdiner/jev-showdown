@@ -82,11 +82,12 @@ export class BattleSimulator {
     if (!attacker || !defender || !attacker.revealedMoves) return;
 
     // Get move
-    const moves = Array.from(attacker.revealedMoves);
+    const moves = this.getMoveNames(attacker);
     const moveIndex = action.moveIndex - 1;
     if (moveIndex < 0 || moveIndex >= moves.length) return;
-    
+
     const moveName = moves[moveIndex];
+    if (!moveName) return;
     
     // Calculate damage
     const damage = this.estimateDamage(attacker, defender, moveName);
@@ -144,11 +145,13 @@ export class BattleSimulator {
         ...mon,
         revealedMoves: new Set(mon.revealedMoves),
         possibleSets: new Map(mon.possibleSets),
+        moves: mon.moves ? [...mon.moves] : undefined,
       })),
       opponentTeam: state.opponentTeam.map(mon => ({
         ...mon,
         revealedMoves: new Set(mon.revealedMoves),
         possibleSets: new Map(mon.possibleSets),
+        moves: mon.moves ? [...mon.moves] : undefined,
       })),
       field: { ...state.field, screens: { ...state.field.screens } },
       hazards: {
@@ -216,6 +219,10 @@ export class BattleSimulator {
   }
 
   getMoveNames(pokemon: any): string[] {
+    // Ordered request slots. Index 0 is move 1, and a disabled slot keeps its place.
+    if (Array.isArray(pokemon?.moves) && pokemon.moves.length > 0) {
+      return pokemon.moves.map((name: unknown) => (typeof name === 'string' ? name : ''));
+    }
     return pokemon?.revealedMoves ? Array.from(pokemon.revealedMoves) : [];
   }
 }

@@ -43,7 +43,7 @@ function isMoveLegal(request: any, moveIndex: number, terastallize: boolean): bo
   const move = active.moves[moveIndex - 1];
   if (!move) return false;
   if (move.disabled) return false;
-  if (typeof move.pp === 'number' && move.pp <= 0) return false;
+  if (move.pp !== undefined && Number(move.pp) <= 0) return false;
   if (terastallize && !active.canTerastallize) return false;
   return true;
 }
@@ -144,8 +144,9 @@ export function teamPreviewChoice(request: any): string | null {
  * throws, times out, or returns a choice the request would reject.
  *
  * This is a real fallback. Search's opponent model calls `maxDamageChoice`
- * and does not come through here. `MaxDamage Debug` on stdout is this path,
- * and the battle driver counts it on `fallbacks`.
+ * and does not come through here. `MaxDamage Debug` on stdout is this path.
+ * The battle driver counts that choice on `fallbacks`, including when it
+ * replaces a move the server rejected.
  */
 export function pickBestLegal(state: GameState, legal: Action[]): Action {
   if (legal.length === 0) {

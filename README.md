@@ -601,7 +601,7 @@ Other fields:
 | `opponent`, `opponentRating` | name and pre-game ladder rating from `\|player\|`. Null when the server omits them. |
 | `eloBefore`, `eloAfter` | our rating from the rating popup. `eloBefore` falls back to our `\|player\|` rating. Null when absent. Never 1000. |
 | `gxe` | from the rating line when that parser provides it. Null when absent. Never 50. |
-| `turns`, `invalidChoices`, `crashes`, `fallbacks`, `mismatches` | existing counters. Ops name for `invalidChoices` is `invalid`. |
+| `turns`, `invalidChoices`, `invalidChoiceReasons`, `crashes`, `fallbacks`, `mismatches` | existing counters. `invalidChoiceReasons` is the text after `[Invalid choice]` on each `\|error\|` or `\|bigerror\|` line, capped at 8. A chat echo of the same words is not counted. Ops name for `invalidChoices` is `invalid`. |
 | `durationMs` | wall clock from room open to the record |
 | `decisions` | number of `latencyMs` samples |
 | `latencyP50Ms`, `latencyP95Ms`, `latencyP99Ms` | nearest-rank percentiles of per-turn `latencyMs`, same rule as `metrics.jsonl`. Null when there are no samples. |
@@ -639,7 +639,7 @@ A later `prediction_error` row (`jev.prediction-error.v1`) on the same file scor
 Example:
 
 ```json
-{"schema":"jev.ladder-game.v1","kind":"ladder-game","source":"ladder","battleId":"battle-gen9randombattle-1","opponent":"Rival","opponentRating":1400,"outcome":"win","endReason":"ko","turns":21,"invalidChoices":0,"crashes":0,"fallbacks":0,"eloBefore":1073,"eloAfter":1089,"gxe":null,"durationMs":84000,"decisions":20,"latencyP50Ms":40,"latencyP95Ms":180,"latencyP99Ms":400,"latencyMaxMs":400,"minTimerMarginSec":12,"engine":"max-damage","configId":"maxdamage-v1","configHash":"ab12","gitSha":"87b268f","concurrency":1,"replayUrl":null,"replayStatus":"unconfirmed"}
+{"schema":"jev.ladder-game.v1","kind":"ladder-game","source":"ladder","battleId":"battle-gen9randombattle-1","opponent":"Rival","opponentRating":1400,"outcome":"win","endReason":"ko","turns":21,"invalidChoices":0,"invalidChoiceReasons":[],"crashes":0,"fallbacks":0,"eloBefore":1073,"eloAfter":1089,"gxe":null,"durationMs":84000,"decisions":20,"latencyP50Ms":40,"latencyP95Ms":180,"latencyP99Ms":400,"latencyMaxMs":400,"minTimerMarginSec":12,"engine":"max-damage","configId":"maxdamage-v1","configHash":"ab12","gitSha":"87b268f","concurrency":1,"replayUrl":null,"replayStatus":"unconfirmed"}
 ```
 
 ## Sim calibration
@@ -667,7 +667,7 @@ Per-battle JSONL (`logs/ladder/{user}-{room}.jsonl`) records these events in add
 | `kind` | When |
 | --- | --- |
 | `timer` | Every `\|inactive\|` / `\|inactiveoff\|`. `secondsLeft`, `aboutUs`, `tight` (`aboutUs` and at most 4 seconds). |
-| `choice-delivery` | After `/choose`. `sent`, `cause` (`sent`, `unconfirmed`, `stale-rqid`, `socket-closed`, `send-threw`, `illegal`, `server-rejected`, `not-your-turn`, `no-legal-retry`), `retry`, `replacement`, `serverLine`, `intendedRoomId`, `sentRoomId`. `intendedRoomId` is the battle the request belonged to. `sentRoomId` is the room id on the `/choose` message, or null when nothing was sent. A false `choose` is retried. `unconfirmed` is the same choice and rqid sent again when 8 seconds pass with no new request and no later turn, and also when our clock ticks. Turn 1 is included. `|turn|1` after the move does not clear it. `stale-rqid` was not sent. When no legal replacement remains, one `no-legal-retry` row is written. |
+| `choice-delivery` | After `/choose`. `sent`, `cause` (`sent`, `unconfirmed`, `stale-rqid`, `socket-closed`, `send-threw`, `illegal`, `server-rejected`, `not-your-turn`, `no-legal-retry`), `retry`, `replacement`, `serverLine`, `intendedRoomId`, `sentRoomId`. `intendedRoomId` is the battle the request belonged to. `sentRoomId` is the room id on the `/choose` message, or null when nothing was sent. A false `choose` is retried. `unconfirmed` is the same choice and rqid sent again only when a clock line for us arrives after the send and the turn has not moved. Silence, including the wait for the opponent and `|turn|1`, does not resend. `stale-rqid` was not sent. An invalid choice that means the original choice still stands (`too late`, `Can't undo`, `nothing to choose`, `not your turn`, `nothing to cancel`) is not replaced. A rejected move is replaced with another legal slot, and that replacement counts on `fallbacks`. When no legal replacement remains, one `no-legal-retry` row is written. |
 | `popup` | `attribution` is `matched`, `only-open`, `ambiguous`, or `elsewhere`. A replay URL matches the battle id even when a password follows it. `elsewhere` is a named battle that is not open, and it is not copied onto the battles that are. An ambiguous popup is copied onto each open battle with `candidates` and is not filed on "the latest room". |
 
 `secondsLeft` is cleared on each `\|request\|`, so a later turn does not reuse the previous clock. The game `result` includes `choiceDeliveryFailures`, `noLegalRetries`, and `ambiguousPopups`. Finished battles are removed from the driver's room map.

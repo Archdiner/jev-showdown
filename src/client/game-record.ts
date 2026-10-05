@@ -22,6 +22,33 @@ import type { CalibrationSummary } from './prediction.js';
  */
 export const LADDER_GAME_SCHEMA = 'jev.ladder-game.v1' as const;
 
+/** Enough of the incident loop to classify a game without storing the whole log. */
+export const INVALID_CHOICE_REASON_CAP = 8;
+
+/**
+ * Reason text after `[Invalid choice]` on an `|error|` or `|bigerror|` line.
+ * Other lines, including a chat echo of the same words, are not a rejection.
+ */
+export function invalidChoiceReason(line: string): string | null {
+  if (!line.startsWith('|error|') && !line.startsWith('|bigerror|')) return null;
+  if (!/\[Invalid choice\]/i.test(line)) return null;
+  const text = line.replace(/^.*?\[Invalid choice\]\s*/i, '').trim();
+  return text || 'invalid choice';
+}
+
+export function cappedInvalidChoiceReasons(reasons: readonly string[]): string[] {
+  return reasons.slice(0, INVALID_CHOICE_REASON_CAP);
+}
+
+function reasonsFromLines(lines: readonly string[]): string[] {
+  const reasons: string[] = [];
+  for (const line of lines) {
+    const reason = invalidChoiceReason(line);
+    if (reason) reasons.push(reason);
+  }
+  return reasons;
+}
+
 export type GameEndReason =
   | 'ko'
   | 'opponent-forfeit'
@@ -57,6 +84,11 @@ export interface LadderGameRecord {
   winner: string | null;
   turns: number;
   invalidChoices: number;
+  /**
+   * Server text after `[Invalid choice]`, one entry per `|error|` or `|bigerror|`
+   * line, capped at 8. A later chat echo of the same words is not an entry.
+   */
+  invalidChoiceReasons: string[];
   crashes: number;
   fallbacks: number;
   mismatches: number;
@@ -285,6 +317,8 @@ export interface LadderGameInput {
   winner: string | null;
   turns: number;
   invalidChoices: number;
+  /** When omitted, reasons are read from `|error|` / `|bigerror|` lines. */
+  invalidChoiceReasons?: string[];
   crashes: number;
   fallbacks: number;
   mismatches: number;
@@ -364,6 +398,7 @@ export function buildLadderGameRecord(input: LadderGameInput): LadderGameRecord 
     turns: input.turns,
     ...(phantom ? { phantom: true as const } : {}),
     invalidChoices: input.invalidChoices,
+    invalidChoiceReasons: cappedInvalidChoiceReasons(input.invalidChoiceReasons ?? reasonsFromLines(input.lines)),
     crashes: input.crashes,
     fallbacks: input.fallbacks,
     mismatches: input.mismatches,
@@ -565,6 +600,7 @@ export interface TranscriptFacts {
   gxe: number | null;
   turns: number;
   invalidChoices: number;
+  invalidChoiceReasons: string[];
   crashes: number;
   winner: string | null;
   minTimerMarginSec: number | null;
@@ -578,6 +614,7 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
   let ourSide: string | null = null;
   let turns = 0;
   let invalidChoices = 0;
+  const invalidChoiceReasons: string[] = [];
   let crashes = 0;
   let winner: string | null = null;
   let eloBefore: number | null = null;
@@ -599,7 +636,11 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
       }
     }
     if (line.startsWith('|turn|')) turns = Number(line.slice('|turn|'.length)) || turns;
-    if (/invalid choice/i.test(line)) invalidChoices += 1;
+    const reason = invalidChoiceReason(line);
+    if (reason) {
+      invalidChoices += 1;
+      if (invalidChoiceReasons.length < INVALID_CHOICE_REASON_CAP) invalidChoiceReasons.push(reason);
+    }
     if (/simulator process crashed|battle crashed/i.test(line)) crashes += 1;
     if (line.startsWith('|win|')) winner = line.slice('|win|'.length).trim() || null;
 
@@ -641,6 +682,7 @@ export function factsFromTranscript(lines: string[], username: string): Transcri
     gxe,
     turns,
     invalidChoices,
+    invalidChoiceReasons,
     crashes,
     winner,
     minTimerMarginSec: timerMarginSec(lines, username),

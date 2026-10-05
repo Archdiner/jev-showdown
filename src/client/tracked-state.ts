@@ -21,6 +21,7 @@ function cloneBelief(mon: PokemonBelief): PokemonBelief {
     ...mon,
     possibleSets: new Map(mon.possibleSets),
     revealedMoves: new Set(mon.revealedMoves),
+    moves: mon.moves ? [...mon.moves] : undefined,
     stats: mon.stats ? { ...mon.stats } : undefined,
     boosts: mon.boosts ? { ...mon.boosts } : undefined,
   };

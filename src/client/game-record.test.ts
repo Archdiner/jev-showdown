@@ -268,6 +268,23 @@ describe('ladder game records', () => {
     expect(loss.gxe).toBeNull();
   });
 
+  it('stores one invalid-choice reason per error line and caps the list', () => {
+    const lines = [
+      '|error|[Invalid choice] Can\'t undo: A trapping/disabling effect would cause undo to leak information',
+      '|c|BotAlpha|invalid choice echo',
+      '|error|[Invalid choice] Sorry, too late to make a different move; the next turn has already started',
+    ];
+    for (let i = 0; i < 10; i++) lines.push(`|bigerror|[Invalid choice] reason ${i}`);
+    const facts = factsFromTranscript(lines, 'BotAlpha');
+    expect(facts.invalidChoices).toBe(12);
+    expect(facts.invalidChoiceReasons).toHaveLength(8);
+    expect(facts.invalidChoiceReasons[0]).toContain("Can't undo");
+    expect(facts.invalidChoiceReasons[1]).toContain('too late');
+    const record = buildLadderGameRecord(input({ lines, invalidChoices: facts.invalidChoices }));
+    expect(record.invalidChoices).toBe(12);
+    expect(record.invalidChoiceReasons).toEqual(facts.invalidChoiceReasons);
+  });
+
   it('records the battle replay id and a URL only when the server confirms it', () => {
     expect(replayIdFromBattle('battle-gen9randombattle-42')).toBe('gen9randombattle-42');
     const pending = buildLadderGameRecord(input());

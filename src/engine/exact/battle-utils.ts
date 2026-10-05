@@ -17,6 +17,15 @@ export function otherSide(side: SideId): SideId {
 }
 
 /**
+ * 0-based request slot. `move 4` and `move 4 terastallize` are both slot 3.
+ * The slot stays put when a neighbor is disabled, out of PP, or Choice-locked.
+ */
+export function moveSlotIndex(choice: string): number {
+  const match = /^move (\d+)/.exec(choice);
+  return match ? Number(match[1]) - 1 : -1;
+}
+
+/**
  * Legal choice strings taken from the side's active request.
  * Switches are included unless the pokemon is strictly trapped.
  */
@@ -40,7 +49,10 @@ export function legalChoices(battle: Battle, sideId: SideId): string[] {
   const active = req.active?.[0];
   if (active?.moves) {
     for (let i = 0; i < active.moves.length; i++) {
-      if (!active.moves[i].disabled) choices.push(`move ${i + 1}`);
+      const move = active.moves[i];
+      if (move.disabled) continue;
+      if (move.pp !== undefined && Number(move.pp) <= 0) continue;
+      choices.push(`move ${i + 1}`);
     }
   }
   if (active && !active.trapped) {

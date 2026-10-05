@@ -201,10 +201,15 @@ describe('ladder delivery and timers', () => {
     await driver.stop();
   });
 
-  it('resends a turn-1 choice when no request or turn follows the send', async () => {
+  it('does not resend a turn-1 choice while the opponent is still deciding', async () => {
     const room = 'battle-gen9randombattle-2692976066';
     const move: Action = { type: 'move', moveIndex: 2 };
-    const { driver, socket, logDir, sent } = harness(() => true, { action: move, choiceWatchMs: 50 });
+    const { driver, socket, logDir, sent } = harness((roomId, choice) => {
+      if (sent.length > 1) {
+        socket.emit('line', roomId, `|error|[Invalid choice] Sorry, too late to make a different move; the next turn has already started (${choice})`);
+      }
+      return true;
+    }, { action: move, choiceWatchMs: 30 });
     const done = ended(driver);
     const body = JSON.stringify({
       rqid: 3,
@@ -222,34 +227,27 @@ describe('ladder delivery and timers', () => {
     socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
     socket.emit('line', room, '|player|p2|Rival|2|1400');
     socket.emit('line', room, `|request|${body}`);
-    await new Promise(resolve => setTimeout(resolve, 45));
+    await new Promise(resolve => setTimeout(resolve, 40));
     expect(sent).toEqual([{ roomId: room, choice: 'move 2|3' }]);
     socket.emit('line', room, '|turn|1');
-    await new Promise(resolve => setTimeout(resolve, 40));
-    expect(sent).toEqual([
-      { roomId: room, choice: 'move 2|3' },
-      { roomId: room, choice: 'move 2|3' },
-    ]);
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect(sent).toEqual([{ roomId: room, choice: 'move 2|3' }]);
     socket.emit('line', room, '|win|BotAlpha');
-    await done;
+    const summary = await done;
+    expect(summary.invalidChoices).toBe(0);
+    expect(summary.invalidChoiceReasons).toEqual([]);
+    expect(summary.fallbacks).toBe(0);
     const deliveries = readLog(logDir, room).filter(event => event.type === 'choice-delivery');
-    expect(deliveries[0]).toMatchObject({
-      sent: true,
-      cause: 'sent',
-      rqid: 3,
-      choice: 'move 2|3',
-      intendedRoomId: room,
-      sentRoomId: room,
-    });
-    expect(deliveries[1]).toMatchObject({
-      sent: true,
-      cause: 'unconfirmed',
-      rqid: 3,
-      choice: 'move 2|3',
-      retry: 1,
-      intendedRoomId: room,
-      sentRoomId: room,
-    });
+    expect(deliveries).toEqual([
+      expect.objectContaining({
+        sent: true,
+        cause: 'sent',
+        rqid: 3,
+        choice: 'move 2|3',
+        intendedRoomId: room,
+        sentRoomId: room,
+      }),
+    ]);
     await driver.stop();
   });
 
@@ -277,6 +275,122 @@ describe('ladder delivery and timers', () => {
     const resends = readLog(logDir, room).filter(event => event.cause === 'unconfirmed');
     expect(resends).toHaveLength(2);
     expect(resends[0]).toMatchObject({ rqid: 2, choice: 'move 1|2', sent: true, retry: 1 });
+    await driver.stop();
+  });
+
+  it('stops after one locked invalid choice and does not replace the move', async () => {
+    const room = 'battle-gen9randombattle-7006';
+    const move: Action = { type: 'move', moveIndex: 1 };
+    const { driver, socket, sent } = harness(() => true, { action: move });
+    const done = ended(driver);
+    const body = JSON.stringify({
+      rqid: 4,
+      side: {
+        id: 'p1',
+        pokemon: [{ ident: 'p1: A', details: 'A', condition: '100/100', active: true }],
+      },
+      active: [{
+        moves: [
+          { move: 'Tackle', id: 'tackle', pp: 35, maxpp: 35, target: 'normal', disabled: false },
+          { move: 'Growl', id: 'growl', pp: 40, maxpp: 40, target: 'normal', disabled: false },
+        ],
+      }],
+    });
+    socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
+    socket.emit('line', room, '|player|p2|Rival|2|1400');
+    socket.emit('line', room, `|request|${body}`);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(sent).toEqual([{ roomId: room, choice: 'move 1|4' }]);
+    socket.emit('line', room, '|inactive|BotAlpha has 120 seconds left.');
+    expect(sent).toHaveLength(2);
+    socket.emit('line', room, "|error|[Invalid choice] Can't undo: A trapping/disabling effect would cause undo to leak information");
+    socket.emit('line', room, '|c|BotAlpha|invalid choice echo');
+    socket.emit('line', room, '|inactive|BotAlpha has 90 seconds left.');
+    expect(sent).toHaveLength(2);
+    socket.emit('line', room, '|win|BotAlpha');
+    const summary = await done;
+    expect(summary.invalidChoices).toBe(1);
+    expect(summary.invalidChoiceReasons).toEqual([
+      "Can't undo: A trapping/disabling effect would cause undo to leak information",
+    ]);
+    expect(summary.fallbacks).toBe(0);
+    await driver.stop();
+  });
+
+  it('counts a fallback and keeps slot 4 when a middle move is disabled', async () => {
+    const room = 'battle-gen9randombattle-7007';
+    const { driver, socket, sent } = harness(() => true, { action: { type: 'move', moveIndex: 1 } });
+    const done = ended(driver);
+    const body = JSON.stringify({
+      rqid: 6,
+      side: {
+        id: 'p1',
+        pokemon: [{
+          ident: 'p1: Malamar',
+          details: 'Malamar',
+          condition: '100/100',
+          active: true,
+          moves: ['earthquake', 'swordsdance', 'stoneedge'],
+        }],
+      },
+      active: [{
+        moves: [
+          { move: 'Earthquake', id: 'earthquake', pp: 10, maxpp: 16, target: 'allAdjacentFoes', disabled: false },
+          { move: 'Outrage', pp: 0, maxpp: 16, target: 'randomNormal', disabled: true },
+          { move: 'Swords Dance', id: 'swordsdance', pp: 16, maxpp: 16, target: 'self', disabled: false },
+          { move: 'Stone Edge', id: 'stoneedge', pp: 8, maxpp: 8, target: 'normal', disabled: false },
+        ],
+      }],
+    });
+    socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
+    socket.emit('line', room, '|player|p2|saintracterror|2|1400');
+    socket.emit('line', room, '|switch|p2a: Serperior|Serperior, L80|100/100');
+    socket.emit('line', room, `|request|${body}`);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(sent).toEqual([{ roomId: room, choice: 'move 1|6' }]);
+    socket.emit('line', room, "|error|[Invalid choice] Can't move: Your Pokémon's Earthquake is disabled");
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(sent).toEqual([
+      { roomId: room, choice: 'move 1|6' },
+      { roomId: room, choice: 'move 4|6' },
+    ]);
+    socket.emit('line', room, '|win|BotAlpha');
+    const summary = await done;
+    expect(summary.invalidChoices).toBe(1);
+    expect(summary.invalidChoiceReasons).toEqual(["Can't move: Your Pokémon's Earthquake is disabled"]);
+    expect(summary.fallbacks).toBe(1);
+    await driver.stop();
+  });
+
+  it('does not send a no-PP slot and counts the replacement', async () => {
+    const room = 'battle-gen9randombattle-7008';
+    const { driver, socket, sent } = harness(() => true, { action: { type: 'move', moveIndex: 4 } });
+    const done = ended(driver);
+    const body = JSON.stringify({
+      rqid: 7,
+      side: {
+        id: 'p1',
+        pokemon: [{ ident: 'p1: Malamar', details: 'Malamar', condition: '100/100', active: true }],
+      },
+      active: [{
+        moves: [
+          { move: 'Earthquake', id: 'earthquake', pp: 10, maxpp: 16, target: 'normal', disabled: false },
+          { move: 'Outrage', id: 'outrage', pp: 10, maxpp: 16, target: 'normal', disabled: false },
+          { move: 'Swords Dance', id: 'swordsdance', pp: 16, maxpp: 16, target: 'self', disabled: false },
+          { move: 'Stone Edge', id: 'stoneedge', pp: 0, maxpp: 8, target: 'normal', disabled: false },
+        ],
+      }],
+    });
+    socket.emit('line', room, '|player|p1|BotAlpha|1|1100');
+    socket.emit('line', room, '|player|p2|Rival|2|1400');
+    socket.emit('line', room, `|request|${body}`);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(sent).toEqual([{ roomId: room, choice: expect.stringMatching(/^move [123]\|7$/) }]);
+    expect(sent[0].choice.startsWith('move 4')).toBe(false);
+    socket.emit('line', room, '|win|BotAlpha');
+    const summary = await done;
+    expect(summary.fallbacks).toBe(1);
+    expect(summary.invalidChoices).toBe(0);
     await driver.stop();
   });
 
