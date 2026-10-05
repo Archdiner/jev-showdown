@@ -1,4 +1,4 @@
-export const OPS_USAGE = `usage: npm run ops -- factory|gatekeeper|live|analyst|sentinel|scorecard|status|report|supervise|dry-run
+export const OPS_USAGE = `usage: npm run ops -- factory|gatekeeper|live|analyst|sentinel|incidents|scorecard|status|report|supervise|dry-run
   factory, gatekeeper, live, analyst, supervise accept --once
   live --local
       Start a local server on a free port, log in as localbot, and do not contact
@@ -15,10 +15,16 @@ export const OPS_USAGE = `usage: npm run ops -- factory|gatekeeper|live|analyst|
   analyst also tails logs/ladder and live-runs JSONL. --ladder-dir and --live-runs replace those defaults.
   Opponent priors use the foe's seat from ourSide or the |player| line. A scraped replay counts both players.
   report --daily is the plain-English day summary
-  sentinel [--once] [--json]
-      Run the reliability checks every 60s. --once exits 1 when a P0 incident is open.
-      --once --json prints those incidents as one JSON object on stdout, then exits 1 when a P0 is open.
+  sentinel [--once] [--json] [--since 24h|ISO]
+      Run the reliability checks every 60s. --once exits 1 only for an open, unacknowledged P0 inside the baseline.
+      --since or SENTINEL_SINCE is that baseline. When both are unset, it is the current ladder run's start.
+      --once --json prints those incidents as one JSON object. Acknowledged and fixing P0s do not change the exit code.
       --ack ID, --fixing ID --pr URL, and --root-cause ID --text REASON move an incident.
+      LIVE_REPO_DIR is the ladder checkout when it is not the ops cwd. Process checks use ps, with /proc when it exists.
+  incidents ack|resolve --before ISO --reason TEXT
+  incidents ack|resolve --sha SHA --reason TEXT
+  incidents link ID REF
+      Mark matching incidents, or attach a ledger ref such as INC-007. The scorecard prints the ref.
   scorecard [--since 24h|ISO] [--md]
       One screen for the owner. --since 24h is a duration. An ISO timestamp is the start of the window.
       Elo, win rate, and record are compared with the previous window of the same length.

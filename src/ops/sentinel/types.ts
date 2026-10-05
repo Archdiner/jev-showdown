@@ -20,6 +20,12 @@ export const DEFAULTS = {
   batchSize: 10,
   lookbackMs: 24 * 60 * 60 * 1000,
   intervalMs: 60_000,
+  /** Later live games that pass a per-game check before that episode resolves. */
+  episodePassGames: 10,
+  /** Live play after the latest failure that also resolves the episode. */
+  episodePassMs: 30 * 60 * 1000,
+  /** Append-only incident log rotates past this size. The snapshot keeps the state. */
+  maxEventBytes: 1_048_576,
 } as const;
 
 export interface Evidence {
@@ -32,6 +38,11 @@ export interface CheckHit {
   key: string;
   detail: string;
   evidence: Evidence[];
+  /** Game time. Episode checks ignore hits older than the baseline. */
+  at?: number | null;
+  gitSha?: string | null;
+  runId?: string | null;
+  battleId?: string | null;
 }
 
 export interface InvariantCheck {
@@ -45,6 +56,10 @@ export interface InvariantCheck {
 export interface ProcessSnapshot {
   pid: number;
   cmd: string;
+  ppid?: number;
+  pgid?: number;
+  /** `ps` lstart, in milliseconds, when it parsed. */
+  startedAt?: number;
   /** Undefined when the environment could not be read. An empty object was readable. */
   env?: Record<string, string>;
 }
@@ -58,11 +73,19 @@ export interface GitStatus {
 
 export interface Layout {
   cwd: string;
+  /** Ladder runner checkout when it is not `cwd`. Null means the ops checkout is the only tree. */
+  liveRepoDir: string | null;
   opsDir: string;
   ladderLogDir: string;
   liveRunsDir: string;
   dataDir: string;
   graphDb: string;
+}
+
+export interface CheckoutStatus {
+  role: 'ops' | 'live';
+  dir: string;
+  git: GitStatus;
 }
 
 export interface LogRow {
@@ -75,6 +98,17 @@ export interface LogRow {
 export interface DrainFile {
   path: string;
   mtimeMs: number;
+  checkout: 'ops' | 'live';
+}
+
+export interface LockSnapshot {
+  path: string;
+  checkout: 'ops' | 'live';
+  dir: string;
+  pid: number | null;
+  username: string | null;
+  startedAt: string | null;
+  host: string | null;
 }
 
 export interface RunMeta {
@@ -85,6 +119,16 @@ export interface RunMeta {
   username?: string;
   local?: boolean;
   engine?: string;
+  /** When the runner started. File mtime is the fallback. */
+  startedAt?: number;
+  gitSha?: string | null;
+}
+
+export interface RunSummary {
+  games: number;
+  wins: number | null;
+  gitSha: string | null;
+  requested: number | null;
 }
 
 export interface ObservedGame {
@@ -108,6 +152,7 @@ export interface ObservedGame {
   local: boolean;
   ladder: boolean;
   gitSha: string | null;
+  runId: string | null;
   variantId: string | null;
   configId: string | null;
   username: string | null;
@@ -134,7 +179,12 @@ export interface SentinelContext {
   batchSize: number;
   processesScanned: boolean;
   processes: ProcessSnapshot[];
+  /** True when `pid` is alive. Injected in tests. Production uses `process.kill(pid, 0)` after the process list. */
+  pidAlive: (pid: number) => boolean;
+  /** Null means every game in the lookback is in the evaluation baseline. */
+  baselineMs: number | null;
   git: GitStatus;
+  checkouts: CheckoutStatus[];
   rows: LogRow[];
   games: ObservedGame[];
   heartbeats: Array<Record<string, unknown> & { file: string; line: number }>;
@@ -144,7 +194,9 @@ export interface SentinelContext {
   speciesPath: string;
   speciesError: string | null;
   drains: DrainFile[];
+  locks: LockSnapshot[];
   runs: RunMeta[];
+  runSummary: RunSummary | null;
   summaryMtimeMs: number | null;
   decisionSamples: Array<{ file: string; line: number; ms: number }>;
 }
@@ -164,6 +216,15 @@ export interface Incident {
   status: IncidentStatus;
   rootCause: string | null;
   pr: string | null;
+  /** External ledger id, for example INC-007. */
+  ref: string | null;
+  gitSha: string | null;
+  runId: string | null;
+  /** False when every failure on this episode is older than the baseline. */
+  inBaseline: boolean;
+  /** Battle ids that failed this episode. Empty for live-state checks. */
+  battles: string[];
+  lastFailureTs: number | null;
   episodeOpenedAt: number;
   clearSince: number | null;
   resolvedAt: number | null;
@@ -172,7 +233,7 @@ export interface Incident {
 
 export interface IncidentEvent {
   ts: number;
-  type: 'opened' | 'updated' | 'acknowledged' | 'fixing' | 'resolved' | 'verified' | 'reopened' | 'root-cause';
+  type: 'opened' | 'updated' | 'acknowledged' | 'fixing' | 'resolved' | 'verified' | 'reopened' | 'root-cause' | 'linked';
   incidentId: string;
   checkId: string;
   key: string;
@@ -187,6 +248,12 @@ export interface IncidentEvent {
   suggestedFix?: string | null;
   episodeOpenedAt?: number;
   clearSince?: number | null;
+  ref?: string | null;
+  gitSha?: string | null;
+  runId?: string | null;
+  inBaseline?: boolean;
+  battles?: string[];
+  lastFailureTs?: number | null;
 }
 
 export function actionable(status: IncidentStatus): boolean {

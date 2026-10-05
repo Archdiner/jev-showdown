@@ -172,8 +172,7 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     { facility: 'factory', pid: 12, ts: now - 4000, status: 'ok', detail: 'working' },
     { facility: 'gatekeeper', pid: 13, ts: now - 3000, status: 'ok', detail: 'working' },
     { facility: 'analyst', pid: 14, ts: now - 2000, status: 'ok', detail: 'reviewed 0' },
-    { facility: 'live', pid: 15, ts: now - 120_000, status: 'ok', detail: 'localbot win rating 1000', scope: 'local' },
-    { facility: 'live', pid: 15, ts: now - 110_000, status: 'ok', detail: 'asad loss rating 1510', scope: 'ladder' },
+    { facility: 'live', pid: 15, ts: now - 120_000, status: 'ok', detail: 'localbot ladder rating 1510 on sim3.psim.us', scope: 'local' },
   ].map(row => JSON.stringify(row)).join('\n')}\n`);
   fs.writeFileSync(path.join(ops, 'live-games.jsonl'), `${JSON.stringify({
     schema: 'jev.ladder-game.v1',
@@ -206,9 +205,17 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     engine: 'max-damage',
     username: 'asad',
     local: false,
+    startedAt: older,
+    gitSha: 'good222',
     drainFile: 'live-runs/1000.drain',
     globalDrainFile: 'state/DRAIN',
   }, null, 2));
+  fs.writeFileSync(path.join(state, 'ladder-asad.lock'), JSON.stringify({
+    pid: 99999,
+    startedAt: new Date(older).toISOString(),
+    host: 'mac.local',
+    username: 'asad',
+  }));
   const drainAt = (now - 11 * 60 * 1000) / 1000;
   for (const file of [path.join(runs, '1000.drain'), path.join(state, 'DRAIN')]) {
     fs.writeFileSync(file, '');
@@ -237,6 +244,7 @@ export function writeTonightFixture(root: string, now = Date.now()): TonightFixt
     now,
     layout: {
       cwd: root,
+      liveRepoDir: null,
       opsDir: ops,
       ladderLogDir: ladder,
       liveRunsDir: runs,

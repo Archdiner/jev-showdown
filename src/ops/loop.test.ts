@@ -220,6 +220,7 @@ describe('improvement stall', () => {
 function layoutFor(root: string): Layout {
   const layout: Layout = {
     cwd: root,
+    liveRepoDir: null,
     opsDir: root,
     ladderLogDir: path.join(root, 'ladder'),
     liveRunsDir: path.join(root, 'live-runs'),
