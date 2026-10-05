@@ -45,7 +45,7 @@ export function createHybridSearch(params: SearchParams): SearchImpl {
           client = new GatewayClient({
             timeoutMs: 6000,
             perTurnLatencyBudgetMs: 20000,
-            maxRetries: 0,
+            maxRetries: 1,
           });
         }
         return client;
@@ -137,10 +137,11 @@ async function hybridSearch(
   scores.sort((a, b) => b.score - a.score || a.choice.localeCompare(b.choice));
   let choice = teraGate(scores, viewed, side, params, ledger.plan);
 
-  if (params.judgment && client && allowed && Date.now() < deadline) {
+  if (params.judgment && client && allowed && Date.now() < deadline && Date.now() >= ledger.cooldownUntil) {
     const judged = await judgeMove(client, params, ledger.plan, scores, deadline - Date.now());
     ledger.costUsd += judged.costUsd;
     if (judged.timeout) ledger.timeouts += 1;
+    if (judged.failed) ledger.cooldownUntil = Date.now() + 8000;
     if (judged.choice && (rootLegal.includes(judged.choice) || rootLegal.length === 0)) choice = judged.choice;
   }
 

@@ -28,6 +28,8 @@ export interface HybridLedger {
   faintCount: number;
   revealCount: number;
   lastPlanTurn: number;
+  /** Epoch ms. A failed plan waits out the gateway instead of calling every reveal. */
+  cooldownUntil: number;
 }
 
 export function emptyLedger(): HybridLedger {
@@ -39,6 +41,7 @@ export function emptyLedger(): HybridLedger {
     faintCount: -1,
     revealCount: -1,
     lastPlanTurn: -999,
+    cooldownUntil: 0,
   };
 }
 
@@ -54,6 +57,7 @@ export function maybeStartPlan(
 ): void {
   if (!params.plan || !allowed || !client) return;
   if (ledger.inflight) return;
+  if (Date.now() < ledger.cooldownUntil) return;
   const faints = battle.getSide(side).pokemon.filter(mon => mon.fainted).length;
   const reveals = foes.reduce((sum, mon) => sum + (mon.moves?.length || 0) + (mon.ability ? 1 : 0) + (mon.item ? 1 : 0), 0);
   const turn = battle.turn || 0;
@@ -73,6 +77,7 @@ export function maybeStartPlan(
     if (result.timeout) ledger.timeouts += 1;
     ledger.costUsd += result.costUsd;
     if (result.plan) ledger.plan = result.plan;
+    else ledger.cooldownUntil = Date.now() + 8000;
   }).catch(() => {
     ledger.inflight = null;
     ledger.timeouts += 1;
@@ -85,12 +90,12 @@ export async function judgeMove(
   plan: HybridPlan | null,
   rows: Array<{ choice: string; score: number; koRate: number }>,
   budgetMs: number,
-): Promise<{ choice: string | null; costUsd: number; timeout: boolean }> {
+): Promise<{ choice: string | null; costUsd: number; timeout: boolean; failed: boolean }> {
   const ranked = [...rows].sort((a, b) => b.score - a.score).slice(0, 3);
-  if (ranked.length < 2) return { choice: ranked[0]?.choice ?? null, costUsd: 0, timeout: false };
+  if (ranked.length < 2) return { choice: ranked[0]?.choice ?? null, costUsd: 0, timeout: false, failed: false };
   const margin = params.margin;
   if (ranked[0].score - ranked[1].score > margin) {
-    return { choice: null, costUsd: 0, timeout: false };
+    return { choice: null, costUsd: 0, timeout: false, failed: false };
   }
   const offered = ranked.map(row => row.choice);
   const prompt = [
@@ -101,14 +106,14 @@ export async function judgeMove(
     ...ranked.map(row => `${row.choice} score=${row.score.toFixed(3)} ko=${row.koRate.toFixed(2)}`),
   ].join('\n');
   const result = await complete(client, params.model, 'medium', prompt, budgetMs, true);
-  if (!result.ok) return { choice: null, costUsd: result.costUsd, timeout: result.timeout };
+  if (!result.ok) return { choice: null, costUsd: result.costUsd, timeout: result.timeout, failed: true };
   const choice = readChoice(result.text, offered);
-  if (!choice) return { choice: null, costUsd: result.costUsd, timeout: false };
+  if (!choice) return { choice: null, costUsd: result.costUsd, timeout: false, failed: false };
   const picked = ranked.find(row => row.choice === choice);
   if (!picked || ranked[0].score - picked.score > margin) {
-    return { choice: null, costUsd: result.costUsd, timeout: false };
+    return { choice: null, costUsd: result.costUsd, timeout: false, failed: false };
   }
-  return { choice, costUsd: result.costUsd, timeout: false };
+  return { choice, costUsd: result.costUsd, timeout: false, failed: false };
 }
 
 function planBrief(battle: Battle, side: SideId, foes: FoeMon[], worlds: WorldSample[]): string {
