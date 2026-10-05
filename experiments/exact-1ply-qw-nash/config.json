@@ -4,14 +4,14 @@
   "opponentModel": "max-damage",
   "evalMode": "hp",
   "errorAsLoss": false,
-  "samples": 8,
+  "samples": 1,
   "tera": true,
   "progress": true,
   "foePrior": true,
   "solver": "regret-matching",
-  "solverIterations": 500,
+  "solverIterations": 200,
   "solverPurificationThreshold": 0.1,
   "playMixed": false,
-  "maxReplies": 6,
-  "replyCap": 6
+  "maxReplies": 3,
+  "replyCap": 3
 }
