@@ -73,7 +73,13 @@ describe('hybrid search pieces', () => {
     expect(notes.statusMove.has('foe')).toBe(true);
     expect(notes.hazardChip.has('foe')).toBe(true);
     expect(notes.foeHazards).toContain('stealthrock');
-    expect(notes.speed.get('foe')).toBe('slower');
+    // Thunder Wave is priority 0, so the foe moved first on a speed turn.
+    expect(notes.speed.get('foe')).toBe('faster');
+    const slower = parsePublic([
+      '|move|p1a: Us|Tackle|p2a: Foe',
+      '|move|p2a: Foe|Earthquake|p1a: Us',
+    ], 'p1');
+    expect(slower.speed.get('foe')).toBe('slower');
   });
 
   it('regret-matches a dominated row to the better action', () => {
