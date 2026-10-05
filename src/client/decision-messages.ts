@@ -1,4 +1,5 @@
 import { Action, BotConfig, GameState } from '../types/index.js';
+import { LivePosition } from './decision-battle.js';
 import { EngineName } from './engines.js';
 
 export interface DecideRequest {
@@ -8,6 +9,7 @@ export interface DecideRequest {
   state: GameState;
   legal: Action[];
   searchTimeMs: number;
+  position?: LivePosition;
 }
 
 export interface InitRequest {

@@ -1,5 +1,9 @@
 # Changelog
 
+## Ladder uses the promoted engines
+
+`npm run ladder -- --engine search` and `--engine exact` call `exactSearch` with the gate champion `EXACT_1PLY` (8 samples). `--engine max-damage` calls `maxDamageChoice` from `@smogon/calc`. The ladder builds that choice from the live request, so the move index is the one the server asked for. Concurrency profiles, drain, and live metrics are unchanged.
+
 ## Operations layer
 
 Four long-running commands share the graph and the logs: `npm run ops -- factory`, `gatekeeper`, `live`, and `analyst`. The factory runs queued simulations and may propose a config. The gatekeeper is the only command that writes `champion` or `live-approved`, and only after SPRT and a 100% diagnostic pass. Live plays those configs on one Showdown login, gives the champion most of the games, and pulls a config after a loss streak or a rating drop. The analyst turns a live loss into a general hypothesis and a factory job. `status`, `report --daily`, and `supervise` read the same store. `deploy/jev-ops.service` is the systemd unit.

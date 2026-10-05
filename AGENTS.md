@@ -141,7 +141,7 @@ npm run ladder -- --check
 
 `--check` logs in, prints `named` / `locked` and the current `gen9randombattle` rating, and exits. A lock, ban, or proxy popup exits with an error and does not reconnect. When it prints `named=yes locked=no`, use the play command below.
 
-The ladder client speaks the Showdown websocket protocol. `--engine max-damage` (the default) is the max-damage heuristic. `--engine search` calls `Bot.selectAction`. In a local head-to-head, max-damage won 12 games to search's 1. Search and eval code are unchanged. Credentials come only from the environment and are never printed.
+The ladder client speaks the Showdown websocket protocol. `--engine max-damage` (the default) calls `maxDamageChoice` (`@smogon/calc`). `--engine search` and `--engine exact` call `exactSearch` with `EXACT_1PLY` (8 samples), the same policy the gate promoted. Credentials come only from the environment and are never printed.
 
 One login can play several battles at once. `--concurrency K` (default 1, absolute max 16) keeps a ladder search queued whenever fewer than K battles are active. `--use-engine-profile` loads `configs/live/concurrency.json`: search 3, max-damage 4, grok 1. `--concurrency-config FILE` overrides those numbers. `--runners N` multiplies the limit the way `ops live --runners=N --concurrency=K` does. An explicit `--concurrency` wins. Showdown can still reject a search under load; that is not a client hard cap of 5. Each battle has its own protocol state, JSONL log, and worker-thread engine. Search time is per battle and is split across decisions that are in flight. If the server rejects a search (already searching, the 5-game cap, or high load), the client logs the popup, backs off, and retries. It never sends `/forfeit`.
 

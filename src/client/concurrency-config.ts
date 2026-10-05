@@ -35,11 +35,13 @@ export function selectLiveEngine(name: string): {
 } {
   const id = name.trim().toLowerCase();
   if (id === 'grok' || id === 'llm') return { engine: 'search', profile: 'grok', useLLMPrior: true };
-  if (id === 'search' || id === 'robust' || id === 'champion') return { engine: 'search', profile: 'search', useLLMPrior: false };
+  if (id === 'search' || id === 'exact' || id === 'exact-1ply' || id === 'robust' || id === 'champion') {
+    return { engine: 'search', profile: 'search', useLLMPrior: false };
+  }
   if (id === 'max-damage' || id === 'maxdamage' || id === 'maxdamage-v1') {
     return { engine: 'max-damage', profile: 'max-damage', useLLMPrior: false };
   }
-  throw new Error(`Unknown engine "${name}". Use search, max-damage, or grok.`);
+  throw new Error(`Unknown engine "${name}". Use search, exact, max-damage, or grok.`);
 }
 
 /**
