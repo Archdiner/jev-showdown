@@ -1,6 +1,6 @@
 import { PRNG, type Battle } from '@pkmn/sim';
 import { legalChoices, type SideId } from '../engine/exact/battle-utils.js';
-import { battleToState } from '../engine/exact/search.js';
+import { QUICK_WIN_SEARCH_ID, battleToState } from '../engine/exact/search.js';
 import { blendCandidates } from '../llm/blend.js';
 import { toAdvisorCandidates } from '../llm/state-summary.js';
 import { GatewayClient } from '../llm/gateway-client.js';
@@ -123,7 +123,9 @@ export function buildBot(source: ConfigSource, env?: EnvName | EnvProfile, overr
       const active = activeConfig === loaded.config ? base : implsOf(activeConfig);
       const activeLayerIds = layerIdsOf(activeConfig);
       const plan = await planFor(active, activeConfig, input, client, spend, runtime);
-      const legal = legalChoices(input.battle, input.side);
+      const legal = legalChoices(input.battle, input.side, {
+        tera: activeConfig.search.id === QUICK_WIN_SEARCH_ID,
+      });
       const budget = Math.min(activeConfig.search.params.timeBudgetMs, runtime.timeLimitMs);
       const trace = legal.length === 0
         ? { choice: 'default', scores: [] as Array<{ choice: string; score: number }>, predictedSwitch: undefined, answersPredictedSwitch: undefined }

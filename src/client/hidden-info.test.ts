@@ -140,6 +140,42 @@ describe('ladder hidden information', () => {
     expect(legalChoices(viewed, 'p1')).toEqual(legal);
   });
 
+  it('stops offering tera once the side has used it', () => {
+    let checked = 0;
+    for (let seed = 1; seed <= 40 && checked < 3; seed++) {
+      const battle = opened(seed);
+      let guard = 0;
+      while (!battle.ended && guard++ < 30 && checked < 3) {
+        let terastallized = false;
+        for (const side of ['p1', 'p2'] as const) {
+          const legal = legalChoices(battle, side, { tera: true });
+          if (legal.length === 0) continue;
+          if (legal[0] === 'default') {
+            battle.choose(side, 'default');
+            continue;
+          }
+          const tera = legal.find(choice => choice.includes('terastallize'));
+          safeChoose(battle, side, tera || legal.find(choice => choice.startsWith('move')) || legal[0]);
+          if (tera) terastallized = true;
+        }
+        if (!terastallized || battle.ended) continue;
+        for (const side of ['p1', 'p2'] as const) {
+          const legal = legalChoices(battle, side, { tera: true });
+          if (!legal.some(choice => choice.startsWith('move'))) continue;
+          if (legal.some(choice => choice.includes('terastallize'))) continue;
+          const viewed = ladderDecisionBattle(battle, side, { quickWins: true });
+          expect(viewed).not.toBeNull();
+          if (!viewed) continue;
+          const viewedLegal = legalChoices(viewed, 'p1', { tera: true });
+          expect(viewedLegal.some(choice => choice.includes('terastallize'))).toBe(false);
+          expect(viewedLegal).toEqual(legal);
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
   it('plays a hidden-info game without an illegal choice', async () => {
     const fast = { ...EXACT_1PLY, samples: 1 };
     const teams = teamsForSeed(3);
