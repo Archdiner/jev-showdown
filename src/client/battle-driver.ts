@@ -4,11 +4,10 @@ import * as path from 'path';
 import { Battle } from '@pkmn/client';
 import { Generations } from '@pkmn/data';
 import { Dex } from '@pkmn/dex';
-import { Bot } from '../bot/bot.js';
 import { Format } from '../types/format.js';
 import { Action, GameState } from '../types/index.js';
 import { StateMismatch } from '../types/format.js';
-import { ShowdownClient, RatingUpdate, ReplayNotice } from './showdown-client.js';
+import { ShowdownClient, ReplayNotice, parseRatingLine } from './showdown-client.js';
 import { DecisionClient } from './decision-client.js';
 import { OpponentTracker } from './opponent-tracker.js';
 import { GameLog, openGameLog } from './game-log.js';
@@ -78,7 +77,7 @@ export interface BattleDriverOptions {
   client: ShowdownClient;
   username: string;
   format: Format;
-  bot: Bot;
+  engineName: string;
   decisions: DecisionClient;
   logDir: string;
   decisionTimeoutMs: number;
@@ -99,9 +98,6 @@ export class BattleDriver extends EventEmitter {
     const { client } = options;
     client.on('line', (roomId: string, line: string) => {
       this.onLine(roomId, line);
-    });
-    client.on('rating', (rating: RatingUpdate) => {
-      this.onRating(rating);
     });
     client.on('replay', (replay: ReplayNotice) => {
       this.onReplay(replay);
@@ -150,6 +146,11 @@ export class BattleDriver extends EventEmitter {
       const seconds = line.match(/(\d+) seconds left/);
       const aboutUs = line.includes(this.options.username) || /You have/i.test(line);
       if (seconds && aboutUs) room.secondsLeft = Number(seconds[1]);
+    }
+
+    const rating = parseRatingLine(line);
+    if (rating && toID(rating.username) === toID(this.options.username)) {
+      room.elo = { before: rating.before, after: rating.after };
     }
 
     if (line.startsWith('|request|')) {
@@ -223,13 +224,15 @@ export class BattleDriver extends EventEmitter {
     };
     this.rooms.set(roomId, room);
     this.options.client.trackRoom(roomId);
-    this.options.bot.startBattle(roomId);
+    this.options.decisions.openBattle(roomId);
     log.write({
       type: 'game_start',
       battleId: roomId,
       format: this.options.format.id,
       username: this.options.username,
+      engine: this.options.engineName,
     });
+    this.emit('battleStart', roomId);
     return room;
   }
 
@@ -304,7 +307,7 @@ export class BattleDriver extends EventEmitter {
         };
       } else {
         const budget = this.budgetMs(room);
-        decision = await this.options.decisions.decide(state, legal, budget);
+        decision = await this.options.decisions.decide(room.roomId, state, legal, budget);
       }
     } catch (err) {
       room.crashes += 1;
@@ -360,7 +363,15 @@ export class BattleDriver extends EventEmitter {
       overlayProtocol(room.snapshot, room.battle, room.ourSide),
       request,
     );
-    return this.options.bot.reconcileState(tracked, request);
+    const mismatches = this.options.format.reconcileState(tracked, request);
+    if (mismatches.length > 0) {
+      console.warn(`[${this.options.username}] ${room.roomId} mismatches (turn ${tracked.turn}):`);
+      for (const mismatch of mismatches) {
+        const prefix = mismatch.severity === 'error' ? '❌' : mismatch.severity === 'warning' ? '⚠️' : 'ℹ️';
+        console.warn(`  ${prefix} ${mismatch.field}: tracked=${JSON.stringify(mismatch.tracked)}, actual=${JSON.stringify(mismatch.actual)}`);
+      }
+    }
+    return mismatches;
   }
 
   private budgetMs(room: RoomState): number {
@@ -422,14 +433,6 @@ export class BattleDriver extends EventEmitter {
     }, 2000);
   }
 
-  private onRating(rating: RatingUpdate): void {
-    if (toID(rating.username) !== toID(this.options.username)) return;
-    for (const room of this.rooms.values()) {
-      if (room.finalized) continue;
-      room.elo = { before: rating.before, after: rating.after };
-    }
-  }
-
   private onPopup(message: string): void {
     const open = [...this.rooms.values()].filter(room => !room.finalized);
     const target = open.find(room => room.ended) ?? open[open.length - 1];
@@ -438,8 +441,11 @@ export class BattleDriver extends EventEmitter {
   }
 
   private onReplay(replay: ReplayNotice): void {
-    const open = [...this.rooms.values()].filter(room => !room.finalized);
-    const target = open.find(room => room.ended) ?? open[0];
+    const target = [...this.rooms.values()].find(room =>
+      room.roomId === replay.id
+      || room.roomId === `battle-${replay.id}`
+      || room.roomId.endsWith(replay.id),
+    );
     if (target) target.replay = replay;
   }
 
@@ -481,7 +487,7 @@ export class BattleDriver extends EventEmitter {
     };
 
     room.log.write({ type: 'result', ...summary });
-    this.options.bot.endBattle(outcome, opponent ?? 'unknown', summary.turns);
+    this.options.decisions.closeBattle(room.roomId);
     await room.log.close();
     this.options.client.untrackRoom(room.roomId);
     this.emit('gameEnd', summary);

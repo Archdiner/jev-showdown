@@ -3,47 +3,94 @@ import { Bot } from '../bot/bot.js';
 import { BattleLogger } from '../learning/battle-logger.js';
 import { gen9RandomBattle } from '../formats/gen9-randombattle.js';
 import { dataLoader } from '../data/data-loader.js';
-import { BotConfig } from '../types/index.js';
+import { Action, BotConfig, GameState } from '../types/index.js';
 import { pickBestLegal, sameAction } from './choice.js';
 import { DecideRequest, WorkerRequest, WorkerResponse } from './decision-messages.js';
+import { EngineName, freshConfig, maxDamageAction } from './engines.js';
 
 if (!parentPort) {
   throw new Error('decision-worker must be started as a worker thread');
 }
 
 const port = parentPort;
-let bot: Bot | null = null;
+
+interface IsolatedEngine {
+  selectAction(state: GameState, legal: Action[]): Promise<Action>;
+  getLastEngineError(): string | null;
+  getLastDecision(): { evaluation: { score: number } } | undefined;
+}
+
+interface BattleEngine {
+  engine: IsolatedEngine;
+  config: BotConfig;
+}
+
+let engineName: EngineName = 'search';
+let baseConfig: BotConfig | null = null;
+const battles = new Map<string, BattleEngine>();
+let chain = Promise.resolve();
 
 function send(message: WorkerResponse): void {
   port.postMessage(message);
 }
 
-async function init(config: BotConfig): Promise<void> {
+async function init(config: BotConfig, engine: EngineName): Promise<void> {
+  engineName = engine;
+  baseConfig = config;
   await dataLoader.load(gen9RandomBattle);
-  const logger = new BattleLogger(':memory:');
-  bot = new Bot(config, gen9RandomBattle, logger);
-  await bot.initialize();
-  bot.startBattle('ladder');
   send({ type: 'ready' });
 }
 
-async function decide(message: DecideRequest): Promise<void> {
-  if (!bot) {
-    send({ type: 'worker-error', message: 'Engine is not initialized' });
+async function openBattle(battleId: string): Promise<void> {
+  if (battles.has(battleId) || !baseConfig) return;
+  const config = freshConfig(baseConfig, baseConfig.searchTimeMs);
+  if (engineName === 'max-damage') {
+    battles.set(battleId, {
+      config,
+      engine: {
+        async selectAction(state, legal) {
+          return maxDamageAction(state, legal);
+        },
+        getLastEngineError: () => null,
+        getLastDecision: () => undefined,
+      },
+    });
     return;
   }
 
+  const bot = new Bot(config, gen9RandomBattle, new BattleLogger(':memory:'));
+  await bot.initialize();
+  bot.startBattle(battleId);
+  battles.set(battleId, { config, engine: bot });
+}
+
+function closeBattle(battleId: string): void {
+  const held = battles.get(battleId);
+  battles.delete(battleId);
+  if (held?.engine instanceof Bot) {
+    held.engine.endBattle('tie', 'closed', 0);
+  }
+}
+
+async function decide(message: DecideRequest): Promise<void> {
+  if (!battles.has(message.battleId)) await openBattle(message.battleId);
+  const held = battles.get(message.battleId);
+  if (!held) {
+    send({ type: 'worker-error', message: `no engine for ${message.battleId}` });
+    return;
+  }
+
+  held.config.searchTimeMs = message.searchTimeMs;
   const started = Date.now();
   try {
-    const action = await bot.selectAction(message.state, message.legal);
-    const engineError = bot.getLastEngineError();
+    const action = await held.engine.selectAction(message.state, message.legal);
+    const engineError = held.engine.getLastEngineError();
     const known = message.legal.some(candidate => sameAction(candidate, action));
     if (engineError || !known) {
-      const fallback = pickBestLegal(message.state, message.legal);
       send({
         type: 'decision',
         id: message.id,
-        action: fallback,
+        action: pickBestLegal(message.state, message.legal),
         score: null,
         timeMs: Date.now() - started,
         fallback: true,
@@ -56,7 +103,7 @@ async function decide(message: DecideRequest): Promise<void> {
       type: 'decision',
       id: message.id,
       action,
-      score: bot.getLastDecision()?.evaluation.score ?? null,
+      score: held.engine.getLastDecision()?.evaluation.score ?? null,
       timeMs: Date.now() - started,
       fallback: false,
     });
@@ -80,13 +127,25 @@ async function decide(message: DecideRequest): Promise<void> {
   }
 }
 
-port.on('message', (message: WorkerRequest) => {
+async function handle(message: WorkerRequest): Promise<void> {
   if (message.type === 'init') {
-    init(message.config).catch(err => {
-      const text = err instanceof Error ? err.message : String(err);
-      send({ type: 'worker-error', message: text });
-    });
+    await init(message.config, message.engine);
     return;
   }
-  void decide(message);
+  if (message.type === 'open-battle') {
+    await openBattle(message.battleId);
+    return;
+  }
+  if (message.type === 'close-battle') {
+    closeBattle(message.battleId);
+    return;
+  }
+  await decide(message);
+}
+
+port.on('message', (message: WorkerRequest) => {
+  chain = chain.then(() => handle(message)).catch(err => {
+    const text = err instanceof Error ? err.message : String(err);
+    send({ type: 'worker-error', message: text });
+  });
 });

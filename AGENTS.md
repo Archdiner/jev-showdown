@@ -93,27 +93,29 @@ See `src/graph/gate.ts` for full gate spec.
 
 ## Live ladder
 
-The ladder client speaks the Showdown websocket protocol and asks the current `Bot.selectAction` engine for every choice. It does not change search or eval. Credentials come only from the environment and are never printed.
+The ladder client speaks the Showdown websocket protocol and asks `Bot.selectAction` (`--engine search`) or the max-damage heuristic (`--engine max-damage`) for every choice. It does not change search or eval. Credentials come only from the environment and are never printed.
+
+One login can play several battles at once. `--concurrency K` (default 1, maximum 5) keeps a ladder search queued whenever fewer than K battles are active. Each battle has its own protocol state, JSONL log, and worker-thread engine. Search time is per battle and is split across decisions that are in flight. If the server rejects a search (already searching, the 5-game cap, or high load), the client logs the popup, backs off, and retries. It never sends `/forfeit`.
 
 Real ladder (run this on your machine, not from a cloud agent):
 
 ```bash
 export SHOWDOWN_USERNAME='your-bot-name'
 export SHOWDOWN_PASSWORD='your-password'
-npm run ladder -- --games 10 --format gen9randombattle
+npm run ladder -- --games 10 --format gen9randombattle --engine search --concurrency 1
 ```
 
-That connects to `wss://sim3.psim.us/showdown/websocket`, logs in with `POST https://play.pokemonshowdown.com/action.php` (`act=login`, `name`, `pass`, `challstr`), then sends `/trn username,0,ASSERTION`. It searches `gen9randombattle`, plays `--games` battles, sends `/savereplay`, and exits. It never sends `/forfeit`. On an engine error or timer squeeze it plays the best legal move and records the fallback. Logs are JSONL in `logs/ladder/`:
+That connects to `wss://sim3.psim.us/showdown/websocket`, logs in with `POST https://play.pokemonshowdown.com/action.php` (`act=login`, `name`, `pass`, `challstr`), then sends `/trn username,0,ASSERTION`. It searches `gen9randombattle`, plays `--games` battles, sends `/savereplay`, and exits. On an engine error or timer squeeze it plays the best legal move and records the fallback. Logs are JSONL in `logs/ladder/`:
 
-- one file per battle: turns, decisions, scores, state mismatches, opponent role probabilities, result, replay id, replay URL, Elo before/after
+- one file per battle, named with the username and room id: turns, decisions, scores, state mismatches, opponent role probabilities, result, replay id, replay URL, Elo before/after
 - `logs/ladder/summary.json` for the run
 
-Override the login endpoint with `SHOWDOWN_LOGIN_URL` if action.php moves. Optional flags: `--search-ms`, `--decision-ms`, `--log-dir`.
+Override the login endpoint with `SHOWDOWN_LOGIN_URL` if action.php moves. Optional flags: `--search-ms`, `--decision-ms`, `--log-dir`, `--engine`, `--concurrency`.
 
 Local games against the MIT `pokemon-showdown` server (two client instances, no password):
 
 ```bash
-npm run ladder -- --local --games 10 --format gen9randombattle
+npm run ladder -- --local --games 12 --format gen9randombattle --concurrency 4 --engine search
 ```
 
 The process starts a server on port 8143 with `--no-security`, logs in `BotAlpha` and `BotBravo` as guests, and ladder-searches them against each other. `--port` changes the port. To point two separate processes at a server you already started:

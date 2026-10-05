@@ -1,18 +1,32 @@
 import { Action, BotConfig, GameState } from '../types/index.js';
+import { EngineName } from './engines.js';
 
 export interface DecideRequest {
   type: 'decide';
   id: number;
+  battleId: string;
   state: GameState;
   legal: Action[];
+  searchTimeMs: number;
 }
 
 export interface InitRequest {
   type: 'init';
   config: BotConfig;
+  engine: EngineName;
 }
 
-export type WorkerRequest = InitRequest | DecideRequest;
+export interface OpenBattleRequest {
+  type: 'open-battle';
+  battleId: string;
+}
+
+export interface CloseBattleRequest {
+  type: 'close-battle';
+  battleId: string;
+}
+
+export type WorkerRequest = InitRequest | DecideRequest | OpenBattleRequest | CloseBattleRequest;
 
 export interface DecisionResponse {
   type: 'decision';

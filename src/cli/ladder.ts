@@ -2,8 +2,6 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Bot } from '../bot/bot.js';
-import { BattleLogger } from '../learning/battle-logger.js';
 import { dataLoader } from '../data/data-loader.js';
 import { gen9RandomBattle } from '../formats/gen9-randombattle.js';
 import { BotConfig } from '../types/index.js';
@@ -12,6 +10,8 @@ import { BattleDriver, GameSummary } from '../client/battle-driver.js';
 import { DecisionClient } from '../client/decision-client.js';
 import { startLocalServer } from '../client/local-server.js';
 import { safeError, toID } from '../client/ids.js';
+import { clampConcurrency, EngineName, MAX_LADDER_CONCURRENCY, parseEngine } from '../client/engines.js';
+import { LadderQueue } from '../client/ladder-queue.js';
 
 interface LadderOptions {
   games: number;
@@ -25,6 +25,9 @@ interface LadderOptions {
   searchMs: number | null;
   decisionMs: number | null;
   logDir: string;
+  engine: EngineName;
+  opponentEngine: EngineName | null;
+  concurrency: number;
   help: boolean;
 }
 
@@ -41,6 +44,9 @@ function parseArgs(argv: string[]): LadderOptions {
     searchMs: null,
     decisionMs: null,
     logDir: 'logs/ladder',
+    engine: 'search',
+    opponentEngine: null,
+    concurrency: 1,
     help: false,
   };
 
@@ -63,6 +69,9 @@ function parseArgs(argv: string[]): LadderOptions {
     else if (arg === '--search-ms') opts.searchMs = Number(next());
     else if (arg === '--decision-ms') opts.decisionMs = Number(next());
     else if (arg === '--log-dir') opts.logDir = next();
+    else if (arg === '--engine') opts.engine = parseEngine(next());
+    else if (arg === '--opponent-engine') opts.opponentEngine = parseEngine(next());
+    else if (arg === '--concurrency') opts.concurrency = clampConcurrency(Number(next()));
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -74,14 +83,17 @@ function parseArgs(argv: string[]): LadderOptions {
 
 function printHelp(): void {
   console.log(`Usage:
-  npm run ladder -- --games N --format gen9randombattle
-  npm run ladder -- --local --games N --format gen9randombattle
+  npm run ladder -- --games N --format gen9randombattle --engine search
+  npm run ladder -- --local --games N --concurrency K --engine max-damage
 
 Real ladder (this process never stores the password):
-  SHOWDOWN_USERNAME=bot SHOWDOWN_PASSWORD=secret npm run ladder -- --games 10 --format gen9randombattle
+  SHOWDOWN_USERNAME=bot SHOWDOWN_PASSWORD=secret npm run ladder -- --games 10 --format gen9randombattle --engine search --concurrency 1
+
+Engines: search (current Bot.selectAction) or max-damage.
+--concurrency K keeps up to K battles on one login (default 1, max ${MAX_LADDER_CONCURRENCY}).
 
 Local server, two clients, N games:
-  npm run ladder -- --local --games 10 --format gen9randombattle
+  npm run ladder -- --local --games 10 --format gen9randombattle --concurrency 4
 
 One local client against an already-running server:
   npm run ladder -- --local --server ws://127.0.0.1:8143/showdown/websocket --username BotAlpha --accept --games 10
@@ -109,19 +121,17 @@ async function makePlayer(input: {
   formatId: string;
   opts: LadderOptions;
   label: string;
-}): Promise<{ client: ShowdownClient; driver: BattleDriver; decisions: DecisionClient }> {
+  engine: EngineName;
+  autoSearch?: boolean;
+}): Promise<{ client: ShowdownClient; driver: BattleDriver; decisions: DecisionClient; queue: LadderQueue }> {
   fs.mkdirSync(input.opts.logDir, { recursive: true });
   const config = engineConfig(input.opts);
-  const decisions = new DecisionClient(
+  const decisions = new DecisionClient({
     config,
-    input.opts.decisionMs ?? (input.local ? 1500 : 12000),
-  );
-  const bot = new Bot(
-    config,
-    gen9RandomBattle,
-    new BattleLogger(path.join(input.opts.logDir, `${input.label}.db`)),
-  );
-  await bot.initialize();
+    engine: input.engine,
+    timeoutMs: input.opts.decisionMs ?? (input.local ? 1500 : 12000),
+    workers: input.opts.concurrency,
+  });
   const client = new ShowdownClient({
     server: input.server,
     username: input.username,
@@ -134,25 +144,33 @@ async function makePlayer(input: {
     client,
     username: input.username,
     format: gen9RandomBattle,
-    bot,
+    engineName: input.engine,
     decisions,
     logDir: input.opts.logDir,
     decisionTimeoutMs: input.opts.decisionMs ?? (input.local ? 1500 : 12000),
     replayDir: path.join(input.opts.logDir, 'replays'),
   });
+  const queue = new LadderQueue(client, input.formatId, input.opts.concurrency, message => {
+    console.warn(`[${input.label}] ${message}`);
+  }, input.autoSearch !== false);
+  client.on('popup', (message: string) => queue.notePopup(message));
+  client.on('lobby', (line: string) => queue.noteLobby(line));
+  driver.on('battleStart', (roomId: string) => queue.noteBattle(roomId));
   await decisions.start();
   await client.connect();
-  console.log(`[${input.label}] logged in as ${input.username}`);
-  return { client, driver, decisions };
+  console.log(`[${input.label}] logged in as ${input.username} engine=${input.engine} concurrency=${input.opts.concurrency}`);
+  return { client, driver, decisions, queue };
 }
 
-function watchChallenges(client: ShowdownClient, onlyFrom: string): void {
+function watchChallenges(client: ShowdownClient, queue: LadderQueue, onlyFrom: string): void {
   client.on('lobby', (line: string) => {
     if (!line.startsWith('|updatechallenges|')) return;
+    if (queue.activeBattles >= queue.limit) return;
     try {
       const payload = JSON.parse(line.slice('|updatechallenges|'.length));
       const from = payload.challengesFrom || {};
       for (const user of Object.keys(from)) {
+        if (queue.activeBattles >= queue.limit) return;
         if (onlyFrom && toID(user) !== toID(onlyFrom)) continue;
         client.accept(user);
       }
@@ -163,15 +181,17 @@ function watchChallenges(client: ShowdownClient, onlyFrom: string): void {
 }
 
 async function playSeries(
-  players: Array<{ client: ShowdownClient; driver: BattleDriver; name: string }>,
+  players: Array<{ client: ShowdownClient; driver: BattleDriver; queue: LadderQueue; name: string }>,
   games: number,
-  startNext: () => void,
+  concurrency: number,
+  onContinue?: () => void,
 ): Promise<GameSummary[]> {
   const finished = new Map<string, GameSummary>();
   return new Promise((resolve, reject) => {
+    const waves = Math.ceil(games / Math.max(1, concurrency));
     const timer = setTimeout(() => {
       reject(new Error(`Timed out after ${finished.size}/${games} games`));
-    }, Math.max(180000, games * 90000));
+    }, Math.max(300000, waves * 180000));
 
     const consider = (summary: GameSummary) => {
       if (finished.has(summary.battleId)) return;
@@ -183,17 +203,26 @@ async function playSeries(
       );
       if (finished.size >= games) {
         clearTimeout(timer);
-        for (const player of players) {
-          try { player.client.cancelSearch(); } catch { /* already disconnected */ }
-        }
+        for (const player of players) player.queue.stop();
         resolve([...finished.values()]);
         return;
       }
-      startNext();
+      for (const player of players) player.queue.fill();
+      onContinue?.();
     };
 
-    for (const player of players) player.driver.on('gameEnd', consider);
-    startNext();
+    for (const player of players) {
+      player.driver.on('gameEnd', (summary: GameSummary) => {
+        player.queue.noteEnd(summary.battleId);
+        if (finished.has(summary.battleId)) {
+          if (finished.size < games) player.queue.fill();
+          return;
+        }
+        consider(summary);
+      });
+    }
+    for (const player of players) player.queue.fill();
+    onContinue?.();
   });
 }
 
@@ -217,6 +246,7 @@ async function runLocalSeries(opts: LadderOptions): Promise<GameSummary[]> {
       formatId: opts.format,
       opts,
       label: 'alpha',
+      engine: opts.engine,
     });
     const bravo = await makePlayer({
       username: 'BotBravo',
@@ -226,18 +256,16 @@ async function runLocalSeries(opts: LadderOptions): Promise<GameSummary[]> {
       formatId: opts.format,
       opts,
       label: 'bravo',
+      engine: opts.opponentEngine ?? opts.engine,
     });
 
     const summaries = await playSeries(
       [
-        { client: alpha.client, driver: alpha.driver, name: 'BotAlpha' },
-        { client: bravo.client, driver: bravo.driver, name: 'BotBravo' },
+        { client: alpha.client, driver: alpha.driver, queue: alpha.queue, name: 'BotAlpha' },
+        { client: bravo.client, driver: bravo.driver, queue: bravo.queue, name: 'BotBravo' },
       ],
       opts.games,
-      () => {
-        alpha.client.search(opts.format);
-        bravo.client.search(opts.format);
-      },
+      opts.concurrency,
     );
 
     alpha.client.disconnect();
@@ -270,9 +298,11 @@ async function runRemote(opts: LadderOptions): Promise<GameSummary[]> {
     formatId: opts.format,
     opts,
     label: toID(username) || 'ladder',
+    engine: opts.engine,
+    autoSearch: !opts.accept && !opts.challenge,
   });
 
-  if (opts.accept) watchChallenges(player.client, opts.challenge);
+  if (opts.accept) watchChallenges(player.client, player.queue, opts.challenge);
   process.once('SIGINT', () => {
     console.log('\n[ladder] disconnecting without forfeit');
     player.client.disconnect();
@@ -280,13 +310,12 @@ async function runRemote(opts: LadderOptions): Promise<GameSummary[]> {
   });
 
   const summaries = await playSeries(
-    [{ client: player.client, driver: player.driver, name: username }],
+    [{ client: player.client, driver: player.driver, queue: player.queue, name: username }],
     opts.games,
-    () => {
-      if (opts.accept && !opts.challenge) return;
-      if (opts.challenge) player.client.challenge(opts.challenge, opts.format);
-      else player.client.search(opts.format);
-    },
+    opts.concurrency,
+    opts.challenge
+      ? () => player.client.challenge(opts.challenge, opts.format)
+      : undefined,
   );
 
   player.client.disconnect();
@@ -304,6 +333,9 @@ function report(summaries: GameSummary[], opts: LadderOptions): void {
     games: summaries.length,
     requested: opts.games,
     format: opts.format,
+    engine: opts.engine,
+    opponentEngine: opts.opponentEngine,
+    concurrency: opts.concurrency,
     local: opts.local,
     invalidChoices,
     crashes,
